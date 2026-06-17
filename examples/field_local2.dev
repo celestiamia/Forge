@@ -1,0 +1,16 @@
+package field_local2
+
+from std.io import puts
+
+struct S:
+    x: int32
+
+pub def main() -> int32:
+    var a: S
+    let p: ptr[S] = &a
+    p.x = 7
+    if a.x == 7:
+        puts("ok\n")
+        return 0
+    puts("fail\n")
+    return 1

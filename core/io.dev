@@ -1,0 +1,34 @@
+package std.io
+
+# Hosted runtime helpers.  These are emitted by the compiler itself as part of
+# the tiny x86_64 Linux syscall-based runtime, so they are declared `extern`
+# here but are not symbols that come from the operating system.
+extern def _dev_puts(s: ptr[char]) -> int32
+extern def _dev_putchar(c: int32) -> int32
+extern def _dev_getchar() -> int32
+extern def _dev_rand() -> int32
+extern def _dev_exit(code: int32) -> void
+
+# Write a null-terminated string to standard output.  Returns the number of
+# bytes written, or a negative value on error.
+pub def puts(s: ptr[char]) -> int32:
+    return _dev_puts(s)
+
+# Write a single character to standard output.  Returns the character written,
+# or a negative value on error.
+pub def putchar(c: int32) -> int32:
+    return _dev_putchar(c)
+
+# Read a single byte from standard input.  Returns the byte as an unsigned
+# value in the low 8 bits, or -1 on end-of-file.
+pub def getchar() -> int32:
+    return _dev_getchar()
+
+# Return a pseudo-random 32-bit signed integer.  The current implementation is
+# a simple linear congruential generator seeded from the CPU timestamp counter.
+pub def rand() -> int32:
+    return _dev_rand()
+
+# Terminate the current process with the given exit code.
+pub def exit(code: int32) -> void:
+    _dev_exit(code)

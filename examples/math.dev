@@ -1,0 +1,36 @@
+package math_demo
+
+from std.io import puts
+from std.math import abs_i32, min_i32, max_i32, clamp_i32
+
+pub def main() -> int32:
+    if abs_i32(-7) != 7:
+        puts("abs fail\n")
+        return 1
+
+    if abs_i32(7) != 7:
+        puts("abs positive fail\n")
+        return 1
+
+    if min_i32(3, 5) != 3:
+        puts("min fail\n")
+        return 1
+
+    if max_i32(3, 5) != 5:
+        puts("max fail\n")
+        return 1
+
+    if clamp_i32(-10, 0, 100) != 0:
+        puts("clamp low fail\n")
+        return 1
+
+    if clamp_i32(200, 0, 100) != 100:
+        puts("clamp high fail\n")
+        return 1
+
+    if clamp_i32(50, 0, 100) != 50:
+        puts("clamp mid fail\n")
+        return 1
+
+    puts("math ok\n")
+    return 0

@@ -1,0 +1,52 @@
+package mem_demo
+
+from std.io import puts
+from std.mem import copy_bytes, set_bytes, zero_bytes, compare_bytes
+
+struct Buf4:
+    b0: uint8
+    b1: uint8
+    b2: uint8
+    b3: uint8
+
+pub def main() -> int32:
+    var a: Buf4
+    a.b0 = 1
+    a.b1 = 2
+    a.b2 = 3
+    a.b3 = 4
+
+    var b: Buf4
+    copy_bytes(&b.b0, &a.b0, 4)
+    if b.b0 == 1 && b.b1 == 2 && b.b2 == 3 && b.b3 == 4:
+        puts("copy ok\n")
+    else:
+        puts("copy fail\n")
+        return 1
+
+    set_bytes(&b.b0, 7, 4)
+    if b.b0 == 7 && b.b1 == 7 && b.b2 == 7 && b.b3 == 7:
+        puts("set ok\n")
+    else:
+        puts("set fail\n")
+        return 1
+
+    zero_bytes(&b.b0, 4)
+    if b.b0 == 0 && b.b1 == 0 && b.b2 == 0 && b.b3 == 0:
+        puts("zero ok\n")
+    else:
+        puts("zero fail\n")
+        return 1
+
+    var c: Buf4
+    c.b0 = 1
+    c.b1 = 2
+    c.b2 = 3
+    c.b3 = 5
+    if compare_bytes(&a.b0, &c.b0, 4) == -1:
+        puts("compare ok\n")
+    else:
+        puts("compare fail\n")
+        return 1
+
+    return 0

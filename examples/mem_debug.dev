@@ -1,0 +1,26 @@
+package mem_debug
+
+from std.io import puts
+from std.mem import copy_bytes
+
+struct Buf4:
+    b0: uint8
+    b1: uint8
+    b2: uint8
+    b3: uint8
+
+pub def main() -> int32:
+    var a: Buf4
+    puts("init a\n")
+    a.b0 = 1
+    puts("set a.b0\n")
+    a.b1 = 2
+    a.b2 = 3
+    a.b3 = 4
+    puts("a done\n")
+
+    var b: Buf4
+    puts("before copy\n")
+    copy_bytes(&b.b0, &a.b0, 4)
+    puts("after copy\n")
+    return 0

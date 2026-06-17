@@ -1,0 +1,12 @@
+package getchar
+
+from std.io import puts, getchar
+
+pub def main() -> int32:
+    puts("Type something:\n")
+    let c: int32 = getchar()
+    if c >= 0:
+        puts("Got a character\n")
+        return 0
+    puts("Got EOF\n")
+    return 1

@@ -1,0 +1,34 @@
+package bump_fmt
+
+from std.io import puts
+from std.alloc import alloc
+from std.fmt import format_i32
+
+# Format `n` into `buf` and print it on its own line.  Returns 1 on a
+# formatter failure (zero-length result) so the test can detect breakage.
+pub def show(buf: ptr[char], n: int32) -> int32:
+    let len: uint64 = format_i32(buf, n)
+    if len == 0:
+        puts("fmt fail\n")
+        return 1
+    puts(buf)
+    puts("\n")
+    return 0
+
+# Exercise the bump allocator together with the integer formatter across
+# zero, small positives, negatives, and multi-digit values.  INT32_MIN
+# (-2147483648) is deliberately avoided: its negation overflows int32 and is
+# not handled by the formatter.
+pub def main() -> int32:
+    let buf: ptr[char] = alloc(16)
+    if buf == null:
+        puts("alloc fail\n")
+        return 1
+
+    show(buf, 0)
+    show(buf, 42)
+    show(buf, -7)
+    show(buf, 100)
+    show(buf, 2147483647)
+    show(buf, -2147483647)
+    return 0

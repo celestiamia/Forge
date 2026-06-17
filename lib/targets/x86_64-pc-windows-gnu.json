@@ -1,0 +1,9 @@
+{
+  "arch": "x86_64",
+  "os": "windows",
+  "env": "gnu",
+  "vendor": "pc",
+  "obj_format": "coff",
+  "linker": "ld",
+  "freestanding": false
+}

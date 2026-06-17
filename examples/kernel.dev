@@ -1,0 +1,11 @@
+# Forge can now emit a flat 512-byte x86 real-mode boot sector via the
+# `x86_16-boot` target (see examples/bootloader.dev).  A full freestanding
+# kernel with its own page tables, GDT, and long-mode switch is a larger
+# follow-up project, so this file remains a documented placeholder.
+
+package kernel
+
+@freestanding
+pub extern def _start() -> void:
+    # kernel entry will go here
+    pass

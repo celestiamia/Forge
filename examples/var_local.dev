@@ -1,0 +1,13 @@
+package var_local
+
+from std.io import puts
+
+pub def main() -> int32:
+    var a: int32
+    puts("before\n")
+    a = 7
+    puts("after\n")
+    if a == 7:
+        puts("ok\n")
+        return 0
+    return 1

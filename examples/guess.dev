@@ -1,0 +1,26 @@
+package guess
+
+from std.io import puts, putchar, getchar, rand
+
+pub def main() -> int32:
+    let secret: int32 = (rand() % 10) + 1
+    var guesses: int32 = 0
+    var won: int32 = 0
+    while won == 0:
+        guesses = guesses + 1
+        if guesses > 5:
+            puts("too many guesses\n")
+            return 1
+        let c: int32 = getchar()
+        if c < 0:
+            puts("EOF\n")
+            return 1
+        let guess: int32 = c - 48  # '0' is 48
+        if guess == secret:
+            puts("correct!\n")
+            won = 1
+        elif guess < secret:
+            puts("higher\n")
+        else:
+            puts("lower\n")
+    return 0

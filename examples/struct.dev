@@ -1,0 +1,19 @@
+package struct_demo
+
+from std.io import puts
+
+struct Point:
+    x: int32
+    y: int32
+
+def init_point(p: ptr[Point], px: int32, py: int32) -> void:
+    p.x = px
+    p.y = py
+
+pub def main() -> int32:
+    var p: Point
+    init_point(&p, 3, 4)
+    if p.x + p.y == 7:
+        puts("struct ok\n")
+        return 0
+    return 1

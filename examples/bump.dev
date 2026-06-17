@@ -1,0 +1,14 @@
+package bump
+
+from std.io import puts
+
+def value_at(p: ptr[int32]) -> int32:
+    unsafe:
+        return *p
+
+pub def main() -> int32:
+    let x: int32 = 7
+    if value_at(&x) == 7:
+        puts("bump ok\n")
+        return 0
+    return 1

@@ -1,0 +1,32 @@
+package string_demo
+
+from std.io import puts
+from std.string import strlen, strcmp, strncmp
+
+pub def main() -> int32:
+    if strlen("hello") != 5:
+        puts("strlen fail\n")
+        return 1
+
+    if strcmp("abc", "abc") != 0:
+        puts("strcmp equal fail\n")
+        return 1
+
+    if strcmp("abc", "abd") >= 0:
+        puts("strcmp less fail\n")
+        return 1
+
+    if strcmp("abd", "abc") <= 0:
+        puts("strcmp greater fail\n")
+        return 1
+
+    if strncmp("abc", "abcd", 3) != 0:
+        puts("strncmp equal-prefix fail\n")
+        return 1
+
+    if strncmp("abc", "abd", 3) >= 0:
+        puts("strncmp less-prefix fail\n")
+        return 1
+
+    puts("string ok\n")
+    return 0

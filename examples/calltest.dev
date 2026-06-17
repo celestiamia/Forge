@@ -1,0 +1,14 @@
+package calltest
+
+from std.io import puts
+
+def add(a: int32, b: int32) -> int32:
+    return a + b
+
+pub def main() -> int32:
+    let x: int32 = add(add(1, 2), add(3, 4))
+    if x == 10:
+        puts("nested call ok\n")
+        return 0
+    puts("nested call fail\n")
+    return 1

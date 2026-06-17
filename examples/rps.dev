@@ -1,0 +1,75 @@
+package rps
+
+from std.io import puts, putchar, getchar, rand
+
+# Map a choice number to a display character: 0='R', 1='P', 2='S'.
+def choice_name(c: int32) -> int32:
+    if c == 0:
+        return 82   # R
+    if c == 1:
+        return 80   # P
+    return 83       # S
+
+# Return the result of player vs computer:
+#   1 = player wins, 0 = draw, -1 = computer wins.
+def compare(player: int32, computer: int32) -> int32:
+    if player == computer:
+        return 0
+    # Rock(0) beats Scissors(2), Paper(1) beats Rock(0), Scissors(2) beats Paper(1).
+    if player == 0 && computer == 2:
+        return 1
+    if player == 1 && computer == 0:
+        return 1
+    if player == 2 && computer == 1:
+        return 1
+    return -1
+
+# Read a single r/p/s choice from stdin, ignoring whitespace and newlines.
+# Returns 0/1/2 for a valid choice, or -1 on EOF.
+def read_choice() -> int32:
+    while true:
+        let c: int32 = getchar()
+        if c < 0:
+            return -1
+        if c == 114 || c == 82:  # r or R
+            return 0
+        if c == 112 || c == 80:  # p or P
+            return 1
+        if c == 115 || c == 83:  # s or S
+            return 2
+        # Ignore any other character (newlines, spaces, etc.).
+
+pub def main() -> int32:
+    var score: int32 = 0
+    var round: int32 = 0
+
+    while round < 3:
+        puts("Rock(r) Paper(p) Scissors(s): ")
+        let p: int32 = read_choice()
+        if p < 0:
+            puts("\nEOF\n")
+            return 1
+
+        let computer: int32 = rand() % 3
+        let result: int32 = compare(p, computer)
+
+        puts("You: ")
+        putchar(choice_name(p))
+        puts("  Computer: ")
+        putchar(choice_name(computer))
+        puts("\n")
+
+        if result == 1:
+            puts("You win this round!\n")
+            score = score + 1
+        elif result == 0:
+            puts("Draw.\n")
+        else:
+            puts("Computer wins this round.\n")
+
+        round = round + 1
+
+    puts("\nFinal score: ")
+    putchar(score + 48)
+    puts("/3\n")
+    return 0

@@ -1,0 +1,39 @@
+package std.mem
+
+import std.volatile
+
+# Copy `n` bytes from `src` to `dest`.  The regions may overlap (memmove-like
+# semantics) because the copy is done forward byte-by-byte.
+pub def copy_bytes(dest: ptr[uint8], src: ptr[uint8], n: uint64) -> void:
+    var i: uint64 = 0
+    while i < n:
+        unsafe:
+            store_u8(dest + i, load_u8(src + i))
+        i = i + 1
+
+# Set `n` bytes starting at `p` to the value `v`.
+pub def set_bytes(p: ptr[uint8], v: uint8, n: uint64) -> void:
+    var i: uint64 = 0
+    while i < n:
+        unsafe:
+            store_u8(p + i, v)
+        i = i + 1
+
+# Zero `n` bytes starting at `p`.
+pub def zero_bytes(p: ptr[uint8], n: uint64) -> void:
+    set_bytes(p, 0, n)
+
+# Compare the first `n` bytes of `a` and `b`.
+# Returns -1 if a < b, 0 if equal, and 1 if a > b.
+pub def compare_bytes(a: ptr[uint8], b: ptr[uint8], n: uint64) -> int32:
+    var i: uint64 = 0
+    while i < n:
+        unsafe:
+            let av: uint8 = load_u8(a + i)
+            let bv: uint8 = load_u8(b + i)
+            if av != bv:
+                if av < bv:
+                    return -1
+                return 1
+        i = i + 1
+    return 0

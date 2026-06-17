@@ -1,0 +1,79 @@
+# Rust / Cargo build artifacts
+/target
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock IS committed (this is a binary crate, not a library).
+
+# Native object / archive / library files (defensive; none exist today).
+*.o
+*.a
+*.so
+*.dylib
+*.rlib
+*.d
+*.lib
+*.obj
+*.dll
+*.exe
+
+# This compiler's own emitted outputs: native ELF executables and flat boot sectors/images.
+*.bin
+*.elf
+*.img
+*.iso
+*.hex
+*.map
+
+# Editor / IDE state
+.vscode/
+.idea/
+.helix/
+.zed/
+.fleet/
+*.swp
+*.swo
+*~
+.#*
+#*#
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# ctags / direnv / patch-merge residue
+tags
+TAGS
+.direnv/
+*.orig
+*.rej
+*.tmp
+
+# Claude Code session state (working memory, not project source)
+.claude/
+
+# Local environment / secrets — never commit
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.jks
+*.pfx
+.netrc
+.npmrc
+.pypirc
+.git-credentials
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+.aws/
+
+# Stray logs / crash dumps.
+# NOTE: the bare name `core` is intentionally NOT ignored here, because it
+# would also exclude the project's `core/` standard-library directory.
+# `core.*` still catches numbered core dumps (e.g. core.1234).
+*.log
+core.*
+perf.data*

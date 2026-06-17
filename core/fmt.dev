@@ -1,0 +1,49 @@
+package std.fmt
+
+# Format a signed 32-bit integer as decimal text into `buf`, null-terminated.
+#
+# Returns the number of characters written, excluding the null terminator.
+# The buffer must hold at least 12 bytes (sign + 10 digits + null).  The value
+# INT32_MIN (-2147483648) is not handled because its negation overflows int32.
+pub def format_i32(buf: ptr[char], value: int32) -> uint64:
+    var neg: uint8 = 0
+    var v: int32 = value
+    if v < 0:
+        neg = 1
+        v = 0 - v
+
+    # Count the decimal digits of the magnitude.
+    var n: uint64 = 0
+    var t: int32 = v
+    if t == 0:
+        n = 1
+    else:
+        while t > 0:
+            n = n + 1
+            t = t / 10
+
+    var total: uint64 = n
+    if neg != 0:
+        total = total + 1
+
+    unsafe:
+        # Null terminator just past the last digit.
+        *(buf + total) = 0 as char
+
+        # Write digits backwards from buf[total - 1].
+        var idx: uint64 = total
+        if v == 0:
+            idx = idx - 1
+            *(buf + idx) = 48 as char
+        else:
+            while v > 0:
+                idx = idx - 1
+                var d: int32 = v % 10
+                *(buf + idx) = (48 + d) as char
+                v = v / 10
+
+        if neg != 0:
+            idx = idx - 1
+            *(buf + idx) = 45 as char
+
+    return total

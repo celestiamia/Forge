@@ -1,0 +1,115 @@
+package std.volatile
+
+# Full volatile memory access library.
+#
+# Forge has no optimizing backend yet, so every raw pointer dereference already
+# emits a real hardware load or store.  These helpers wrap those dereferences in
+# `unsafe` blocks and provide explicit width and barrier operations.  Once the
+# language gains inline assembly or volatile intrinsics, these same functions
+# can be reimplemented without changing user code.
+
+# ---------------------------------------------------------------------------
+# Runtime fence helpers (emitted by the hosted x86_64 runtime).
+# ---------------------------------------------------------------------------
+extern def _dev_lfence() -> void
+extern def _dev_sfence() -> void
+extern def _dev_mfence() -> void
+
+# ---------------------------------------------------------------------------
+# Unsigned integer loads
+# ---------------------------------------------------------------------------
+pub def load_u8(p: ptr[uint8]) -> uint8:
+    unsafe:
+        return *p
+
+pub def load_u16(p: ptr[uint16]) -> uint16:
+    unsafe:
+        return *p
+
+pub def load_u32(p: ptr[uint32]) -> uint32:
+    unsafe:
+        return *p
+
+pub def load_u64(p: ptr[uint64]) -> uint64:
+    unsafe:
+        return *p
+
+# ---------------------------------------------------------------------------
+# Signed integer loads
+# ---------------------------------------------------------------------------
+pub def load_i8(p: ptr[int8]) -> int8:
+    unsafe:
+        return *p
+
+pub def load_i16(p: ptr[int16]) -> int16:
+    unsafe:
+        return *p
+
+pub def load_i32(p: ptr[int32]) -> int32:
+    unsafe:
+        return *p
+
+pub def load_i64(p: ptr[int64]) -> int64:
+    unsafe:
+        return *p
+
+# ---------------------------------------------------------------------------
+# Unsigned integer stores
+# ---------------------------------------------------------------------------
+pub def store_u8(p: ptr[uint8], v: uint8) -> void:
+    unsafe:
+        *p = v
+
+pub def store_u16(p: ptr[uint16], v: uint16) -> void:
+    unsafe:
+        *p = v
+
+pub def store_u32(p: ptr[uint32], v: uint32) -> void:
+    unsafe:
+        *p = v
+
+pub def store_u64(p: ptr[uint64], v: uint64) -> void:
+    unsafe:
+        *p = v
+
+# ---------------------------------------------------------------------------
+# Signed integer stores
+# ---------------------------------------------------------------------------
+pub def store_i8(p: ptr[int8], v: int8) -> void:
+    unsafe:
+        *p = v
+
+pub def store_i16(p: ptr[int16], v: int16) -> void:
+    unsafe:
+        *p = v
+
+pub def store_i32(p: ptr[int32], v: int32) -> void:
+    unsafe:
+        *p = v
+
+pub def store_i64(p: ptr[int64], v: int64) -> void:
+    unsafe:
+        *p = v
+
+# ---------------------------------------------------------------------------
+# Pointer-sized load/store
+# ---------------------------------------------------------------------------
+pub def load_ptr(p: ptr[ptr[uint8]]) -> ptr[uint8]:
+    unsafe:
+        return *p
+
+pub def store_ptr(p: ptr[ptr[uint8]], v: ptr[uint8]) -> void:
+    unsafe:
+        *p = v
+
+# ---------------------------------------------------------------------------
+# Memory barriers
+# ---------------------------------------------------------------------------
+pub def read_barrier() -> void:
+    _dev_lfence()
+
+pub def write_barrier() -> void:
+    _dev_sfence()
+
+pub def full_barrier() -> void:
+    _dev_mfence()

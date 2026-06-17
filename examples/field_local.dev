@@ -1,0 +1,16 @@
+package field_local
+
+from std.io import puts
+
+struct S:
+    x: int32
+
+pub def main() -> int32:
+    var a: S
+    puts("before\n")
+    a.x = 7
+    puts("after\n")
+    if a.x == 7:
+        puts("ok\n")
+        return 0
+    return 1

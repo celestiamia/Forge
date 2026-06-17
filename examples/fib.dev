@@ -1,0 +1,17 @@
+package fib
+
+from std.io import puts, putchar
+
+pub def main() -> int32:
+    var a: int32 = 0
+    var b: int32 = 1
+    var i: int32 = 0
+    while i < 10:
+        let next: int32 = a + b
+        a = b
+        b = next
+        i = i + 1
+    if a == 55:
+        puts("fib ok\n")
+        return 0
+    return 1

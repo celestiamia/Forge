@@ -1,0 +1,14 @@
+package std.runtime
+
+# The hosted x86_64 Linux runtime is emitted by the compiler itself.  This
+# module exposes the small set of process-level helpers that live in that
+# runtime so that user code can abort or exit without depending on `std.io`.
+extern def _dev_exit(code: int32) -> void
+
+# Terminate the current process immediately with the given exit code.
+pub def exit(code: int32) -> void:
+    _dev_exit(code)
+
+# Abnormally terminate the current process with a non-zero exit code.
+pub def abort() -> void:
+    _dev_exit(1)

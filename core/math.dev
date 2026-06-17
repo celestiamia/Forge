@@ -1,0 +1,27 @@
+package std.math
+
+# Absolute value for signed 32-bit integers.
+pub def abs_i32(x: int32) -> int32:
+    if x < 0:
+        return -x
+    return x
+
+# Minimum of two signed 32-bit integers.
+pub def min_i32(a: int32, b: int32) -> int32:
+    if a < b:
+        return a
+    return b
+
+# Maximum of two signed 32-bit integers.
+pub def max_i32(a: int32, b: int32) -> int32:
+    if a > b:
+        return a
+    return b
+
+# Clamp a signed 32-bit integer to the inclusive range [lo, hi].
+pub def clamp_i32(v: int32, lo: int32, hi: int32) -> int32:
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v

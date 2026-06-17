@@ -1,0 +1,7 @@
+package hello
+
+from std.io import puts
+
+pub def main() -> int32:
+    puts("Hello, Forge!\n")
+    return 0

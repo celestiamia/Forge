@@ -1,0 +1,9 @@
+{
+  "arch": "x86_64",
+  "os": "macos",
+  "env": "",
+  "vendor": "apple",
+  "obj_format": "macho",
+  "linker": "ld64",
+  "freestanding": false
+}

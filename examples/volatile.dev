@@ -1,0 +1,27 @@
+package volatile_demo
+
+from std.io import puts
+from std.volatile import load_u8, store_u8, load_u32, store_u32, full_barrier
+
+pub def main() -> int32:
+    var x: uint32 = 0
+    store_u32(&x, 0x12345678)
+    full_barrier()
+    let v: uint32 = load_u32(&x)
+    if v == 0x12345678:
+        puts("volatile u32 ok\n")
+    else:
+        puts("volatile u32 fail\n")
+        return 1
+
+    var a: uint8 = 0
+    var b: uint8 = 0
+    store_u8(&a, 0xAB)
+    store_u8(&b, 0xCD)
+    if load_u8(&a) == 0xAB && load_u8(&b) == 0xCD:
+        puts("volatile u8 ok\n")
+    else:
+        puts("volatile u8 fail\n")
+        return 1
+
+    return 0

@@ -1,0 +1,23 @@
+package match_bc
+
+from std.io import puts
+
+pub def main() -> int32:
+    var i: int32 = 0
+    var sum: int32 = 0
+    while true:
+        if i >= 5:
+            break
+        i = i + 1
+        if i == 2:
+            continue
+        sum = sum + i
+    let msg: ptr[char] = match sum:
+        case 10:
+            "ten\n"
+        case 13:
+            "thirteen\n"
+        case _:
+            "other\n"
+    puts(msg)
+    return 0
