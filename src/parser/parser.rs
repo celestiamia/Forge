@@ -1651,7 +1651,6 @@ impl Parser {
 // ------------------------------------------------------------------
 
 fn parse_int(s: &str) -> Literal {
-    let s = s.trim_end_matches(|c: char| c.is_alphabetic());
     let s_clean = s.replace('_', "");
     if s_clean.starts_with("0x") || s_clean.starts_with("0X") {
         Literal::Int(i64::from_str_radix(&s_clean[2..], 16).unwrap_or(0))
@@ -1660,7 +1659,8 @@ fn parse_int(s: &str) -> Literal {
     } else if s_clean.starts_with("0o") || s_clean.starts_with("0O") {
         Literal::Int(i64::from_str_radix(&s_clean[2..], 8).unwrap_or(0))
     } else {
-        Literal::Int(s_clean.parse::<i64>().unwrap_or(0))
+        let s = s_clean.trim_end_matches(|c: char| c.is_alphabetic());
+        Literal::Int(s.parse::<i64>().unwrap_or(0))
     }
 }
 

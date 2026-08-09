@@ -514,11 +514,33 @@ fn encode_shift_rm64_imm8(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand, imm: i8) 
 pub fn shl_rm64_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) {
     encode_shift_rm64_imm8(buf, ShiftOp::Shl, rm, imm);
 }
+pub fn shl_rm64_cl(buf: &mut Vec<u8>, rm: Operand) {
+    encode_shift_rm64_cl(buf, ShiftOp::Shl, rm);
+}
 pub fn shr_rm64_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) {
     encode_shift_rm64_imm8(buf, ShiftOp::Shr, rm, imm);
 }
+pub fn shr_rm64_cl(buf: &mut Vec<u8>, rm: Operand) {
+    encode_shift_rm64_cl(buf, ShiftOp::Shr, rm);
+}
 pub fn sar_rm64_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) {
     encode_shift_rm64_imm8(buf, ShiftOp::Sar, rm, imm);
+}
+pub fn sar_rm64_cl(buf: &mut Vec<u8>, rm: Operand) {
+    encode_shift_rm64_cl(buf, ShiftOp::Sar, rm);
+}
+
+fn encode_shift_rm64_cl(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand) {
+    let ext = match op {
+        ShiftOp::Shl => 4,
+        ShiftOp::Shr => 5,
+        ShiftOp::Sar => 7,
+    };
+    let mut rex = Rex::new(true);
+    let suffix = modrm_suffix_byte(&mut rex, ext, rm);
+    rex.emit(buf);
+    buf.push(0xD3);
+    buf.extend(suffix);
 }
 
 pub fn movzx_r64_rm8(buf: &mut Vec<u8>, dst: Reg, src: Operand) {

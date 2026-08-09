@@ -943,6 +943,12 @@ impl Context {
             );
             return TypedExpr::new(TypedExprKind::Ident(name.to_string()), ty);
         }
+        if let Some(static_info) = self.statics.get(name) {
+            return TypedExpr::new(
+                TypedExprKind::Ident(name.to_string()),
+                static_info.ty.clone(),
+            );
+        }
         if self.adts.contains_key(name) || self.imports.contains_key(name) {
             return TypedExpr::new(TypedExprKind::Ident(name.to_string()), Type::Unknown);
         }
@@ -1588,7 +1594,7 @@ fn primitive_type(name: &str) -> Option<Type> {
         "i32" | "int" | "int32" => Some(Type::Int { width: 32, signed: true }),
         "i64" | "int64" => Some(Type::Int { width: 64, signed: true }),
         "i128" | "int128" => Some(Type::Int { width: 128, signed: true }),
-        "u8" | "uint8" => Some(Type::Int { width: 8, signed: false }),
+        "u8" | "uint8" | "byte" => Some(Type::Int { width: 8, signed: false }),
         "u16" | "uint16" => Some(Type::Int { width: 16, signed: false }),
         "u32" | "uint32" => Some(Type::Int { width: 32, signed: false }),
         "u64" | "uint64" => Some(Type::Int { width: 64, signed: false }),
@@ -1711,6 +1717,10 @@ fn cast_allowed(from: &Type, to: &Type) -> bool {
         (Type::Pointer { .. }, Type::USize) | (Type::USize, Type::Pointer { .. }) => true,
         (Type::Pointer { .. }, Type::ISize) | (Type::ISize, Type::Pointer { .. }) => true,
         (Type::Bool, Type::Int { .. }) | (Type::Int { .. }, Type::Bool) => true,
+        // Array to pointer decay
+        (Type::Array { elem, .. }, Type::Pointer { pointee }) => {
+            **elem == **pointee || is_layout_compatible_8bit(elem, pointee)
+        }
         _ => false,
     }
 }
@@ -1730,6 +1740,8 @@ fn compatible(expected: &Type, got: &Type) -> bool {
             Type::Ref { pointee } | Type::RefMut { pointee } | Type::Own { pointee } => {
                 Some(pointee.as_ref())
             }
+            // Array to pointer decay
+            Type::Array { elem, .. } => Some(elem.as_ref()),
             _ => None,
         };
         if let Some(gp) = got_pointee {

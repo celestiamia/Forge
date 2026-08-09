@@ -1,0 +1,96 @@
+package httpserver
+
+# A minimal HTTP server in Forge.
+
+import std.io
+import std.string
+
+# Constants
+const AF_INET: int32 = 2
+const SOCK_STREAM: int32 = 1
+const PORT: int32 = 8080
+const BACKLOG: int32 = 10
+const BUF_SIZE: int32 = 4096
+
+# HTTP response template
+const HTTP_RESPONSE: ptr[char] = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, Forge!"
+
+pub def main() -> int32:
+    # Create socket
+    var sockfd: int32 = socket(AF_INET, SOCK_STREAM, 0)
+    if sockfd < 0:
+        puts("Failed to create socket")
+        return 1
+
+    # Prepare sockaddr_in structure (16 bytes)
+    # struct sockaddr_in {
+    #     sa_family_t    sin_family;   // 2 bytes
+    #     in_port_t      sin_port;     // 2 bytes (network byte order)
+    #     struct in_addr sin_addr;     // 4 bytes
+    #     unsigned char  sin_zero[8];  // 8 bytes
+    # }
+    var addr: [byte; 16] = zeroed()
+    addr[0] = (AF_INET & 0xFF) as byte
+    addr[1] = ((AF_INET >> 8) & 0xFF) as byte
+    
+    # Port in network byte order (big endian)
+    addr[2] = ((PORT >> 8) & 0xFF) as byte
+    addr[3] = (PORT & 0xFF) as byte
+    
+    # INADDR_ANY (0.0.0.0) - already zeroed
+
+    # Bind socket
+    var ret: int32 = bind(sockfd, addr as ptr[char], 16)
+    if ret < 0:
+        puts("Failed to bind socket")
+        close(sockfd)
+        return 1
+
+    # Listen
+    ret = listen(sockfd, BACKLOG)
+    if ret < 0:
+        puts("Failed to listen")
+        close(sockfd)
+        return 1
+
+    puts("Server listening on port 8080...")
+
+    # Accept loop
+    var client_addr: [byte; 16] = zeroed()
+    var addrlen: int32 = 16
+    
+    while true:
+        var clientfd: int32 = accept(sockfd, client_addr as ptr[char], &addrlen)
+        if clientfd < 0:
+            puts("Failed to accept connection")
+            continue
+
+        # Read request
+        var buf: [byte; 4096] = zeroed_buf()
+        var nread: int32 = read(clientfd, buf as ptr[char], BUF_SIZE)
+        if nread > 0:
+            puts("Received request")
+            # Send response
+            var response_len: uint64 = strlen(HTTP_RESPONSE)
+            write(clientfd, HTTP_RESPONSE, response_len as int32)
+
+        close(clientfd)
+
+    close(sockfd)
+    return 0
+
+def zeroed() -> [byte; 16]:
+    var arr: [byte; 16]
+    var i: int32 = 0
+    while i < 16:
+        arr[i] = 0
+        i = i + 1
+    return arr
+
+def zeroed_buf() -> [byte; 4096]:
+    var arr: [byte; 4096]
+    var i: int32 = 0
+    while i < 4096:
+        arr[i] = 0
+        i = i + 1
+    return arr

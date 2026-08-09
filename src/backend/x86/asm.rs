@@ -363,12 +363,24 @@ impl Assembler {
         encode::shl_rm32_imm8(&mut self.buf, dst.into_op(), imm);
     }
 
+    pub fn shl_cl(&mut self, dst: impl IntoOp) {
+        encode::shl_rm32_cl(&mut self.buf, dst.into_op());
+    }
+
     pub fn shr(&mut self, dst: impl IntoOp, imm: i8) {
         encode::shr_rm32_imm8(&mut self.buf, dst.into_op(), imm);
     }
 
+    pub fn shr_cl(&mut self, dst: impl IntoOp) {
+        encode::shr_rm32_cl(&mut self.buf, dst.into_op());
+    }
+
     pub fn sar(&mut self, dst: impl IntoOp, imm: i8) {
         encode::sar_rm32_imm8(&mut self.buf, dst.into_op(), imm);
+    }
+
+    pub fn sar_cl(&mut self, dst: impl IntoOp) {
+        encode::sar_rm32_cl(&mut self.buf, dst.into_op());
     }
 
     pub fn movzx8(&mut self, dst: Reg, src: impl IntoOp) {

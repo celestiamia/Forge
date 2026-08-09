@@ -158,7 +158,9 @@ impl<'a> LowerCtx<'a> {
                         .unwrap_or(ir::Type::I64);
                     let init_expr = self.lower_expr(&c.value)?;
                     let init = expr_to_literal(&init_expr)?;
-                    globals.push(ir::Global { name: c.name.clone(), ty, init });
+                    globals.push(ir::Global { name: c.name.clone(), ty: ty.clone(), init });
+                    // Add to vars so the constant can be referenced in expressions
+                    self.vars.insert(c.name.clone(), ty);
                 }
                 _ => {}
             }
@@ -245,7 +247,7 @@ impl<'a> LowerCtx<'a> {
                     .unwrap_or(ir::Type::I64);
                 let init = l.value.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 self.vars.insert(l.name.clone(), ty.clone());
-                Ok(vec![ir::Stmt::Let { name: l.name.clone(), ty, init }])
+                self.lower_binding(&l.name, l.ty.as_ref(), ty, init)
             }
             ast::Stmt::Var(v) => {
                 let ty = v
@@ -256,7 +258,7 @@ impl<'a> LowerCtx<'a> {
                     .unwrap_or(ir::Type::I64);
                 let init = v.value.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 self.vars.insert(v.name.clone(), ty.clone());
-                Ok(vec![ir::Stmt::Let { name: v.name.clone(), ty, init }])
+                self.lower_binding(&v.name, v.ty.as_ref(), ty, init)
             }
             ast::Stmt::Assign(a) => {
                 let lhs = self.lower_lvalue(&a.target)?;
@@ -353,6 +355,105 @@ impl<'a> LowerCtx<'a> {
             ast::Stmt::Continue => Ok(vec![ir::Stmt::Continue]),
             ast::Stmt::Match(m) => self.lower_match_stmt(m),
         }
+    }
+
+    /// Lower a `let`/`var` binding, emitting a `StackAlloc` when the declared
+    /// type is an array so the backend allocates backing storage for it.  An
+    /// array initializer is evaluated into a temporary pointer and then copied
+    /// element-by-element into the variable's own storage, so that the variable
+    /// never aliases a callee's stack frame.
+    fn lower_binding(
+        &mut self,
+        name: &str,
+        declared: Option<&ast::TypeExpr>,
+        ty: ir::Type,
+        init: Option<ir::Expr>,
+    ) -> Result<Vec<ir::Stmt>> {
+        if let Some(ast::TypeExpr::Array(elem, size)) = declared {
+            let count = match size.as_ref() {
+                ast::Expr::Literal(ast::Literal::Int(n)) => *n as usize,
+                _ => bail!("array size must be an integer constant"),
+            };
+            let elem_ty = self.lower_type(elem)?;
+            let mut stmts = vec![ir::Stmt::StackAlloc {
+                name: name.to_string(),
+                elem_ty: elem_ty.clone(),
+                count,
+            }];
+            if let Some(init) = init {
+                // temp = init; i = 0; while i < count: name[i] = temp[i]; i++
+                let tmp = self.fresh_temp(name);
+                let idx = self.fresh_temp(name);
+                stmts.push(ir::Stmt::Let {
+                    name: tmp.clone(),
+                    ty: ty.clone(),
+                    init: Some(init),
+                });
+                stmts.push(ir::Stmt::Let {
+                    name: idx.clone(),
+                    ty: ir::Type::I64,
+                    init: Some(ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(0)), ir::Type::I64)),
+                });
+                let var_tmp = ir::Expr::new(ir::ExprKind::Var(tmp.clone()), ty.clone());
+                let var_idx = ir::Expr::new(ir::ExprKind::Var(idx.clone()), ir::Type::I64);
+                let var_name = ir::Expr::new(ir::ExprKind::Var(name.to_string()), ty.clone());
+                let src = ir::Expr::new(
+                    ir::ExprKind::Bin {
+                        op: ir::BinOp::Add,
+                        left: Box::new(var_tmp),
+                        right: Box::new(var_idx.clone()),
+                    },
+                    ty.clone(),
+                );
+                let dst = ir::Expr::new(
+                    ir::ExprKind::Bin {
+                        op: ir::BinOp::Add,
+                        left: Box::new(var_name),
+                        right: Box::new(var_idx.clone()),
+                    },
+                    ty.clone(),
+                );
+                let cond = ir::Expr::new(
+                    ir::ExprKind::Bin {
+                        op: ir::BinOp::Lt,
+                        left: Box::new(var_idx.clone()),
+                        right: Box::new(ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(count as i64)), ir::Type::I64)),
+                    },
+                    ir::Type::Bool,
+                );
+                let one = ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(1)), ir::Type::I64);
+                let step = ir::Expr::new(
+                    ir::ExprKind::Bin {
+                        op: ir::BinOp::Add,
+                        left: Box::new(var_idx.clone()),
+                        right: Box::new(one),
+                    },
+                    ir::Type::I64,
+                );
+                stmts.push(ir::Stmt::While {
+                    cond,
+                    body: vec![
+                        ir::Stmt::Assign {
+                            lhs: ir::LValue::Deref(dst),
+                            rhs: ir::Expr::new(
+                                ir::ExprKind::Load(Box::new(src)),
+                                elem_ty.clone(),
+                            ),
+                        },
+                        ir::Stmt::Assign {
+                            lhs: ir::LValue::Var(idx),
+                            rhs: step,
+                        },
+                    ],
+                });
+            }
+            return Ok(stmts);
+        }
+        Ok(vec![ir::Stmt::Let {
+            name: name.to_string(),
+            ty,
+            init,
+        }])
     }
 
     fn lower_range(&mut self, expr: &ast::Expr) -> Result<(ir::Expr, ir::Expr, bool)> {
@@ -528,6 +629,19 @@ impl<'a> LowerCtx<'a> {
                     field: idx,
                 })
             }
+            ast::Expr::Index(i) => {
+                let object = self.lower_expr(&i.object)?;
+                let index = self.lower_expr(&i.index)?;
+                let ptr_ty = object.ty.clone();
+                Ok(ir::LValue::Deref(ir::Expr::new(
+                    ir::ExprKind::Bin {
+                        op: ir::BinOp::Add,
+                        left: Box::new(object),
+                        right: Box::new(index),
+                    },
+                    ptr_ty,
+                )))
+            }
             _ => bail!("invalid assignment target"),
         }
     }
@@ -691,7 +805,24 @@ impl<'a> LowerCtx<'a> {
                 );
                 Ok(ir::Expr::new(ir::ExprKind::Load(Box::new(gep)), field_ty))
             }
-            ast::Expr::Index(_) => bail!("indexing is not supported in the first milestone"),
+            ast::Expr::Index(i) => {
+                let object = self.lower_expr(&i.object)?;
+                let index = self.lower_expr(&i.index)?;
+                let elem_ty = match &object.ty {
+                    ir::Type::Ptr(inner) => *inner.clone(),
+                    _ => bail!("indexing a non-pointer expression"),
+                };
+                let object_ty = object.ty.clone();
+                let ptr = ir::Expr::new(
+                    ir::ExprKind::Bin {
+                        op: ir::BinOp::Add,
+                        left: Box::new(object),
+                        right: Box::new(index),
+                    },
+                    object_ty,
+                );
+                Ok(ir::Expr::new(ir::ExprKind::Load(Box::new(ptr)), elem_ty))
+            }
             ast::Expr::SizeOf(_) => bail!("sizeof is not supported in the first milestone"),
             ast::Expr::OffsetOf(_) => bail!("offsetof is not supported in the first milestone"),
             ast::Expr::Asm(a) => {

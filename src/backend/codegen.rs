@@ -43,6 +43,7 @@ pub struct CodeGen<'p> {
     label_offsets: HashMap<u32, usize>,
     func_labels: HashMap<String, u32>,
     string_labels: HashMap<String, u32>,
+    global_labels: HashMap<String, u32>,
 
     locals: HashMap<String, Slot>,
     frame_size: usize,
@@ -118,6 +119,18 @@ fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         cg.func_labels.insert("_dev_sfence".to_string(), sb);
         let mb = cg.asm.new_label();
         cg.func_labels.insert("_dev_mfence".to_string(), mb);
+        let s = cg.asm.new_label();
+        cg.func_labels.insert("_dev_socket".to_string(), s);
+        let b = cg.asm.new_label();
+        cg.func_labels.insert("_dev_bind".to_string(), b);
+        let li = cg.asm.new_label();
+        cg.func_labels.insert("_dev_listen".to_string(), li);
+        let a = cg.asm.new_label();
+        cg.func_labels.insert("_dev_accept".to_string(), a);
+        let re = cg.asm.new_label();
+        cg.func_labels.insert("_dev_read".to_string(), re);
+        let cl = cg.asm.new_label();
+        cg.func_labels.insert("_dev_close".to_string(), cl);
         // The bump allocator helpers are only emitted when the program
         // actually imports `std.alloc` (i.e. declares the extern helpers).
         let need_alloc = prog
@@ -147,9 +160,52 @@ fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         cg.emit_runtime(start_label)?;
     }
 
-    // Append string literals as rodata at the end of the assembler buffer.
+    // Append global constants and string literals as rodata at the end of the assembler buffer.
     let rodata_start = cg.asm.new_label();
     cg.bind_label(rodata_start);
+
+    // Emit globals (constants) first
+    let mut globals: Vec<(String, u32, Literal, Type)> = cg
+        .prog
+        .globals
+        .iter()
+        .map(|g| (g.name.clone(), *cg.global_labels.get(&g.name).unwrap(), g.init.clone(), g.ty.clone()))
+        .collect();
+    globals.sort_by_key(|(_, lab, _, _)| *lab);
+    // Global slots initialized with a string literal hold the absolute address
+    // of the literal in rodata; patched once the layout is known below.
+    let mut string_patches: Vec<(u32, u32)> = Vec::new();
+    for (_, lab, init, ty) in globals {
+        cg.bind_label(lab);
+        let value = match init {
+            Literal::Int(v) => {
+                let size = ty_width(&ty);
+                match size {
+                    8 => (v as i8).to_le_bytes().to_vec(),
+                    16 => (v as i16).to_le_bytes().to_vec(),
+                    32 => (v as i32).to_le_bytes().to_vec(),
+                    64 => v.to_le_bytes().to_vec(),
+                    _ => v.to_le_bytes().to_vec(),
+                }
+            }
+            Literal::Bool(v) => {
+                let val = if v { 1i8 } else { 0i8 };
+                val.to_le_bytes().to_vec()
+            }
+            Literal::Char(v) => (v as u8).to_le_bytes().to_vec(),
+            Literal::String(s) => {
+                let s_lab = cg.string_label(&s);
+                string_patches.push((lab, s_lab));
+                vec![0; 8]
+            }
+            _ => vec![0; 8],
+        };
+        let mut padded = value;
+        padded.resize(8, 0);
+        cg.asm.append_bytes(&padded);
+    }
+
+    // Emit string literals
     let mut strings: Vec<(String, u32)> = cg.string_labels.drain().collect();
     strings.sort_by_key(|(_, lab)| *lab);
     for (s, lab) in strings {
@@ -161,10 +217,22 @@ fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
     let bytes = cg.asm.into_bytes();
     let split = *cg.label_offsets.get(&rodata_start).unwrap_or(&bytes.len());
     let mut code = bytes[..split].to_vec();
-    let rodata = bytes[split..].to_vec();
+    let mut rodata = bytes[split..].to_vec();
 
     let text_offset = EHDR_SIZE + PHDR_SIZE * 2;
     let entry_vaddr = BASE_VADDR + text_offset + *cg.label_offsets.get(&start_label).unwrap_or(&0) as u64;
+
+    // Patch string-valued global slots with the absolute address of their
+    // literal in rodata.
+    let rodata_start_off = *cg.label_offsets.get(&rodata_start).unwrap_or(&0);
+    let rodata_vaddr = BASE_VADDR + text_offset + code.len() as u64;
+    for (g_lab, s_lab) in string_patches {
+        let g_off = *cg.label_offsets.get(&g_lab).unwrap_or(&0);
+        let s_off = *cg.label_offsets.get(&s_lab).unwrap_or(&0);
+        let slot = g_off - rodata_start_off;
+        let addr = rodata_vaddr + (s_off - rodata_start_off) as u64;
+        rodata[slot..slot + 8].copy_from_slice(&addr.to_le_bytes());
+    }
 
     // Build the writable `.data` segment and patch absolute virtual addresses
     // into the code.  Two things can live here in hosted mode: the random seed
@@ -216,12 +284,19 @@ impl<'p> CodeGen<'p> {
             layouts.insert(s.name.clone(), layout_struct(s));
         }
 
+        let mut global_labels = HashMap::new();
+        for g in &prog.globals {
+            let lab = global_labels.len() as u32 + 1000; // offset to avoid conflict
+            global_labels.insert(g.name.clone(), lab);
+        }
+
         Self {
             prog,
             asm: Assembler::new(),
             label_offsets: HashMap::new(),
             func_labels: HashMap::new(),
             string_labels: HashMap::new(),
+            global_labels,
             locals: HashMap::new(),
             frame_size: 0,
             struct_layouts: layouts,
@@ -293,7 +368,11 @@ impl<'p> CodeGen<'p> {
     fn emit_stmt(&mut self, s: &Stmt) -> Result<()> {
         match s {
             Stmt::Let { name, ty, init } => {
-                let slot = self.alloc_named_slot(name, 8, 8);
+                let slot = if let Some(s) = self.locals.get(name) {
+                    s.clone()
+                } else {
+                    self.alloc_named_slot(name, 8, 8)
+                };
                 if let Some(e) = init {
                     self.eval_expr(e)?;
                     self.store_scalar(slot.offset);
@@ -439,6 +518,27 @@ impl<'p> CodeGen<'p> {
                 Literal::Null => self.asm.mov(Reg::Rax, 0i32),
             },
             ExprKind::Var(name) => {
+                // First check if it's a global variable (constant)
+                if let Some(&lab) = self.global_labels.get(name) {
+                    self.asm.lea_rip(Reg::Rax, lab);
+                    // Load the value based on type
+                    match &e.ty {
+                        Type::I8 | Type::U8 | Type::Bool | Type::Char => {
+                            self.asm.movsx8(Reg::Rax, Mem::base(Reg::Rax));
+                        }
+                        Type::I16 | Type::U16 => {
+                            self.asm.movsx16(Reg::Rax, Mem::base(Reg::Rax));
+                        }
+                        Type::I32 | Type::U32 => {
+                            self.asm.mov32(Reg::Rax, Mem::base(Reg::Rax));
+                        }
+                        _ => {
+                            self.asm.mov(Reg::Rax, Mem::base(Reg::Rax));
+                        }
+                    }
+                    return Ok(());
+                }
+                // Otherwise it's a local variable
                 let slot = self
                     .locals
                     .get(name)
@@ -518,6 +618,27 @@ impl<'p> CodeGen<'p> {
                     if op == BinOp::Mod {
                         self.asm.mov(Reg::Rax, Reg::Rdx); // remainder
                     }
+                }
+                _ => unreachable!(),
+            }
+            return Ok(());
+        }
+
+        // Bitwise operations
+        if matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr) {
+            match op {
+                BinOp::BitAnd => self.asm.and(Reg::Rax, Reg::R10),
+                BinOp::BitOr => self.asm.or(Reg::Rax, Reg::R10),
+                BinOp::BitXor => self.asm.xor(Reg::Rax, Reg::R10),
+                BinOp::Shl => {
+                    self.asm.mov(Reg::Rcx, Reg::Rax);
+                    self.asm.mov(Reg::Rax, Reg::R10);
+                    self.asm.shl_cl(Reg::Rax);
+                }
+                BinOp::Shr => {
+                    self.asm.mov(Reg::Rcx, Reg::Rax);
+                    self.asm.mov(Reg::Rax, Reg::R10);
+                    self.asm.sar_cl(Reg::Rax);
                 }
                 _ => unreachable!(),
             }
@@ -897,6 +1018,48 @@ impl<'p> CodeGen<'p> {
         self.asm.mfence();
         self.asm.ret();
 
+        // _dev_socket(domain, type, protocol) -> sys_socket(rax=41)
+        let s = *self.func_labels.get("_dev_socket").unwrap();
+        self.bind_label(s);
+        self.asm.mov(Reg::Rax, 41i32);
+        self.asm.syscall();
+        self.asm.ret();
+
+        // _dev_bind(fd, addr, addrlen) -> sys_bind(rax=49)
+        let b = *self.func_labels.get("_dev_bind").unwrap();
+        self.bind_label(b);
+        self.asm.mov(Reg::Rax, 49i32);
+        self.asm.syscall();
+        self.asm.ret();
+
+        // _dev_listen(fd, backlog) -> sys_listen(rax=50)
+        let li = *self.func_labels.get("_dev_listen").unwrap();
+        self.bind_label(li);
+        self.asm.mov(Reg::Rax, 50i32);
+        self.asm.syscall();
+        self.asm.ret();
+
+        // _dev_accept(fd, addr, addrlen) -> sys_accept(rax=43)
+        let a = *self.func_labels.get("_dev_accept").unwrap();
+        self.bind_label(a);
+        self.asm.mov(Reg::Rax, 43i32);
+        self.asm.syscall();
+        self.asm.ret();
+
+        // _dev_read(fd, buf, count) -> sys_read(rax=0)
+        let re = *self.func_labels.get("_dev_read").unwrap();
+        self.bind_label(re);
+        self.asm.mov(Reg::Rax, 0i32);
+        self.asm.syscall();
+        self.asm.ret();
+
+        // _dev_close(fd) -> sys_close(rax=3)
+        let cl = *self.func_labels.get("_dev_close").unwrap();
+        self.bind_label(cl);
+        self.asm.mov(Reg::Rax, 3i32);
+        self.asm.syscall();
+        self.asm.ret();
+
         // _dev_alloc(size) -> ptr[char]
         // A tiny bump allocator: a pointer in the writable `.data` segment is
         // initialized to the base of a 64 KiB `.bss` arena.  Each call advances
@@ -988,6 +1151,10 @@ fn scalar_width(ty: &Type) -> u32 {
         Type::I32 | Type::U32 | Type::F32 => 32,
         _ => 64,
     }
+}
+
+fn ty_width(ty: &Type) -> u32 {
+    scalar_width(ty)
 }
 
 fn abi_reg(idx: usize) -> Result<Reg> {

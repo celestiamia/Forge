@@ -347,6 +347,29 @@ pub fn sar_rm32_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) {
     encode_shift_rm32_imm8(buf, ShiftOp::Sar, rm, imm);
 }
 
+fn encode_shift_rm32_cl(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand) {
+    let ext = match op {
+        ShiftOp::Shl => 4,
+        ShiftOp::Shr => 5,
+        ShiftOp::Sar => 7,
+    };
+    let suffix = modrm_suffix(ext, rm);
+    buf.push(0xD3);
+    buf.extend(suffix);
+}
+
+pub fn shl_rm32_cl(buf: &mut Vec<u8>, rm: Operand) {
+    encode_shift_rm32_cl(buf, ShiftOp::Shl, rm);
+}
+
+pub fn shr_rm32_cl(buf: &mut Vec<u8>, rm: Operand) {
+    encode_shift_rm32_cl(buf, ShiftOp::Shr, rm);
+}
+
+pub fn sar_rm32_cl(buf: &mut Vec<u8>, rm: Operand) {
+    encode_shift_rm32_cl(buf, ShiftOp::Sar, rm);
+}
+
 pub fn movzx_r32_rm8(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
     let suffix = modrm_suffix(dst.enc(), src);
     buf.extend_from_slice(&[0x0F, 0xB6]);

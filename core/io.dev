@@ -8,6 +8,13 @@ extern def _dev_putchar(c: int32) -> int32
 extern def _dev_getchar() -> int32
 extern def _dev_rand() -> int32
 extern def _dev_exit(code: int32) -> void
+extern def _dev_socket(domain: int32, type: int32, protocol: int32) -> int32
+extern def _dev_bind(fd: int32, addr: ptr[char], addrlen: int32) -> int32
+extern def _dev_listen(fd: int32, backlog: int32) -> int32
+extern def _dev_accept(fd: int32, addr: ptr[char], addrlen: ptr[int32]) -> int32
+extern def _dev_read(fd: int32, buf: ptr[char], count: int32) -> int32
+extern def _dev_write(fd: int32, buf: ptr[char], count: int32) -> int32
+extern def _dev_close(fd: int32) -> int32
 
 # Write a null-terminated string to standard output.  Returns the number of
 # bytes written, or a negative value on error.
@@ -32,3 +39,25 @@ pub def rand() -> int32:
 # Terminate the current process with the given exit code.
 pub def exit(code: int32) -> void:
     _dev_exit(code)
+
+# Socket functions
+pub def socket(domain: int32, type: int32, protocol: int32) -> int32:
+    return _dev_socket(domain, type, protocol)
+
+pub def bind(fd: int32, addr: ptr[char], addrlen: int32) -> int32:
+    return _dev_bind(fd, addr, addrlen)
+
+pub def listen(fd: int32, backlog: int32) -> int32:
+    return _dev_listen(fd, backlog)
+
+pub def accept(fd: int32, addr: ptr[char], addrlen: ptr[int32]) -> int32:
+    return _dev_accept(fd, addr, addrlen)
+
+pub def read(fd: int32, buf: ptr[char], count: int32) -> int32:
+    return _dev_read(fd, buf, count)
+
+pub def write(fd: int32, buf: ptr[char], count: int32) -> int32:
+    return _dev_write(fd, buf, count)
+
+pub def close(fd: int32) -> int32:
+    return _dev_close(fd)

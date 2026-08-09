@@ -40,6 +40,7 @@ pub struct CodeGen<'p> {
     label_offsets: HashMap<u32, usize>,
     func_labels: HashMap<String, u32>,
     string_labels: HashMap<String, u32>,
+    global_labels: HashMap<String, u32>,
 
     locals: HashMap<String, Slot>,
     frame_size: usize,
@@ -47,6 +48,9 @@ pub struct CodeGen<'p> {
     addr_tmp: i32,
     ret_label: u32,
     string_patches: Vec<(usize, u32)>,
+    /// (global label, string label) pairs for string-initialized constants,
+    /// patched once the rodata layout is known.
+    global_string_patches: Vec<(u32, u32)>,
     /// Code offset of the `mov eax, <bump_ptr_vaddr>` immediate in `_dev_alloc`,
     /// patched once the `.data` segment layout is known.  `None` when the program
     /// does not use the bump allocator.
@@ -63,6 +67,11 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         let lab = cg.asm.new_label();
         cg.func_labels.insert(f.name.clone(), lab);
     }
+    // Reserve labels for global constants.
+    for g in &prog.globals {
+        let lab = cg.asm.new_label();
+        cg.global_labels.insert(g.name.clone(), lab);
+    }
     let start_label = if prog.hosted {
         let l = cg.asm.new_label();
         cg.func_labels.insert("_start".to_string(), l);
@@ -76,6 +85,20 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         cg.func_labels.insert("_dev_rand".to_string(), r);
         let e = cg.asm.new_label();
         cg.func_labels.insert("_dev_exit".to_string(), e);
+        let s = cg.asm.new_label();
+        cg.func_labels.insert("_dev_socket".to_string(), s);
+        let b = cg.asm.new_label();
+        cg.func_labels.insert("_dev_bind".to_string(), b);
+        let li = cg.asm.new_label();
+        cg.func_labels.insert("_dev_listen".to_string(), li);
+        let a = cg.asm.new_label();
+        cg.func_labels.insert("_dev_accept".to_string(), a);
+        let re = cg.asm.new_label();
+        cg.func_labels.insert("_dev_read".to_string(), re);
+        let w = cg.asm.new_label();
+        cg.func_labels.insert("_dev_write".to_string(), w);
+        let cl = cg.asm.new_label();
+        cg.func_labels.insert("_dev_close".to_string(), cl);
         let lb = cg.asm.new_label();
         cg.func_labels.insert("_dev_lfence".to_string(), lb);
         let sb = cg.asm.new_label();
@@ -114,6 +137,50 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
     // Append string literals as rodata at the end of the assembler buffer.
     let rodata_start = cg.asm.new_label();
     cg.bind_label(rodata_start);
+
+    // Emit global constants (each in a 4-byte slot) before the string literals.
+    let mut globals: Vec<(String, u32, Literal, Type)> = cg
+        .prog
+        .globals
+        .iter()
+        .map(|g| {
+            (
+                g.name.clone(),
+                *cg.global_labels.get(&g.name).unwrap(),
+                g.init.clone(),
+                g.ty.clone(),
+            )
+        })
+        .collect();
+    globals.sort_by_key(|(_, lab, _, _)| *lab);
+    for (_, lab, init, ty) in globals {
+        cg.bind_label(lab);
+        let value = match init {
+            Literal::Int(v) => {
+                let size = ty.byte_size();
+                match size {
+                    1 => (v as i8).to_le_bytes().to_vec(),
+                    2 => (v as i16).to_le_bytes().to_vec(),
+                    _ => (v as i32).to_le_bytes().to_vec(),
+                }
+            }
+            Literal::Bool(v) => {
+                let val = if v { 1i8 } else { 0i8 };
+                val.to_le_bytes().to_vec()
+            }
+            Literal::Char(v) => (v as u8).to_le_bytes().to_vec(),
+            Literal::String(s) => {
+                let s_lab = cg.string_label(&s);
+                cg.global_string_patches.push((lab, s_lab));
+                vec![0; 4]
+            }
+            _ => vec![0; 4],
+        };
+        let mut padded = value;
+        padded.resize(4, 0);
+        cg.asm.append_bytes(&padded);
+    }
+
     let mut strings: Vec<(String, u32)> = cg.string_labels.drain().collect();
     strings.sort_by_key(|(_, lab)| *lab);
     for (s, lab) in strings {
@@ -125,7 +192,7 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
     let bytes = cg.asm.into_bytes();
     let split = *cg.label_offsets.get(&rodata_start).unwrap_or(&bytes.len());
     let mut code = bytes[..split].to_vec();
-    let rodata = bytes[split..].to_vec();
+    let mut rodata = bytes[split..].to_vec();
 
     let text_offset = EHDR_SIZE + PHDR_SIZE * 2;
     let entry_vaddr = BASE_VADDR
@@ -137,6 +204,18 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         let label_off = *cg.label_offsets.get(label).unwrap_or(&0) as u32;
         let abs = BASE_VADDR + text_offset + label_off;
         code[*patch_off..*patch_off + 4].copy_from_slice(&abs.to_le_bytes());
+    }
+
+    // Patch string-valued global slots with the absolute address of their
+    // literal in rodata.
+    let rodata_start_off = *cg.label_offsets.get(&rodata_start).unwrap_or(&0);
+    let rodata_vaddr = BASE_VADDR + text_offset + code.len() as u32;
+    for (g_lab, s_lab) in cg.global_string_patches {
+        let g_off = *cg.label_offsets.get(&g_lab).unwrap_or(&0);
+        let s_off = *cg.label_offsets.get(&s_lab).unwrap_or(&0);
+        let slot = g_off - rodata_start_off;
+        let addr = rodata_vaddr + (s_off - rodata_start_off) as u32;
+        rodata[slot..slot + 4].copy_from_slice(&addr.to_le_bytes());
     }
 
     // Build the writable `.data` segment.  When the program uses the bump
@@ -178,12 +257,14 @@ impl<'p> CodeGen<'p> {
             label_offsets: HashMap::new(),
             func_labels: HashMap::new(),
             string_labels: HashMap::new(),
+            global_labels: HashMap::new(),
             locals: HashMap::new(),
             frame_size: 0,
             struct_layouts: layouts,
             addr_tmp: 0,
             ret_label: 0,
             string_patches: Vec::new(),
+            global_string_patches: Vec::new(),
             alloc_ptr_patch: None,
             loop_end_stack: Vec::new(),
             loop_head_stack: Vec::new(),
@@ -394,6 +475,24 @@ impl<'p> CodeGen<'p> {
                 Literal::Null => self.asm.mov(Reg::Eax, 0i32),
             },
             ExprKind::Var(name) => {
+                // Global constant: load its slot address (patched) then the value.
+                if let Some(&lab) = self.global_labels.get(name) {
+                    let patch_off = self.asm.len() + 2; // C7 /0 imm32
+                    self.asm.mov(Reg::Eax, 0i32);
+                    self.string_patches.push((patch_off, lab));
+                    match &e.ty {
+                        Type::I8 | Type::U8 | Type::Bool | Type::Char => {
+                            self.asm.movsx8(Reg::Eax, Mem::base(Reg::Eax));
+                        }
+                        Type::I16 | Type::U16 => {
+                            self.asm.movsx16(Reg::Eax, Mem::base(Reg::Eax));
+                        }
+                        _ => {
+                            self.asm.mov(Reg::Eax, Mem::base(Reg::Eax));
+                        }
+                    }
+                    return Ok(());
+                }
                 let slot = self
                     .locals
                     .get(name)
@@ -481,6 +580,38 @@ impl<'p> CodeGen<'p> {
                 _ => unreachable!(),
             }
             return Ok(());
+        }
+
+        // Bitwise operations: left in Ecx, right in Eax.
+        match op {
+            BinOp::BitAnd => {
+                self.asm.and(Reg::Eax, Reg::Ecx);
+                return Ok(());
+            }
+            BinOp::BitOr => {
+                self.asm.or(Reg::Eax, Reg::Ecx);
+                return Ok(());
+            }
+            BinOp::BitXor => {
+                self.asm.xor(Reg::Eax, Reg::Ecx);
+                return Ok(());
+            }
+            BinOp::Shl => {
+                // value in Ecx, count in Eax -> count to cl, value to Eax.
+                self.asm.mov(Reg::Edx, Reg::Ecx); // value
+                self.asm.mov(Reg::Ecx, Reg::Eax); // count -> cl
+                self.asm.mov(Reg::Eax, Reg::Edx); // value -> Eax
+                self.asm.shl_cl(Reg::Eax);
+                return Ok(());
+            }
+            BinOp::Shr => {
+                self.asm.mov(Reg::Edx, Reg::Ecx); // value
+                self.asm.mov(Reg::Ecx, Reg::Eax); // count -> cl
+                self.asm.mov(Reg::Eax, Reg::Edx); // value -> Eax
+                self.asm.sar_cl(Reg::Eax);
+                return Ok(());
+            }
+            _ => {}
         }
 
         // Comparisons: left in Ecx, right in Eax.
@@ -740,6 +871,120 @@ impl<'p> CodeGen<'p> {
         self.asm.mov(Reg::Ebx, Mem::base_disp(Reg::Ebp, 8));
         self.asm.mov(Reg::Eax, 1i32); // sys_exit
         self.asm.int(0x80);
+
+        // Network syscalls on i386 go through sys_socketcall(102) with the
+        // subcall number in EBX and a pointer to the argument array in ECX.
+        // Subcalls: 1=socket, 2=bind, 4=listen, 5=accept.
+        // _dev_socket(domain, type, protocol) -> socketcall(1)
+        let s = *self.func_labels.get("_dev_socket").unwrap();
+        self.bind_label(s);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.sub(Reg::Esp, 16i32); // 4-slot args array
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 8)); // domain
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -16), Reg::Eax);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 12)); // type
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -12), Reg::Eax);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 16)); // protocol
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -8), Reg::Eax);
+        self.asm.mov(Reg::Ebx, 1i32);
+        self.asm.lea(Reg::Ecx, Mem::base_disp(Reg::Ebp, -16));
+        self.asm.mov(Reg::Eax, 102i32); // sys_socketcall
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
+
+        // _dev_bind(fd, addr, addrlen) -> socketcall(2)
+        let b = *self.func_labels.get("_dev_bind").unwrap();
+        self.bind_label(b);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.sub(Reg::Esp, 16i32);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 8)); // fd
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -16), Reg::Eax);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 12)); // addr
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -12), Reg::Eax);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 16)); // addrlen
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -8), Reg::Eax);
+        self.asm.mov(Reg::Ebx, 2i32);
+        self.asm.lea(Reg::Ecx, Mem::base_disp(Reg::Ebp, -16));
+        self.asm.mov(Reg::Eax, 102i32);
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
+
+        // _dev_listen(fd, backlog) -> socketcall(4)
+        let li = *self.func_labels.get("_dev_listen").unwrap();
+        self.bind_label(li);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.sub(Reg::Esp, 8i32);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 8)); // fd
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -8), Reg::Eax);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 12)); // backlog
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -4), Reg::Eax);
+        self.asm.mov(Reg::Ebx, 4i32);
+        self.asm.lea(Reg::Ecx, Mem::base_disp(Reg::Ebp, -8));
+        self.asm.mov(Reg::Eax, 102i32);
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
+
+        // _dev_accept(fd, addr, addrlen) -> socketcall(5)
+        let a = *self.func_labels.get("_dev_accept").unwrap();
+        self.bind_label(a);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.sub(Reg::Esp, 16i32);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 8)); // fd
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -16), Reg::Eax);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 12)); // addr
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -12), Reg::Eax);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 16)); // addrlen
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -8), Reg::Eax);
+        self.asm.mov(Reg::Ebx, 5i32);
+        self.asm.lea(Reg::Ecx, Mem::base_disp(Reg::Ebp, -16));
+        self.asm.mov(Reg::Eax, 102i32);
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
+
+        // _dev_read(fd, buf, count) -> sys_read(3)
+        let re = *self.func_labels.get("_dev_read").unwrap();
+        self.bind_label(re);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.mov(Reg::Eax, 3i32);
+        self.asm.mov(Reg::Ebx, Mem::base_disp(Reg::Ebp, 8)); // fd
+        self.asm.mov(Reg::Ecx, Mem::base_disp(Reg::Ebp, 12)); // buf
+        self.asm.mov(Reg::Edx, Mem::base_disp(Reg::Ebp, 16)); // count
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
+
+        // _dev_write(fd, buf, count) -> sys_write(4)
+        let w = *self.func_labels.get("_dev_write").unwrap();
+        self.bind_label(w);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.mov(Reg::Eax, 4i32);
+        self.asm.mov(Reg::Ebx, Mem::base_disp(Reg::Ebp, 8)); // fd
+        self.asm.mov(Reg::Ecx, Mem::base_disp(Reg::Ebp, 12)); // buf
+        self.asm.mov(Reg::Edx, Mem::base_disp(Reg::Ebp, 16)); // count
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
+
+        // _dev_close(fd) -> sys_close(6)
+        let cl = *self.func_labels.get("_dev_close").unwrap();
+        self.bind_label(cl);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.mov(Reg::Eax, 6i32);
+        self.asm.mov(Reg::Ebx, Mem::base_disp(Reg::Ebp, 8)); // fd
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
 
         // _dev_puts(s) -> print null-terminated string to stdout
         let p = *self.func_labels.get("_dev_puts").unwrap();
