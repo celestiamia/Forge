@@ -203,167 +203,142 @@ impl Context {
 
     pub(super) fn check_stmt(&mut self, stmt: &Stmt) -> TypedStmt {
         match stmt {
-            Stmt::Let(l) => {
-                let annotated = l.ty.as_ref().map(|t| self.resolve_type_expr(t));
-                let (init, ty) = if let Some(value) = l.value.as_ref() {
-                    let init = self.check_expr(value, annotated.as_ref());
-                    let ty = annotated.unwrap_or_else(|| init.ty.clone());
-                    if !init.ty.is_unknown() && !ty.is_unknown() && init.ty != ty {
-                        self.error(format!(
-                            "`let {}` expected `{}`, found `{}`",
-                            l.name, ty, init.ty
-                        ));
-                    }
-                    (init, ty)
-                } else {
-                    let ty = annotated.unwrap_or_else(|| {
-                        self.error(format!("`let {}` needs a type annotation or initializer", l.name));
-                        Type::Unknown
-                    });
-                    (zero_expr(&ty), ty)
-                };
-                self.bind_var(&l.name, ty.clone(), false);
-                TypedStmt::Let {
-                    name: l.name.clone(),
-                    ty,
-                    init,
-                    mutable: false,
-                }
-            }
-            Stmt::Var(v) => {
-                let annotated = v.ty.as_ref().map(|t| self.resolve_type_expr(t));
-                let (init, ty) = if let Some(value) = v.value.as_ref() {
-                    let init = self.check_expr(value, annotated.as_ref());
-                    let ty = annotated.unwrap_or_else(|| init.ty.clone());
-                    if !init.ty.is_unknown() && !ty.is_unknown() && init.ty != ty {
-                        self.error(format!(
-                            "`var {}` expected `{}`, found `{}`",
-                            v.name, ty, init.ty
-                        ));
-                    }
-                    (init, ty)
-                } else {
-                    let ty = annotated.unwrap_or_else(|| {
-                        self.error(format!("`var {}` needs a type annotation or initializer", v.name));
-                        Type::Unknown
-                    });
-                    (zero_expr(&ty), ty)
-                };
-                self.bind_var(&v.name, ty.clone(), true);
-                TypedStmt::Var {
-                    name: v.name.clone(),
-                    ty,
-                    init,
-                }
-            }
-            Stmt::Assign(a) => {
-                let target = self.check_expr(&a.target, None);
-                let value = self.check_expr(&a.value, Some(&target.ty));
-                if !self.is_mutable_lvalue(&target) {
-                    self.error(format!(
-                        "cannot assign to immutable or non-lvalue expression"
-                    ));
-                }
-                if !value.ty.is_unknown() && !target.ty.is_unknown() && value.ty != target.ty {
-                    self.error(format!(
-                        "assignment expected `{}`, found `{}`",
-                        target.ty, value.ty
-                    ));
-                }
-                TypedStmt::Assign { target, value }
-            }
+            Stmt::Let(l) => self.check_let_var(&l.name, &l.ty, &l.value, false),
+            Stmt::Var(v) => self.check_let_var(&v.name, &v.ty, &v.value, true),
+            Stmt::Assign(a) => self.check_assign(a),
             Stmt::Expr(e) => TypedStmt::Expr(self.check_expr(e, None)),
-            Stmt::Return(e) => {
-                let ret = self.return_type.clone().unwrap_or(Type::Unknown);
-                let value = e.as_ref().map(|v| self.check_expr(v, Some(&ret)));
-                if let Some(v) = &value {
-                    if !v.ty.is_unknown() && !ret.is_unknown() && v.ty != ret {
-                        self.error(format!(
-                            "return expected `{}`, found `{}`",
-                            ret, v.ty
-                        ));
-                    }
-                } else if !ret.is_void() && !ret.is_unknown() {
-                    self.error("missing return value".to_string());
-                }
-                TypedStmt::Return(value)
-            }
-            Stmt::If(i) => {
-                let cond = self.check_expr(&i.condition, Some(&Type::Bool));
-                if !cond.ty.is_unknown() && cond.ty != Type::Bool {
-                    self.error(format!("if condition must be bool, found `{}`", cond.ty));
-                }
-                let then_block = self.check_block(&i.then_block);
-                let elifs: Vec<(TypedExpr, TypedBlock)> = i
-                    .elifs
-                    .iter()
-                    .map(|(c, b)| {
-                        let tc = self.check_expr(c, Some(&Type::Bool));
-                        if !tc.ty.is_unknown() && tc.ty != Type::Bool {
-                            self.error(format!("elif condition must be bool, found `{}`", tc.ty));
-                        }
-                        (tc, self.check_block(b))
-                    })
-                    .collect();
-                let else_block = i.else_block.as_ref().map(|b| self.check_block(b));
-                TypedStmt::If {
-                    cond,
-                    then_block,
-                    elifs,
-                    else_block,
-                }
-            }
-            Stmt::For(f) => {
-                let iter = self.check_expr(&f.iter, None);
-                let elem_ty = self.iter_element_type(&iter.ty);
-                self.push_scope();
-                self.bind_var(&f.var, elem_ty, true);
-                let body = self.check_block(&f.body);
-                self.pop_scope();
-                TypedStmt::For {
-                    var: f.var.clone(),
-                    iter,
-                    body,
-                }
-            }
-            Stmt::While(w) => {
-                let cond = self.check_expr(&w.condition, Some(&Type::Bool));
-                if !cond.ty.is_unknown() && cond.ty != Type::Bool {
-                    self.error(format!("while condition must be bool, found `{}`", cond.ty));
-                }
-                let body = self.check_block(&w.body);
-                TypedStmt::While { cond, body }
-            }
-            Stmt::Match(m) => {
-                let scrutinee = self.check_expr(&m.scrutinee, None);
-                let mut cases = Vec::new();
-                for case in &m.cases {
-                    self.push_scope();
-                    self.check_pattern(&case.pattern, &scrutinee.ty);
-                    let body = self.check_block(&case.body);
-                    self.pop_scope();
-                    cases.push(TypedMatchCase {
-                        pattern: self.lower_pattern(&case.pattern),
-                        body,
-                    });
-                }
-                self.check_match_exhaustive(&scrutinee.ty, &cases);
-                TypedStmt::Match { scrutinee, cases }
-            }
-            Stmt::UnsafeBlock(b) => {
-                let prev = self.in_unsafe;
-                self.in_unsafe = true;
-                let block = self.check_block(b);
-                self.in_unsafe = prev;
-                TypedStmt::UnsafeBlock(block)
-            }
-            Stmt::Loop(b) => {
-                let body = self.check_block(b);
-                TypedStmt::Loop(body)
-            }
+            Stmt::Return(e) => self.check_return(e),
+            Stmt::If(i) => self.check_if(i),
+            Stmt::For(f) => self.check_for(f),
+            Stmt::While(w) => self.check_while(w),
+            Stmt::Match(m) => self.check_match(m),
+            Stmt::UnsafeBlock(b) => self.check_unsafe_block(b),
+            Stmt::Loop(b) => TypedStmt::Loop(self.check_block(b)),
             Stmt::Break => TypedStmt::Break,
             Stmt::Continue => TypedStmt::Continue,
         }
+    }
+
+    fn check_let_var(&mut self, name: &str, ty_opt: &Option<ast::TypeExpr>, value_opt: &Option<ast::Expr>, mutable: bool) -> TypedStmt {
+        let annotated = ty_opt.as_ref().map(|t| self.resolve_type_expr(t));
+        let (init, ty) = if let Some(value) = value_opt {
+            let init = self.check_expr(value, annotated.as_ref());
+            let ty = annotated.unwrap_or_else(|| init.ty.clone());
+            if !init.ty.is_unknown() && !ty.is_unknown() && init.ty != ty {
+                self.error(format!(
+                    "`{} {}` expected `{}`, found `{}`",
+                    if mutable { "var" } else { "let" }, name, ty, init.ty
+                ));
+            }
+            (init, ty)
+        } else {
+            let ty = annotated.unwrap_or_else(|| {
+                self.error(format!(
+                    "`{} {}` needs a type annotation or initializer",
+                    if mutable { "var" } else { "let" }, name
+                ));
+                Type::Unknown
+            });
+            (zero_expr(&ty), ty)
+        };
+        self.bind_var(name, ty.clone(), mutable);
+        if mutable {
+            TypedStmt::Var { name: name.to_string(), ty, init }
+        } else {
+            TypedStmt::Let { name: name.to_string(), ty, init, mutable: false }
+        }
+    }
+
+    fn check_bool_cond(&mut self, cond_expr: &ast::Expr, context: &str) -> TypedExpr {
+        let cond = self.check_expr(cond_expr, Some(&Type::Bool));
+        if !cond.ty.is_unknown() && cond.ty != Type::Bool {
+            self.error(format!("{} condition must be bool, found `{}`", context, cond.ty));
+        }
+        cond
+    }
+
+    fn check_assign(&mut self, a: &ast::AssignStmt) -> TypedStmt {
+        let target = self.check_expr(&a.target, None);
+        let value = self.check_expr(&a.value, Some(&target.ty));
+        if !self.is_mutable_lvalue(&target) {
+            self.error("cannot assign to immutable or non-lvalue expression".to_string());
+        }
+        if !value.ty.is_unknown() && !target.ty.is_unknown() && value.ty != target.ty {
+            self.error(format!(
+                "assignment expected `{}`, found `{}`",
+                target.ty, value.ty
+            ));
+        }
+        TypedStmt::Assign { target, value }
+    }
+
+    fn check_return(&mut self, e: &Option<ast::Expr>) -> TypedStmt {
+        let ret = self.return_type.clone().unwrap_or(Type::Unknown);
+        let value = e.as_ref().map(|v| self.check_expr(v, Some(&ret)));
+        if let Some(v) = &value {
+            if !v.ty.is_unknown() && !ret.is_unknown() && v.ty != ret {
+                self.error(format!("return expected `{}`, found `{}`", ret, v.ty));
+            }
+        } else if !ret.is_void() && !ret.is_unknown() {
+            self.error("missing return value".to_string());
+        }
+        TypedStmt::Return(value)
+    }
+
+    fn check_if(&mut self, i: &ast::IfStmt) -> TypedStmt {
+        let cond = self.check_bool_cond(&i.condition, "if");
+        let then_block = self.check_block(&i.then_block);
+        let elifs: Vec<(TypedExpr, TypedBlock)> = i
+            .elifs
+            .iter()
+            .map(|(c, b)| {
+                let tc = self.check_bool_cond(c, "elif");
+                (tc, self.check_block(b))
+            })
+            .collect();
+        let else_block = i.else_block.as_ref().map(|b| self.check_block(b));
+        TypedStmt::If { cond, then_block, elifs, else_block }
+    }
+
+    fn check_while(&mut self, w: &ast::WhileStmt) -> TypedStmt {
+        let cond = self.check_bool_cond(&w.condition, "while");
+        let body = self.check_block(&w.body);
+        TypedStmt::While { cond, body }
+    }
+
+    fn check_for(&mut self, f: &ast::ForStmt) -> TypedStmt {
+        let iter = self.check_expr(&f.iter, None);
+        let elem_ty = self.iter_element_type(&iter.ty);
+        self.push_scope();
+        self.bind_var(&f.var, elem_ty, true);
+        let body = self.check_block(&f.body);
+        self.pop_scope();
+        TypedStmt::For { var: f.var.clone(), iter, body }
+    }
+
+    fn check_match(&mut self, m: &ast::MatchStmt) -> TypedStmt {
+        let scrutinee = self.check_expr(&m.scrutinee, None);
+        let mut cases = Vec::new();
+        for case in &m.cases {
+            self.push_scope();
+            self.check_pattern(&case.pattern, &scrutinee.ty);
+            let body = self.check_block(&case.body);
+            self.pop_scope();
+            cases.push(TypedMatchCase {
+                pattern: self.lower_pattern(&case.pattern),
+                body,
+            });
+        }
+        self.check_match_exhaustive(&scrutinee.ty, &cases);
+        TypedStmt::Match { scrutinee, cases }
+    }
+
+    fn check_unsafe_block(&mut self, b: &ast::Block) -> TypedStmt {
+        let prev = self.in_unsafe;
+        self.in_unsafe = true;
+        let block = self.check_block(b);
+        self.in_unsafe = prev;
+        TypedStmt::UnsafeBlock(block)
     }
 
     pub(super) fn iter_element_type(&mut self, ty: &Type) -> Type {

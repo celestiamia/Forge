@@ -337,133 +337,168 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
-    pub(super) fn emit_stmt(&mut self, s: &Stmt) -> Result<()> {
+pub(super) fn emit_stmt(&mut self, s: &Stmt) -> Result<()> {
         match s {
-            Stmt::Let { name, ty, init } => {
-                let slot = if let Some(s) = self.locals.get(name) {
-                    s.clone()
-                } else {
-                    self.alloc_named_slot(name, 8, 8)
-                };
-                if let Some(e) = init {
-                    self.eval_expr(e)?;
-                    self.store_scalar(slot.offset);
-                }
-                let _ = ty;
+            Stmt::Let { name, ty, init } => self.emit_let(name, ty, init),
+            Stmt::StackAlloc { name, elem_ty, count } => self.emit_stack_alloc(name, elem_ty, count),
+            Stmt::Assign { lhs, rhs } => self.emit_assign(lhs, rhs),
+            Stmt::Return(None) => self.emit_return_none(),
+            Stmt::Return(Some(e)) => self.emit_return(e),
+            Stmt::Expr(e) => self.emit_expr(e),
+            Stmt::If { cond, then, else_ } => self.emit_if(cond, then, else_),
+            Stmt::While { cond, body } => self.emit_while(cond, body),
+            Stmt::For { init, cond, step, body } => self.emit_for(init, cond, step, body),
+            Stmt::Break => self.emit_break(),
+            Stmt::Continue => self.emit_continue(),
+            Stmt::Unsafe(b) => self.emit_unsafe(b),
+        }
+    }
+
+    fn emit_let(&mut self, name: &str, ty: &Type, init: &Option<Expr>) -> Result<()> {
+        let slot = if let Some(s) = self.locals.get(name) {
+            s.clone()
+        } else {
+            self.alloc_named_slot(name, 8, 8)
+        };
+        if let Some(e) = init {
+            self.eval_expr(e)?;
+            self.store_scalar(slot.offset);
+        }
+        let _ = ty;
+        Ok(())
+    }
+
+    fn emit_stack_alloc(&mut self, name: &str, elem_ty: &Type, count: &usize) -> Result<()> {
+        let elem_size = elem_ty.byte_size();
+        let raw_size = elem_size * *count;
+        let align = elem_size.max(1);
+        let raw_slot = self.alloc_slot(raw_size, align);
+        let ptr_slot = self.alloc_named_slot(name, 8, 8);
+        self.asm
+            .lea(Reg::Rax, Mem::base_disp(Reg::Rbp, raw_slot.offset));
+        self.store_scalar(ptr_slot.offset);
+        Ok(())
+    }
+
+    fn emit_assign(&mut self, lhs: &LValue, rhs: &Expr) -> Result<()> {
+        self.lvalue_addr(lhs)?;
+        self.asm
+            .mov(Mem::base_disp(Reg::Rbp, self.addr_tmp), Reg::Rax);
+        self.eval_expr(rhs)?;
+        self.asm
+            .mov(Reg::Rdx, Mem::base_disp(Reg::Rbp, self.addr_tmp));
+        let width = self.lvalue_store_width(lhs);
+        self.store_width(width, Reg::Rdx, Reg::Rax);
+        Ok(())
+    }
+
+    fn emit_return_none(&mut self) -> Result<()> {
+        self.asm.jmp(self.ret_label);
+        Ok(())
+    }
+
+    fn emit_return(&mut self, e: &Expr) -> Result<()> {
+        self.eval_expr(e)?;
+        self.asm.jmp(self.ret_label);
+        Ok(())
+    }
+
+    fn emit_expr(&mut self, e: &Expr) -> Result<()> {
+        self.eval_expr(e)?;
+        Ok(())
+    }
+
+    fn emit_if(&mut self, cond: &Expr, then: &[Stmt], else_: &Option<Vec<Stmt>>) -> Result<()> {
+        let then_lab = self.asm.new_label();
+        let end_lab = self.asm.new_label();
+        let else_lab = if else_.is_some() {
+            Some(self.asm.new_label())
+        } else {
+            None
+        };
+        self.eval_expr(cond)?;
+        self.asm.test(Reg::Rax, Reg::Rax);
+        if let Some(l) = else_lab {
+            self.asm.je(l);
+        } else {
+            self.asm.je(end_lab);
+        }
+        self.bind_label(then_lab);
+        for st in then {
+            self.emit_stmt(st)?;
+        }
+        self.asm.jmp(end_lab);
+        if let Some(l) = else_lab {
+            self.bind_label(l);
+            for st in else_.as_ref().unwrap() {
+                self.emit_stmt(st)?;
             }
-            Stmt::StackAlloc { name, elem_ty, count } => {
-                let elem_size = elem_ty.byte_size();
-                let raw_size = elem_size * *count;
-                let align = elem_size.max(1);
-                let raw_slot = self.alloc_slot(raw_size, align);
-                let ptr_slot = self.alloc_named_slot(name, 8, 8);
-                self.asm
-                    .lea(Reg::Rax, Mem::base_disp(Reg::Rbp, raw_slot.offset));
-                self.store_scalar(ptr_slot.offset);
-            }
-            Stmt::Assign { lhs, rhs } => {
-                self.lvalue_addr(lhs)?; // address in RAX
-                self.asm
-                    .mov(Mem::base_disp(Reg::Rbp, self.addr_tmp), Reg::Rax);
-                self.eval_expr(rhs)?; // value in RAX
-                self.asm
-                    .mov(Reg::Rdx, Mem::base_disp(Reg::Rbp, self.addr_tmp));
-                let width = self.lvalue_store_width(lhs);
-                self.store_width(width, Reg::Rdx, Reg::Rax);
-            }
-            Stmt::Return(None) => {
-                self.asm.jmp(self.ret_label);
-            }
-            Stmt::Return(Some(e)) => {
-                self.eval_expr(e)?;
-                self.asm.jmp(self.ret_label);
-            }
-            Stmt::Expr(e) => {
-                self.eval_expr(e)?;
-            }
-            Stmt::If { cond, then, else_ } => {
-                let then_lab = self.asm.new_label();
-                let end_lab = self.asm.new_label();
-                let else_lab = if else_.is_some() {
-                    Some(self.asm.new_label())
-                } else {
-                    None
-                };
-                self.eval_expr(cond)?;
-                self.asm.test(Reg::Rax, Reg::Rax);
-                if let Some(l) = else_lab {
-                    self.asm.je(l);
-                } else {
-                    self.asm.je(end_lab);
-                }
-                self.bind_label(then_lab);
-                for st in then {
-                    self.emit_stmt(st)?;
-                }
-                self.asm.jmp(end_lab);
-                if let Some(l) = else_lab {
-                    self.bind_label(l);
-                    for st in else_.as_ref().unwrap() {
-                        self.emit_stmt(st)?;
-                    }
-                }
-                self.bind_label(end_lab);
-            }
-            Stmt::While { cond, body } => {
-                let head = self.asm.new_label();
-                let end = self.asm.new_label();
-                self.loop_head_stack.push(head);
-                self.loop_end_stack.push(end);
-                self.bind_label(head);
-                self.eval_expr(cond)?;
-                self.asm.test(Reg::Rax, Reg::Rax);
-                self.asm.je(end);
-                for st in body {
-                    self.emit_stmt(st)?;
-                }
-                self.asm.jmp(head);
-                self.bind_label(end);
-                self.loop_head_stack.pop();
-                self.loop_end_stack.pop();
-            }
-            Stmt::For { init, cond, step, body } => {
-                if let Some(i) = init {
-                    self.emit_stmt(i)?;
-                }
-                let head = self.asm.new_label();
-                let end = self.asm.new_label();
-                self.loop_head_stack.push(head);
-                self.loop_end_stack.push(end);
-                self.bind_label(head);
-                self.eval_expr(cond)?;
-                self.asm.test(Reg::Rax, Reg::Rax);
-                self.asm.je(end);
-                for st in body {
-                    self.emit_stmt(st)?;
-                }
-                if let Some(st) = step {
-                    self.eval_expr(st)?;
-                }
-                self.asm.jmp(head);
-                self.bind_label(end);
-                self.loop_head_stack.pop();
-                self.loop_end_stack.pop();
-            }
-            Stmt::Break => {
-                let end = *self.loop_end_stack.last()
-                    .ok_or_else(|| anyhow::anyhow!("break outside of loop"))?;
-                self.asm.jmp(end);
-            }
-            Stmt::Continue => {
-                let head = *self.loop_head_stack.last()
-                    .ok_or_else(|| anyhow::anyhow!("continue outside of loop"))?;
-                self.asm.jmp(head);
-            }
-            Stmt::Unsafe(b) => {
-                for st in b {
-                    self.emit_stmt(st)?;
-                }
-            }
+        }
+        self.bind_label(end_lab);
+        Ok(())
+    }
+
+    fn emit_while(&mut self, cond: &Expr, body: &[Stmt]) -> Result<()> {
+        let head = self.asm.new_label();
+        let end = self.asm.new_label();
+        self.loop_head_stack.push(head);
+        self.loop_end_stack.push(end);
+        self.bind_label(head);
+        self.eval_expr(cond)?;
+        self.asm.test(Reg::Rax, Reg::Rax);
+        self.asm.je(end);
+        for st in body {
+            self.emit_stmt(st)?;
+        }
+        self.asm.jmp(head);
+        self.bind_label(end);
+        self.loop_head_stack.pop();
+        self.loop_end_stack.pop();
+        Ok(())
+    }
+
+    fn emit_for(&mut self, init: &Option<Box<Stmt>>, cond: &Expr, step: &Option<Expr>, body: &[Stmt]) -> Result<()> {
+        if let Some(i) = init {
+            self.emit_stmt(i)?;
+        }
+        let head = self.asm.new_label();
+        let end = self.asm.new_label();
+        self.loop_head_stack.push(head);
+        self.loop_end_stack.push(end);
+        self.bind_label(head);
+        self.eval_expr(cond)?;
+        self.asm.test(Reg::Rax, Reg::Rax);
+        self.asm.je(end);
+        for st in body {
+            self.emit_stmt(st)?;
+        }
+        if let Some(st) = step {
+            self.eval_expr(st)?;
+        }
+        self.asm.jmp(head);
+        self.bind_label(end);
+        self.loop_head_stack.pop();
+        self.loop_end_stack.pop();
+        Ok(())
+    }
+
+    fn emit_break(&mut self) -> Result<()> {
+        let end = *self.loop_end_stack.last()
+            .ok_or_else(|| anyhow::anyhow!("break outside of loop"))?;
+        self.asm.jmp(end);
+        Ok(())
+    }
+
+    fn emit_continue(&mut self) -> Result<()> {
+        let head = *self.loop_head_stack.last()
+            .ok_or_else(|| anyhow::anyhow!("continue outside of loop"))?;
+        self.asm.jmp(head);
+        Ok(())
+    }
+
+    fn emit_unsafe(&mut self, b: &[Stmt]) -> Result<()> {
+        for st in b {
+            self.emit_stmt(st)?;
         }
         Ok(())
     }

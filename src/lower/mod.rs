@@ -44,7 +44,11 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn lower_module(&mut self, module: &ast::Module) -> Result<ir::Program> {
-        // First pass: collect struct and function signatures.
+        self.collect_signatures(module);
+        self.lower_function_bodies(module)
+    }
+
+    fn collect_signatures(&mut self, module: &ast::Module) {
         for item in &module.items {
             match item {
                 ast::Item::Struct(s) => {
@@ -52,7 +56,8 @@ impl<'a> LowerCtx<'a> {
                         .fields
                         .iter()
                         .map(|f| Ok((f.name.clone(), self.lower_type(&f.ty)?)))
-                        .collect::<Result<Vec<_>>>()?;
+                        .collect::<Result<Vec<_>>>()
+                        .expect("struct field type resolution");
                     self.structs.insert(s.name.clone(), ir::StructDef { name: s.name.clone(), fields });
                 }
                 ast::Item::Function(f) => {
@@ -60,12 +65,14 @@ impl<'a> LowerCtx<'a> {
                         .params
                         .iter()
                         .map(|p| Ok((p.name.clone(), self.lower_type(&p.ty)?)))
-                        .collect::<Result<Vec<_>>>()?;
+                        .collect::<Result<Vec<_>>>()
+                        .expect("function param type resolution");
                     let ret = f
                         .ret
                         .as_ref()
                         .map(|t| self.lower_type(t))
-                        .transpose()?
+                        .transpose()
+                        .expect("function return type resolution")
                         .unwrap_or(ir::Type::Void);
                     let name = if self.hosted && f.name == "main" && f.vis == ast::Visibility::Public {
                         "_forge_main".to_string()
@@ -79,20 +86,23 @@ impl<'a> LowerCtx<'a> {
                         .params
                         .iter()
                         .map(|p| self.lower_type(&p.ty))
-                        .collect::<Result<Vec<_>>>()?;
+                        .collect::<Result<Vec<_>>>()
+                        .expect("extern function param type resolution");
                     let ret = e
                         .ret
                         .as_ref()
                         .map(|t| self.lower_type(t))
-                        .transpose()?
+                        .transpose()
+                        .expect("extern function return type resolution")
                         .unwrap_or(ir::Type::Void);
                     self.externs.insert(e.name.clone(), (params, ret));
                 }
                 _ => {}
             }
         }
+    }
 
-        // Second pass: lower function bodies.
+    fn lower_function_bodies(&mut self, module: &ast::Module) -> Result<ir::Program> {
         let mut funcs = Vec::new();
         let mut globals = Vec::new();
         let mut externs = Vec::new();
