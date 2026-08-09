@@ -1,0 +1,425 @@
+use super::*;
+use super::typing::*;
+
+impl Context {
+    pub(super) fn check_item(&mut self, item: &Item) -> TypedItem {
+        match item {
+            Item::Function(f) => TypedItem::Function(self.check_function(f)),
+            Item::Struct(s) => TypedItem::Struct {
+                name: s.name.clone(),
+                generics: s.generics.clone(),
+                fields: self.adts.get(&s.name).map(|i| i.fields.clone()).unwrap_or_default(),
+            },
+            Item::Union(u) => TypedItem::Union {
+                name: u.name.clone(),
+                generics: u.generics.clone(),
+                fields: self.adts.get(&u.name).map(|i| i.fields.clone()).unwrap_or_default(),
+            },
+            Item::Enum(e) => TypedItem::Enum {
+                name: e.name.clone(),
+                generics: e.generics.clone(),
+                variants: self.adts.get(&e.name).map(|i| i.variants.clone()).unwrap_or_default(),
+            },
+            Item::ExternFn(e) => {
+                let sig = self.extern_fns.get(&e.name).cloned().unwrap();
+                TypedItem::ExternFn {
+                    name: sig.name,
+                    generics: sig.generics,
+                    params: sig.params,
+                    ret: sig.ret,
+                }
+            }
+            Item::Const(c) => {
+                let ty = c
+                    .ty
+                    .as_ref()
+                    .map(|t| self.resolve_type_expr(t))
+                    .unwrap_or(Type::Unknown);
+                let value = self.check_expr(&c.value, Some(&ty));
+                self.expect_type(&ty, &value.ty, "constant initializer");
+                TypedItem::Const {
+                    name: c.name.clone(),
+                    ty,
+                    value,
+                }
+            }
+            Item::Use(u) => TypedItem::Use {
+                path: u.path.clone(),
+                alias: u.alias.clone(),
+            },
+            Item::Impl(i) => {
+                let target = self.resolve_type_expr(&i.target);
+                let methods: Vec<TypedFunction> = i
+                    .methods
+                    .iter()
+                    .map(|m| self.check_function(m))
+                    .collect();
+                TypedItem::Impl { target, methods }
+            }
+        }
+    }
+
+    pub(super) fn check_function(&mut self, f: &ast::Function) -> TypedFunction {
+        let sig = self
+            .functions
+            .get(&f.name)
+            .or_else(|| self.extern_fns.get(&f.name))
+            .cloned()
+            .unwrap();
+        let prev_unsafe = self.in_unsafe;
+        self.in_unsafe = self.in_unsafe || sig.is_unsafe;
+        self.current_function = Some(sig.name.clone());
+        self.return_type = Some(sig.ret.clone());
+
+        let body = f.body.as_ref().map(|b| {
+            self.push_scope();
+            for (name, ty) in &sig.params {
+                self.bind_var(name, ty.clone(), true);
+            }
+            let block = self.check_block(b);
+            self.pop_scope();
+            // If the function declares a non-void return type, make sure the
+            // body's trailing expression matches or that every execution path
+            // reaches a `return`.  Void functions may end with any statement.
+            if !sig.ret.is_void()
+                && !sig.ret.is_unknown()
+                && !block.ty.is_unknown()
+                && block.ty != sig.ret
+                && !Self::block_definitely_returns(&block)
+            {
+                self.error(format!(
+                    "function `{}` returns `{}`, but body may not return a value",
+                    sig.name, sig.ret
+                ));
+            }
+            block
+        });
+
+        self.return_type = None;
+        self.current_function = None;
+        self.in_unsafe = prev_unsafe;
+
+        TypedFunction {
+            name: sig.name,
+            generics: sig.generics,
+            params: sig.params,
+            ret: sig.ret,
+            body,
+            is_unsafe: sig.is_unsafe,
+        }
+    }
+
+    /// Return true if every execution path through the block reaches a `return`.
+    /// This is intentionally conservative: it recognizes top-level returns,
+    /// returns inside `unsafe` blocks, and infinite loops (`while true` / `loop`)
+    /// that contain a return anywhere in their body.
+
+    pub(super) fn block_definitely_returns(block: &TypedBlock) -> bool {
+        for (i, stmt) in block.stmts.iter().enumerate() {
+            let is_last = i == block.stmts.len() - 1;
+            match stmt {
+                TypedStmt::Return(_) => return true,
+                TypedStmt::UnsafeBlock(b) if is_last => return Self::block_definitely_returns(b),
+                TypedStmt::While { cond, body } if is_last => {
+                    if Self::is_infinite_cond(cond) && Self::block_contains_return(body) {
+                        return true;
+                    }
+                }
+                TypedStmt::Loop(body) if is_last => {
+                    if Self::block_contains_return(body) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    pub(super) fn is_infinite_cond(cond: &TypedExpr) -> bool {
+        matches!(
+            cond.kind,
+            TypedExprKind::Literal(Literal::Bool(true)) | TypedExprKind::Literal(Literal::Int(1))
+        )
+    }
+
+    /// Return true if the block contains a `return` statement at any nesting level.
+
+    pub(super) fn block_contains_return(block: &TypedBlock) -> bool {
+        for stmt in &block.stmts {
+            match stmt {
+                TypedStmt::Return(_) => return true,
+                TypedStmt::UnsafeBlock(b) |
+                TypedStmt::If { then_block: b, else_block: None, .. } => {
+                    if Self::block_contains_return(b) {
+                        return true;
+                    }
+                }
+                TypedStmt::If {
+                    then_block: t,
+                    else_block: Some(e),
+                    ..
+                } => {
+                    if Self::block_contains_return(t) || Self::block_contains_return(e) {
+                        return true;
+                    }
+                }
+                TypedStmt::While { body, .. } | TypedStmt::For { body, .. } | TypedStmt::Loop(body) => {
+                    if Self::block_contains_return(body) {
+                        return true;
+                    }
+                }
+                TypedStmt::Match { cases, .. } => {
+                    if cases.iter().any(|c| Self::block_contains_return(&c.body)) {
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    // Scopes
+
+    pub(super) fn check_block(&mut self, block: &Block) -> TypedBlock {
+        let mut stmts = Vec::with_capacity(block.stmts.len());
+        let mut last_ty = Type::Void;
+        for (i, stmt) in block.stmts.iter().enumerate() {
+            let is_last = i == block.stmts.len() - 1;
+            let typed = self.check_stmt(stmt);
+            if is_last {
+                match &typed {
+                    TypedStmt::Expr(e) => last_ty = e.ty.clone(),
+                    TypedStmt::Return(Some(e)) => last_ty = e.ty.clone(),
+                    TypedStmt::UnsafeBlock(b) => last_ty = b.ty.clone(),
+                    _ => {}
+                }
+            }
+            stmts.push(typed);
+        }
+        TypedBlock { stmts, ty: last_ty }
+    }
+
+    pub(super) fn check_stmt(&mut self, stmt: &Stmt) -> TypedStmt {
+        match stmt {
+            Stmt::Let(l) => {
+                let annotated = l.ty.as_ref().map(|t| self.resolve_type_expr(t));
+                let (init, ty) = if let Some(value) = l.value.as_ref() {
+                    let init = self.check_expr(value, annotated.as_ref());
+                    let ty = annotated.unwrap_or_else(|| init.ty.clone());
+                    if !init.ty.is_unknown() && !ty.is_unknown() && init.ty != ty {
+                        self.error(format!(
+                            "`let {}` expected `{}`, found `{}`",
+                            l.name, ty, init.ty
+                        ));
+                    }
+                    (init, ty)
+                } else {
+                    let ty = annotated.unwrap_or_else(|| {
+                        self.error(format!("`let {}` needs a type annotation or initializer", l.name));
+                        Type::Unknown
+                    });
+                    (zero_expr(&ty), ty)
+                };
+                self.bind_var(&l.name, ty.clone(), false);
+                TypedStmt::Let {
+                    name: l.name.clone(),
+                    ty,
+                    init,
+                    mutable: false,
+                }
+            }
+            Stmt::Var(v) => {
+                let annotated = v.ty.as_ref().map(|t| self.resolve_type_expr(t));
+                let (init, ty) = if let Some(value) = v.value.as_ref() {
+                    let init = self.check_expr(value, annotated.as_ref());
+                    let ty = annotated.unwrap_or_else(|| init.ty.clone());
+                    if !init.ty.is_unknown() && !ty.is_unknown() && init.ty != ty {
+                        self.error(format!(
+                            "`var {}` expected `{}`, found `{}`",
+                            v.name, ty, init.ty
+                        ));
+                    }
+                    (init, ty)
+                } else {
+                    let ty = annotated.unwrap_or_else(|| {
+                        self.error(format!("`var {}` needs a type annotation or initializer", v.name));
+                        Type::Unknown
+                    });
+                    (zero_expr(&ty), ty)
+                };
+                self.bind_var(&v.name, ty.clone(), true);
+                TypedStmt::Var {
+                    name: v.name.clone(),
+                    ty,
+                    init,
+                }
+            }
+            Stmt::Assign(a) => {
+                let target = self.check_expr(&a.target, None);
+                let value = self.check_expr(&a.value, Some(&target.ty));
+                if !self.is_mutable_lvalue(&target) {
+                    self.error(format!(
+                        "cannot assign to immutable or non-lvalue expression"
+                    ));
+                }
+                if !value.ty.is_unknown() && !target.ty.is_unknown() && value.ty != target.ty {
+                    self.error(format!(
+                        "assignment expected `{}`, found `{}`",
+                        target.ty, value.ty
+                    ));
+                }
+                TypedStmt::Assign { target, value }
+            }
+            Stmt::Expr(e) => TypedStmt::Expr(self.check_expr(e, None)),
+            Stmt::Return(e) => {
+                let ret = self.return_type.clone().unwrap_or(Type::Unknown);
+                let value = e.as_ref().map(|v| self.check_expr(v, Some(&ret)));
+                if let Some(v) = &value {
+                    if !v.ty.is_unknown() && !ret.is_unknown() && v.ty != ret {
+                        self.error(format!(
+                            "return expected `{}`, found `{}`",
+                            ret, v.ty
+                        ));
+                    }
+                } else if !ret.is_void() && !ret.is_unknown() {
+                    self.error("missing return value".to_string());
+                }
+                TypedStmt::Return(value)
+            }
+            Stmt::If(i) => {
+                let cond = self.check_expr(&i.condition, Some(&Type::Bool));
+                if !cond.ty.is_unknown() && cond.ty != Type::Bool {
+                    self.error(format!("if condition must be bool, found `{}`", cond.ty));
+                }
+                let then_block = self.check_block(&i.then_block);
+                let elifs: Vec<(TypedExpr, TypedBlock)> = i
+                    .elifs
+                    .iter()
+                    .map(|(c, b)| {
+                        let tc = self.check_expr(c, Some(&Type::Bool));
+                        if !tc.ty.is_unknown() && tc.ty != Type::Bool {
+                            self.error(format!("elif condition must be bool, found `{}`", tc.ty));
+                        }
+                        (tc, self.check_block(b))
+                    })
+                    .collect();
+                let else_block = i.else_block.as_ref().map(|b| self.check_block(b));
+                TypedStmt::If {
+                    cond,
+                    then_block,
+                    elifs,
+                    else_block,
+                }
+            }
+            Stmt::For(f) => {
+                let iter = self.check_expr(&f.iter, None);
+                let elem_ty = self.iter_element_type(&iter.ty);
+                self.push_scope();
+                self.bind_var(&f.var, elem_ty, true);
+                let body = self.check_block(&f.body);
+                self.pop_scope();
+                TypedStmt::For {
+                    var: f.var.clone(),
+                    iter,
+                    body,
+                }
+            }
+            Stmt::While(w) => {
+                let cond = self.check_expr(&w.condition, Some(&Type::Bool));
+                if !cond.ty.is_unknown() && cond.ty != Type::Bool {
+                    self.error(format!("while condition must be bool, found `{}`", cond.ty));
+                }
+                let body = self.check_block(&w.body);
+                TypedStmt::While { cond, body }
+            }
+            Stmt::Match(m) => {
+                let scrutinee = self.check_expr(&m.scrutinee, None);
+                let mut cases = Vec::new();
+                for case in &m.cases {
+                    self.push_scope();
+                    self.check_pattern(&case.pattern, &scrutinee.ty);
+                    let body = self.check_block(&case.body);
+                    self.pop_scope();
+                    cases.push(TypedMatchCase {
+                        pattern: self.lower_pattern(&case.pattern),
+                        body,
+                    });
+                }
+                self.check_match_exhaustive(&scrutinee.ty, &cases);
+                TypedStmt::Match { scrutinee, cases }
+            }
+            Stmt::UnsafeBlock(b) => {
+                let prev = self.in_unsafe;
+                self.in_unsafe = true;
+                let block = self.check_block(b);
+                self.in_unsafe = prev;
+                TypedStmt::UnsafeBlock(block)
+            }
+            Stmt::Loop(b) => {
+                let body = self.check_block(b);
+                TypedStmt::Loop(body)
+            }
+            Stmt::Break => TypedStmt::Break,
+            Stmt::Continue => TypedStmt::Continue,
+        }
+    }
+
+    pub(super) fn iter_element_type(&mut self, ty: &Type) -> Type {
+        match ty {
+            Type::Slice { elem } => *elem.clone(),
+            Type::Array { elem, .. } => *elem.clone(),
+            Type::Pointer { pointee } => *pointee.clone(), // pointer iteration (unsafe elsewhere)
+            Type::Unknown => Type::Unknown,
+            _ => {
+                self.error(format!("cannot iterate over type `{}`", ty));
+                Type::Unknown
+            }
+        }
+    }
+
+    pub(super) fn check_pattern(&mut self, pat: &Pattern, ty: &Type) {
+        match pat {
+            Pattern::Wildcard => {}
+            Pattern::Literal(l) => {
+                let lit_ty = literal_type(l, Some(ty));
+                if !lit_ty.is_unknown() && !ty.is_unknown() && lit_ty != *ty {
+                    self.error(format!("pattern literal type `{}` does not match `{}`", lit_ty, ty));
+                }
+            }
+            Pattern::Ident(name) => {
+                self.bind_var(name, ty.clone(), false);
+            }
+            Pattern::Tuple(pats) => {
+                if let Type::Tuple { fields } = ty {
+                    if pats.len() != fields.len() {
+                        self.error(format!(
+                            "tuple pattern has {} elements, but value has {}",
+                            pats.len(),
+                            fields.len()
+                        ));
+                    } else {
+                        for (p, f) in pats.iter().zip(fields.iter()) {
+                            self.check_pattern(p, f);
+                        }
+                    }
+                } else if !ty.is_unknown() {
+                    self.error(format!("cannot match tuple pattern against non-tuple type `{}`", ty));
+                }
+            }
+        }
+    }
+
+    pub(super) fn lower_pattern(&self, pat: &Pattern) -> TypedPattern {
+        match pat {
+            Pattern::Wildcard => TypedPattern::Wildcard,
+            Pattern::Literal(l) => TypedPattern::Literal(l.clone()),
+            Pattern::Ident(name) => TypedPattern::Ident(name.clone()),
+            Pattern::Tuple(pats) => TypedPattern::Tuple(pats.iter().map(|p| self.lower_pattern(p)).collect()),
+        }
+    }
+
+    // Expressions
+
+}
