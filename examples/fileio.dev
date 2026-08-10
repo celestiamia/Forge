@@ -1,0 +1,67 @@
+package fileio
+
+from std.io import puts, open, read, write, close, lseek, unlink, stdin, stdout, O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC, SEEK_SET, SEEK_END
+from std.string import strlen
+
+pub def main() -> int32:
+    # Write to stdout using the named constant.
+    puts("file I/O demo\n")
+
+    # Open a temporary file for writing.
+    var fd: int32 = open("/tmp/forge_fileio.txt", O_WRONLY | O_CREAT | O_TRUNC, 0x1ED)
+    if fd < 0:
+        puts("open for write failed\n")
+        return 1
+
+    # Write some content.
+    var msg: ptr[char] = "Hello from Forge file I/O!\n"
+    var msg_len: int32 = strlen(msg) as int32
+    var wret: int32 = write(fd, msg, msg_len)
+    if wret < 0:
+        puts("write failed\n")
+        close(fd)
+        return 1
+
+    close(fd)
+
+    # Reopen for reading.
+    fd = open("/tmp/forge_fileio.txt", O_RDONLY, 0)
+    if fd < 0:
+        puts("open for read failed\n")
+        return 1
+
+    # Determine file size via lseek to SEEK_END.
+    var size: int64 = lseek(fd, 0, SEEK_END)
+    if size < 0:
+        puts("lseek end failed\n")
+        close(fd)
+        return 1
+
+    # Rewind to the beginning.
+    lseek(fd, 0, SEEK_SET)
+
+    # Read contents into a stack buffer.
+    var buf: [byte; 64] = zeroed_buf()
+    var nread: int32 = read(fd, buf as ptr[char], 64)
+    if nread < 0:
+        puts("read failed\n")
+        close(fd)
+        return 1
+
+    # Write the read data back to stdout to prove round-trip works.
+    write(stdout, buf as ptr[char], nread)
+
+    # Clean up.
+    close(fd)
+    unlink("/tmp/forge_fileio.txt")
+
+    puts("fileio ok\n")
+    return 0
+
+def zeroed_buf() -> [byte; 64]:
+    var arr: [byte; 64]
+    var i: int32 = 0
+    while i < 64:
+        arr[i] = 0
+        i = i + 1
+    return arr

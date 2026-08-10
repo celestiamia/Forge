@@ -1,0 +1,10 @@
+package multimod
+
+import utils
+from utils import is_even
+
+pub def main() -> int32:
+    if is_even(42) && clamp(100, 0, 50) == 50:
+        puts("multimod ok\n")
+        return 0
+    return 1

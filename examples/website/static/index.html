@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forge Website</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <header>
+        <h1>Welcome to Forge</h1>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/about">About</a>
+            <a href="/counter">Counter</a>
+            <a href="/api/status">API Status</a>
+        </nav>
+    </header>
+    <main>
+        <section>
+            <h2>Getting Started</h2>
+            <p>Forge is a systems programming language compiler (forgec) that targets x86_64 and x86_32 Linux.</p>
+            <p>It features a Python-like syntax with indentation-based blocks and full type inference.</p>
+        </section>
+        <section>
+            <h2>Interactive Demo</h2>
+            <p id="demo">Click the button to increment the counter:</p>
+            <button onclick="incrementCounter()">Click me!</button>
+            <p id="counter">Count: 0</p>
+        </section>
+        <section>
+            <h2>Endpoints</h2>
+            <ul>
+                <li><a href="/hello?name=World">/hello?name=YourName</a> - Dynamic greeting</li>
+                <li><a href="/api/status">/api/status</a> - Server status (JSON)</li>
+                <li><a href="/api/random">/api/random</a> - Random number (JSON)</li>
+                <li><a href="/counter">/counter</a> - Server-side page counter</li>
+            </ul>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2024 Forge Project</p>
+    </footer>
+    <script src="/app.js"></script>
+</body>
+</html>

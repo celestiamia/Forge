@@ -16,6 +16,61 @@ extern def _dev_read(fd: int32, buf: ptr[char], count: int32) -> int32
 extern def _dev_write(fd: int32, buf: ptr[char], count: int32) -> int32
 extern def _dev_close(fd: int32) -> int32
 
+# File descriptor constants for standard streams.
+const stdin: int32 = 0
+const stdout: int32 = 1
+
+# open(2) flag constants (Linux x86).
+const O_RDONLY: int32 = 0
+const O_WRONLY: int32 = 1
+const O_RDWR: int32 = 2
+const O_CREAT: int32 = 64
+const O_TRUNC: int32 = 512
+const O_APPEND: int32 = 1024
+
+# lseek(2) whence values.
+const SEEK_SET: int32 = 0
+const SEEK_CUR: int32 = 1
+const SEEK_END: int32 = 2
+
+# fcntl(2) command constants.
+const F_DUPFD: int32 = 0
+const F_DUPFD_CLOEXEC: int32 = 1030
+const F_GETFD: int32 = 1
+const F_SETFD: int32 = 2
+const F_GETFL: int32 = 3
+const F_SETFL: int32 = 4
+const F_GETLK: int32 = 5
+const F_SETLK: int32 = 6
+const F_SETLKW: int32 = 7
+
+# FD_CLOEXEC flag for F_GETFD / F_SETFD.
+const FD_CLOEXEC: int64 = 1
+
+# O_ACCMODE mask and O_NONBLOCK for use with F_GETFL / F_SETFL.
+const O_ACCMODE: int32 = 3
+const O_NONBLOCK: int32 = 2048
+
+# AF_INET / SOCK_STREAM for socket(2).
+const AF_INET: int32 = 2
+const AF_INET6: int32 = 10
+const SOCK_STREAM: int32 = 1
+const SOCK_DGRAM: int32 = 2
+const SOCK_NONBLOCK: int32 = 2048
+const SOCK_CLOEXEC: int32 = 524288
+
+# setsockopt(2) level and option constants.
+const SOL_SOCKET: int32 = 1
+const SO_REUSEADDR: int32 = 2
+const SO_REUSEPORT: int32 = 15
+
+extern def _dev_open(path: ptr[char], flags: int32, mode: int32) -> int32
+extern def _dev_lseek(fd: int32, offset: int64, whence: int32) -> int64
+extern def _dev_unlink(path: ptr[char]) -> int32
+extern def _dev_fork() -> int32
+extern def _dev_fcntl(fd: int32, cmd: int32, arg: int64) -> int64
+extern def _dev_setsockopt(fd: int32, level: int32, optname: int32, optval: ptr[char], optlen: int32) -> int32
+
 # Write a null-terminated string to standard output.  Returns the number of
 # bytes written, or a negative value on error.
 pub def puts(s: ptr[char]) -> int32:
@@ -61,3 +116,37 @@ pub def write(fd: int32, buf: ptr[char], count: int32) -> int32:
 
 pub def close(fd: int32) -> int32:
     return _dev_close(fd)
+
+# Open a file by null-terminated path.  `flags` is a bitmask of O_* constants
+# and `mode` is the permission bits (e.g. 0x1ED = 0644) used when O_CREAT is set.
+# Returns a non-negative file descriptor on success, or a negative errno on
+# failure.
+pub def open(path: ptr[char], flags: int32, mode: int32) -> int32:
+    return _dev_open(path, flags, mode)
+
+# Reposition the file offset for `fd`.  Returns the new offset on success, or a
+# negative errno on failure.
+pub def lseek(fd: int32, offset: int64, whence: int32) -> int64:
+    return _dev_lseek(fd, offset, whence)
+
+# Delete the file at the null-terminated `path`.  Returns 0 on success, or -1
+# on error.
+pub def unlink(path: ptr[char]) -> int32:
+    return _dev_unlink(path)
+
+# Duplicate the calling process.  In the parent the child PID is returned; in
+# the child 0 is returned; on failure -1 is returned.
+pub def fork() -> int32:
+    return _dev_fork()
+
+# fcntl(2) file descriptor control.  `cmd` selects the operation: F_DUPFD,
+# F_GETFD, F_SETFD, F_GETFL, F_SETFL, etc.  Returns a value whose meaning
+# depends on the command.
+pub def fcntl(fd: int32, cmd: int32, arg: int64) -> int64:
+    return _dev_fcntl(fd, cmd, arg)
+
+# Set a socket option.  `level` is typically SOL_SOCKET; `optname` selects the
+# option (e.g. SO_REUSEADDR).  `optval` points to the option value, `optlen`
+# is its length in bytes.  Returns 0 on success or -1 on error.
+pub def setsockopt(fd: int32, level: int32, optname: int32, optval: ptr[char], optlen: int32) -> int32:
+    return _dev_setsockopt(fd, level, optname, optval, optlen)

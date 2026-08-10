@@ -1,0 +1,294 @@
+package website
+
+# A full-featured website server in Forge.
+#
+# Demonstrates:
+#   - Static file serving (HTML5, CSS, JavaScript) from a local directory
+#   - Dynamic page generation (hello page, counter)
+#   - JSON API endpoints (/api/status, /api/random)
+#   - HTTP routing with content-type detection
+#   - SO_REUSEADDR for quick server restarts
+#   - Multi-process concurrency via fork()
+#   - Proper HTTP/1.1 response headers
+#
+# Routes:
+#   GET /                -> static/index.html
+#   GET /about           -> static/about.html
+#   GET /style.css       -> static/style.css
+#   GET /app.js          -> static/app.js
+#   GET /hello?name=X    -> dynamic greeting page
+#   GET /api/status      -> JSON status response
+#   GET /api/random      -> JSON random number response
+#   GET /counter         -> dynamically generated counter page
+#   *                    -> 404 page
+
+from std.io import puts, socket, bind, listen, accept, read, write, close, fork, exit
+from std.io import open, lseek, rand, stdout, AF_INET, SOCK_STREAM
+from std.io import SOL_SOCKET, SO_REUSEADDR, FD_CLOEXEC, F_GETFD, F_SETFD, setsockopt, fcntl
+from std.io import O_RDONLY, SEEK_SET, SEEK_END
+from std.mem import zero_bytes
+from std.string import strlen, strstr, strcat, strncpy
+from std.fmt import format_i32
+from std.volatile import load_u8, store_u8
+from pages import hello_page, counter_page, api_status, api_random
+
+const PORT: int32 = 8080
+const BACKLOG: int32 = 10
+const REQ_SIZE: int32 = 8192
+const FILE_BUF_SIZE: int32 = 8192
+const RESP_BUF_SIZE: int32 = 2048
+
+pub def main() -> int32:
+    var sockfd: int32 = socket(AF_INET, SOCK_STREAM, 0)
+    if sockfd < 0:
+        puts("Failed to create socket\n")
+        return 1
+
+    var optval: [byte; 4]
+    zero_bytes(optval as ptr[uint8], 4 as uint64)
+    optval[0] = 1 as byte
+    if setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, optval as ptr[char], 4) < 0:
+        puts("Warning: SO_REUSEADDR failed\n")
+
+    var flags: int64 = fcntl(sockfd, F_GETFD, 0)
+    if flags >= 0:
+        fcntl(sockfd, F_SETFD, flags | FD_CLOEXEC)
+
+    var addr: [byte; 16]
+    zero_bytes(addr as ptr[uint8], 16 as uint64)
+    addr[0] = (AF_INET & 0xFF) as byte
+    addr[1] = ((AF_INET >> 8) & 0xFF) as byte
+    addr[2] = ((PORT >> 8) & 0xFF) as byte
+    addr[3] = (PORT & 0xFF) as byte
+
+    if bind(sockfd, addr as ptr[char], 16) < 0:
+        puts("Failed to bind\n")
+        close(sockfd)
+        return 1
+
+    if listen(sockfd, BACKLOG) < 0:
+        puts("Failed to listen\n")
+        close(sockfd)
+        return 1
+
+    puts("Forge website server listening on port 8080...\n")
+
+    # Warm up the random seed (LCG starts at 0; first calls return 0).
+    rand()
+    rand()
+
+    while true:
+        # Advance the seed in the parent so each forked child gets a
+        # different random starting point.
+        rand()
+
+        var clientfd: int32 = accept(sockfd, null as ptr[char], null as ptr[int32])
+        if clientfd < 0:
+            continue
+
+        var pid: int32 = fork()
+        if pid < 0:
+            puts("fork failed\n")
+            close(clientfd)
+            continue
+
+        if pid == 0:
+            close(sockfd)
+            handle_client(clientfd)
+            close(clientfd)
+            exit(0)
+        else:
+            close(clientfd)
+
+    close(sockfd)
+    return 0
+
+
+def handle_client(fd: int32) -> void:
+    var req: [byte; 8192]
+    zero_bytes(req as ptr[uint8], 8192 as uint64)
+    var nread: int32 = read(fd, req as ptr[char], 8192)
+    if nread <= 0:
+        return
+
+    # Check for GET request (G=71, E=69, T=84, space=32)
+    if req[0] == 71 && req[1] == 69 && req[2] == 84 && req[3] == 32:
+        serve_get(fd, req as ptr[char])
+    else:
+        send_text_response(fd, "HTTP/1.1 405 Method Not Allowed\r\n", "text/plain", "405 Method Not Allowed\n")
+
+
+def serve_get(fd: int32, req: ptr[char]) -> void:
+    # Route based on the request path using strstr on the raw request line.
+    if strstr(req, "GET / HTTP") != (null as ptr[char]):
+        serve_static_file(fd, "static/index.html", "text/html; charset=utf-8")
+    elif strstr(req, "GET /about") != (null as ptr[char]):
+        serve_static_file(fd, "static/about.html", "text/html; charset=utf-8")
+    elif strstr(req, "GET /style.css") != (null as ptr[char]):
+        serve_static_file(fd, "static/style.css", "text/css")
+    elif strstr(req, "GET /app.js") != (null as ptr[char]):
+        serve_static_file(fd, "static/app.js", "application/javascript")
+    elif strstr(req, "GET /api/status") != (null as ptr[char]):
+        serve_api_status(fd)
+    elif strstr(req, "GET /api/random") != (null as ptr[char]):
+        serve_api_random(fd)
+    elif strstr(req, "GET /counter") != (null as ptr[char]):
+        serve_counter(fd)
+    elif strstr(req, "GET /hello") != (null as ptr[char]):
+        serve_hello(fd, req)
+    else:
+        serve_404(fd)
+
+
+# Serve a static file from disk.
+# `filepath` is a null-terminated path relative to the working directory.
+# `content_type` is the MIME type string for the response header.
+def serve_static_file(fd: int32, filepath: ptr[char], content_type: ptr[char]) -> void:
+    var file_fd: int32 = open(filepath, O_RDONLY, 0)
+    if file_fd < 0:
+        serve_404(fd)
+        return
+
+    var size: int64 = lseek(file_fd, 0, SEEK_END)
+    lseek(file_fd, 0, SEEK_SET)
+
+    if size <= 0:
+        close(file_fd)
+        serve_404(fd)
+        return
+
+    # Clamp file size to buffer capacity.
+    if size > 8000:
+        size = 8000
+
+    var file_buf: [byte; 8192]
+    zero_bytes(file_buf as ptr[uint8], 8192 as uint64)
+    var nread: int32 = read(file_fd, file_buf as ptr[char], size as int32)
+    close(file_fd)
+
+    if nread <= 0:
+        serve_404(fd)
+        return
+
+    send_response(fd, "HTTP/1.1 200 OK\r\n", content_type, file_buf as ptr[char], nread)
+
+
+# Send a complete HTTP response with headers and body in a single buffer.
+def send_response(fd: int32, status_line: ptr[char], content_type: ptr[char], body: ptr[char], body_len: int32) -> void:
+    var resp: [byte; 8192]
+    zero_bytes(resp as ptr[uint8], 8192 as uint64)
+
+    strcat(resp as ptr[char], status_line)
+    strcat(resp as ptr[char], "Content-Type: ")
+    strcat(resp as ptr[char], content_type)
+    strcat(resp as ptr[char], "\r\n")
+    strcat(resp as ptr[char], "Content-Length: ")
+
+    var len_buf: [byte; 16]
+    zero_bytes(len_buf as ptr[uint8], 16 as uint64)
+    var len: uint64 = format_i32(len_buf as ptr[char], body_len)
+    strcat(resp as ptr[char], len_buf as ptr[char])
+    strcat(resp as ptr[char], "\r\n\r\n")
+
+    # Append body to the response buffer.
+    var header_len: int32 = strlen(resp as ptr[char]) as int32
+    var i: int32 = 0
+    while i < body_len:
+        unsafe:
+            let c: uint8 = load_u8(body + i as uint64)
+            store_u8(resp as ptr[uint8] + (header_len as uint64 + i as uint64), c)
+        i = i + 1
+
+    var total: int32 = strlen(resp as ptr[char]) as int32
+    write(fd, resp as ptr[char], total)
+
+
+# Convenience wrapper for null-terminated body strings.
+def send_text_response(fd: int32, status_line: ptr[char], content_type: ptr[char], body: ptr[char]) -> void:
+    var body_len: int32 = strlen(body) as int32
+    send_response(fd, status_line, content_type, body, body_len)
+
+
+# Serve a 404 response.  Tries to serve static/404.html; falls back to
+# a simple text message if the file is unavailable.
+def serve_404(fd: int32) -> void:
+    var file_fd: int32 = open("static/404.html", O_RDONLY, 0)
+    if file_fd < 0:
+        send_text_response(fd, "HTTP/1.1 404 Not Found\r\n", "text/html; charset=utf-8", "<html><body><h1>404 Not Found</h1><p>The requested resource was not found.</p></body></html>\n")
+        return
+
+    var size: int64 = lseek(file_fd, 0, SEEK_END)
+    lseek(file_fd, 0, SEEK_SET)
+
+    if size <= 0 || size > 4096:
+        close(file_fd)
+        send_text_response(fd, "HTTP/1.1 404 Not Found\r\n", "text/html; charset=utf-8", "<html><body><h1>404 Not Found</h1><p>The requested resource was not found.</p></body></html>\n")
+        return
+
+    var file_buf: [byte; 4096]
+    zero_bytes(file_buf as ptr[uint8], 4096 as uint64)
+    var nread: int32 = read(file_fd, file_buf as ptr[char], size as int32)
+    close(file_fd)
+
+    if nread <= 0:
+        send_text_response(fd, "HTTP/1.1 404 Not Found\r\n", "text/html; charset=utf-8", "<html><body><h1>404 Not Found</h1><p>The requested resource was not found.</p></body></html>\n")
+        return
+
+    send_response(fd, "HTTP/1.1 404 Not Found\r\n", "text/html; charset=utf-8", file_buf as ptr[char], nread)
+
+
+# Handle GET /hello?name=X
+def serve_hello(fd: int32, req: ptr[char]) -> void:
+    var buf: [byte; 2048]
+    zero_bytes(buf as ptr[uint8], 2048 as uint64)
+    var name_buf: [byte; 64]
+    zero_bytes(name_buf as ptr[uint8], 64 as uint64)
+    extract_name(req, name_buf as ptr[char], 64)
+    var body_len: uint64 = hello_page(buf as ptr[char], 2048, name_buf as ptr[char])
+    send_response(fd, "HTTP/1.1 200 OK\r\n", "text/html; charset=utf-8", buf as ptr[char], body_len as int32)
+
+
+# Handle GET /api/status
+def serve_api_status(fd: int32) -> void:
+    var buf: [byte; 256]
+    zero_bytes(buf as ptr[uint8], 256 as uint64)
+    var body_len: uint64 = api_status(buf as ptr[char], 256)
+    send_response(fd, "HTTP/1.1 200 OK\r\n", "application/json", buf as ptr[char], body_len as int32)
+
+
+# Handle GET /api/random
+def serve_api_random(fd: int32) -> void:
+    var buf: [byte; 64]
+    zero_bytes(buf as ptr[uint8], 64 as uint64)
+    var body_len: uint64 = api_random(buf as ptr[char], 64)
+    send_response(fd, "HTTP/1.1 200 OK\r\n", "application/json", buf as ptr[char], body_len as int32)
+
+
+# Handle GET /counter
+def serve_counter(fd: int32) -> void:
+    var buf: [byte; 2048]
+    zero_bytes(buf as ptr[uint8], 2048 as uint64)
+    var body_len: uint64 = counter_page(buf as ptr[char], 2048)
+    send_response(fd, "HTTP/1.1 200 OK\r\n", "text/html; charset=utf-8", buf as ptr[char], body_len as int32)
+
+
+# Extract the `name` query parameter from a GET request.
+# Looks for `?name=VALUE` and copies VALUE (up to maxlen-1 bytes) into buf.
+# If the parameter is absent, copies the default "World".
+def extract_name(req: ptr[char], buf: ptr[char], maxlen: int32) -> void:
+    var p: ptr[char] = strstr(req, "?name=")
+    if p == (null as ptr[char]):
+        strncpy(buf, "World", maxlen as uint64)
+        return
+
+    # Skip past "?name=" (6 bytes) into the value portion.
+    unsafe:
+        p = p + 6
+        var i: int32 = 0
+        while i < maxlen - 1:
+            let c: uint8 = load_u8(p + i as uint64)
+            if c == 32 || c == 38 || c == 0:
+                break
+            store_u8(buf + i as uint64, c)
+            i = i + 1
+        store_u8(buf + i as uint64, 0)

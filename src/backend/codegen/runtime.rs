@@ -17,6 +17,12 @@ impl<'p> CodeGen<'p> {
         self.emit_dev_accept()?;
         self.emit_dev_read()?;
         self.emit_dev_close()?;
+        self.emit_dev_open()?;
+        self.emit_dev_lseek()?;
+        self.emit_dev_unlink()?;
+        self.emit_dev_fork()?;
+        self.emit_dev_fcntl()?;
+        self.emit_dev_setsockopt()?;
         self.emit_dev_alloc()?;
         self.emit_dev_free()?;
         self.emit_entry_point(start_label)?;
@@ -209,6 +215,60 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
+    fn emit_dev_open(&mut self) -> Result<()> {
+        let op = *self.func_labels.get("_dev_open").unwrap();
+        self.bind_label(op);
+        self.asm.mov(Reg::Rax, 2i32);
+        self.asm.syscall();
+        self.asm.ret();
+        Ok(())
+    }
+
+    fn emit_dev_lseek(&mut self) -> Result<()> {
+        let ls = *self.func_labels.get("_dev_lseek").unwrap();
+        self.bind_label(ls);
+        self.asm.mov(Reg::Rax, 8i32);
+        self.asm.syscall();
+        self.asm.ret();
+        Ok(())
+    }
+
+    fn emit_dev_unlink(&mut self) -> Result<()> {
+        let un = *self.func_labels.get("_dev_unlink").unwrap();
+        self.bind_label(un);
+        self.asm.mov(Reg::Rax, 87i32);
+        self.asm.syscall();
+        self.asm.ret();
+        Ok(())
+    }
+
+    fn emit_dev_fork(&mut self) -> Result<()> {
+        let fk = *self.func_labels.get("_dev_fork").unwrap();
+        self.bind_label(fk);
+        self.asm.mov(Reg::Rax, 57i32);
+        self.asm.syscall();
+        self.asm.ret();
+        Ok(())
+    }
+
+    fn emit_dev_fcntl(&mut self) -> Result<()> {
+        let fc = *self.func_labels.get("_dev_fcntl").unwrap();
+        self.bind_label(fc);
+        self.asm.mov(Reg::Rax, 72i32);
+        self.asm.syscall();
+        self.asm.ret();
+        Ok(())
+    }
+
+    fn emit_dev_setsockopt(&mut self) -> Result<()> {
+        let ss = *self.func_labels.get("_dev_setsockopt").unwrap();
+        self.bind_label(ss);
+        self.asm.mov(Reg::Rax, 54i32);
+        self.asm.syscall();
+        self.asm.ret();
+        Ok(())
+    }
+
     fn emit_dev_alloc(&mut self) -> Result<()> {
         if let Some(&a) = self.func_labels.get("_dev_alloc") {
             self.bind_label(a);
@@ -239,6 +299,11 @@ impl<'p> CodeGen<'p> {
             .func_labels
             .get("_forge_main")
             .ok_or_else(|| anyhow::anyhow!("hosted mode requires a main function"))?;
+        // The Linux ABI starts the process with argc at [rsp] and the argv
+        // array at [rsp+8].  Pass both to main; a `pub def main()` that
+        // declares no parameters simply ignores them.
+        self.asm.mov(Reg::Rdi, Mem::base(Reg::Rsp));
+        self.asm.lea(Reg::Rsi, Mem::base_disp(Reg::Rsp, 8));
         self.asm.call(main_lab);
         self.asm.mov(Reg::Rdi, Reg::Rax);
         let exit_lab = *self.func_labels.get("_dev_exit").unwrap();

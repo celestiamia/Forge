@@ -138,7 +138,7 @@ Key components:
 
 - **`src/lexer/lexer.rs`** — Tokenizes `.dev` source, including indentation-based block handling.
 - **`src/parser/parser.rs`** — Recursive-descent parser producing the AST in `src/ast/mod.rs`.
-- **`src/driver/loader.rs`** — Resolves `std.*` imports (e.g. `std.io` → `core/io.dev`) and merges imported public items into the compilation unit.
+- **`src/driver/loader.rs`** — Resolves `std.*` imports (e.g. `std.io` → `core/io.dev`) and user-defined module imports (e.g. `mymod` → `mymod.dev`) by walking up from the entry source directory.  All imported modules are recursively loaded and merged into a single compilation unit before semantic analysis and lowering.
 - **`src/sema/check.rs`** — Full semantic analyzer: name resolution, type inference/checking, mutability, unsafe rules, generic monomorphization metadata.
 - **`src/ty/mod.rs`** — Forge type system with interning (`Type`, `TypeCtx`).
 - **`src/lower.rs`** — Lowers the Python-like AST to the backend IR. This is the pragmatic bridge used by the current milestone. `match` desugars to an if-chain; `match` expressions lower to a zero-init temp plus an if-chain inside a `Block`.
@@ -173,7 +173,7 @@ When adding new language features, prefer extending the active path:
 
 Supported:
 
-- `package`, `import`, `from ... import`
+- `package`, `import` (stdlib and user-defined), `from ... import`
 - `extern def`, `pub def`, `let`/`var`, `return`
 - `if`/`elif`/`else`, `while`, `for i in a..b`, `loop`, `match`/`case`/`_`, `break`/`continue`
 - `unsafe { ... }` blocks
@@ -195,6 +195,13 @@ Imported standard library modules:
 - `std.math` — `abs_i32`, `min_i32`, `max_i32`, `clamp_i32` (see `core/math.dev`)
 - `std.alloc` — bump allocator over a 64 KiB compiler-emitted arena: `alloc(size) -> ptr[char]`, `free(p)` (no-op); backed by the `_dev_alloc`/`_dev_free` runtime helpers (see `core/alloc.dev`)
 - `std.fmt` — integer formatting: `format_i32(buf, value) -> uint64` writes a signed 32-bit decimal into `buf` (null-terminated) and returns the length; `INT32_MIN` is not handled (see `core/fmt.dev`)
+
+User-defined modules:
+
+- `import mymod` resolves to `mymod.dev` (or `mypkg/sub.dev` for dotted paths) by walking up from the entry file's directory
+- `from mymod import func` imports selected names
+- All items from all modules are merged into a single flat namespace; name conflicts across modules are reported as errors
+- See `examples/multimod/` for a working example
 
 Supported targets and output formats:
 

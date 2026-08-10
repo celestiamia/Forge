@@ -1,0 +1,69 @@
+package randfile
+
+from std.io import puts, putchar, open, write, read, close, lseek, stdout, stdin, O_WRONLY, O_CREAT, O_TRUNC, O_RDONLY, SEEK_END, SEEK_SET, rand
+from std.string import strlen
+from std.fmt import format_i32
+
+pub def main() -> int32:
+    puts("Generating 10 random numbers into /tmp/forge_rand.txt\n")
+
+    # Open a file for writing (create or truncate, mode 0644).
+    var fd: int32 = open("/tmp/forge_rand.txt", O_WRONLY | O_CREAT | O_TRUNC, 0x1ED)
+    if fd < 0:
+        puts("open for write failed\n")
+        return 1
+
+    # Buffer for formatting lines and reading file contents.
+    # Max: 10 numbers × ~11 chars each ≈ 120 bytes.
+    var buf: [byte; 128] = zeroed128()
+
+    # Generate 10 random numbers, format each, append newline, write to file.
+    var i: int32 = 0
+    while i < 10:
+        var r: int32 = rand()
+        if r < 0:
+            r = 0 - r
+        var n: int32 = format_i32(buf as ptr[char], r) as int32
+        buf[n] = 10  # append newline
+        n = n + 1
+        var wret: int32 = write(fd, buf as ptr[char], n)
+        if wret < 0:
+            puts("write failed\n")
+            close(fd)
+            return 1
+        i = i + 1
+
+    close(fd)
+    puts("Wrote 10 random numbers.\n")
+
+    # Reopen for reading to prove round-trip.
+    fd = open("/tmp/forge_rand.txt", O_RDONLY, 0)
+    if fd < 0:
+        puts("open for read failed\n")
+        return 1
+
+    # Get file size via lseek to SEEK_END.
+    var size: int64 = lseek(fd, 0, SEEK_END)
+    if size < 0:
+        puts("lseek failed\n")
+        close(fd)
+        return 1
+
+    # Rewind to start.
+    lseek(fd, 0, SEEK_SET)
+
+    # Read contents back and echo to stdout.
+    read(fd, buf as ptr[char], size as int32)
+    write(stdout, buf as ptr[char], size as int32)
+
+    close(fd)
+    puts("Done.\n")
+    return 0
+
+def zeroed128() -> [byte; 128]:
+    var arr: [byte; 128]
+    var i: int32 = 0
+    while i < 128:
+        arr[i] = 0
+        i = i + 1
+    return arr

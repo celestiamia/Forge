@@ -112,6 +112,80 @@ impl<'p> CodeGen<'p> {
         self.asm.leave();
         self.asm.ret();
 
+        let op = *self.func_labels.get("_dev_open").unwrap();
+        self.bind_label(op);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.mov(Reg::Eax, 5i32); // sys_open
+        self.asm.mov(Reg::Ebx, Mem::base_disp(Reg::Ebp, 8)); // path
+        self.asm.mov(Reg::Ecx, Mem::base_disp(Reg::Ebp, 12)); // flags
+        self.asm.mov(Reg::Edx, Mem::base_disp(Reg::Ebp, 16)); // mode
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
+
+        let ls = *self.func_labels.get("_dev_lseek").unwrap();
+        self.bind_label(ls);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.mov(Reg::Eax, 19i32); // sys_lseek
+        self.asm.mov(Reg::Ebx, Mem::base_disp(Reg::Ebp, 8)); // fd
+        self.asm.mov(Reg::Ecx, Mem::base_disp(Reg::Ebp, 12)); // offset
+        self.asm.mov(Reg::Edx, Mem::base_disp(Reg::Ebp, 16)); // whence
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
+
+        let un = *self.func_labels.get("_dev_unlink").unwrap();
+        self.bind_label(un);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.mov(Reg::Eax, 10i32); // sys_unlink
+        self.asm.mov(Reg::Ebx, Mem::base_disp(Reg::Ebp, 8)); // path
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
+
+        let fk = *self.func_labels.get("_dev_fork").unwrap();
+        self.bind_label(fk);
+        self.asm.mov(Reg::Eax, 2i32); // sys_fork
+        self.asm.int(0x80);
+        self.asm.ret();
+
+        let fc = *self.func_labels.get("_dev_fcntl").unwrap();
+        self.bind_label(fc);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.mov(Reg::Eax, 55i32); // sys_fcntl (i386 __NR_fcntl=55; 72 is x86_64-only, 72=i386 sigsuspend)
+        self.asm.mov(Reg::Ebx, Mem::base_disp(Reg::Ebp, 8)); // fd
+        self.asm.mov(Reg::Ecx, Mem::base_disp(Reg::Ebp, 12)); // cmd
+        self.asm.mov(Reg::Edx, Mem::base_disp(Reg::Ebp, 16)); // arg
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
+
+        let ss = *self.func_labels.get("_dev_setsockopt").unwrap();
+        self.bind_label(ss);
+        self.asm.push(Reg::Ebp);
+        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.sub(Reg::Esp, 20i32); // 5-slot args array for socketcall
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 8)); // fd
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -20), Reg::Eax);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 12)); // level
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -16), Reg::Eax);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 16)); // optname
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -12), Reg::Eax);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 20)); // optval
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -8), Reg::Eax);
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 24)); // optlen
+        self.asm.mov(Mem::base_disp(Reg::Ebp, -4), Reg::Eax);
+        self.asm.mov(Reg::Ebx, 14i32); // SYS_SETSOCKOPT
+        self.asm.lea(Reg::Ecx, Mem::base_disp(Reg::Ebp, -20));
+        self.asm.mov(Reg::Eax, 102i32); // sys_socketcall
+        self.asm.int(0x80);
+        self.asm.leave();
+        self.asm.ret();
+
         let p = *self.func_labels.get("_dev_puts").unwrap();
         self.bind_label(p);
         self.asm.push(Reg::Ebp);
@@ -223,7 +297,16 @@ impl<'p> CodeGen<'p> {
             .func_labels
             .get("_forge_main")
             .ok_or_else(|| anyhow::anyhow!("hosted mode requires a main function"))?;
+        // cdecl startup: the kernel leaves argc at [esp] and the argv array at
+        // [esp+4].  Load argc, take the address of the argv array, push argv
+        // then argc, so main receives (argc, argv); a `pub def main()` with no
+        // parameters simply ignores them.
+        self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Esp, 0));
+        self.asm.lea(Reg::Ecx, Mem::base_disp(Reg::Esp, 4));
+        self.asm.push(Reg::Ecx);
+        self.asm.push(Reg::Eax);
         self.asm.call(main_lab);
+        self.asm.add(Reg::Esp, 8i32);
         self.asm.mov(Reg::Ebx, Reg::Eax);
         self.asm.mov(Reg::Eax, 1i32);
         self.asm.int(0x80);

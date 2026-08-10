@@ -1,0 +1,133 @@
+package pages
+
+# Dynamic page generators for the Forge website.
+#
+# Each function writes a complete HTML or JSON response into a caller-provided
+# buffer (which must be large enough) and returns the number of bytes written
+# as a uint64.  The buffer is null-terminated so it can be passed directly to
+# `write()` as a ptr[char].
+#
+# All functions call `zero_bytes` on the buffer before use and build the
+# response with `strncpy` + `strcat`.  The maximum response sizes are kept
+# under 2048 bytes for HTML and 256 bytes for JSON.
+
+from std.mem import zero_bytes
+from std.string import strcat, strncpy, strlen
+from std.fmt import format_i32
+
+# ---------------------------------------------------------------------------
+# HTML helpers
+# ---------------------------------------------------------------------------
+
+# Write the common HTML head (doctype, head, nav, and opening of main) into
+# `buf`.  Returns nothing; the caller continues appending to `buf`.
+def html_head(buf: ptr[char], buf_size: int32, title: ptr[char]) -> void:
+    zero_bytes(buf as ptr[uint8], buf_size as uint64)
+    strncpy(buf, "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n", buf_size as uint64)
+    strcat(buf, "    <meta charset=\"UTF-8\">\n")
+    strcat(buf, "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n")
+    strcat(buf, "    <title>")
+    strcat(buf, title)
+    strcat(buf, "</title>\n")
+    strcat(buf, "    <link rel=\"stylesheet\" href=\"/style.css\">\n")
+    strcat(buf, "</head>\n<body>\n")
+    strcat(buf, "    <header>\n")
+    strcat(buf, "        <h1>")
+    strcat(buf, title)
+    strcat(buf, "</h1>\n")
+    strcat(buf, "        <nav>\n")
+    strcat(buf, "            <a href=\"/\">Home</a>\n")
+    strcat(buf, "            <a href=\"/about\">About</a>\n")
+    strcat(buf, "            <a href=\"/counter\">Counter</a>\n")
+    strcat(buf, "            <a href=\"/api/status\">API Status</a>\n")
+    strcat(buf, "        </nav>\n")
+    strcat(buf, "    </header>\n")
+    strcat(buf, "    <main>\n")
+    strcat(buf, "        <section>\n")
+
+
+# Write the common HTML footer (close main, footer, body, html) into `buf`.
+# The caller has already written the section content; we just append.
+def html_footer(buf: ptr[char]) -> void:
+    strcat(buf, "        </section>\n")
+    strcat(buf, "    </main>\n")
+    strcat(buf, "    <footer>\n")
+    strcat(buf, "        <p>&copy; 2024 Forge Project</p>\n")
+    strcat(buf, "    </footer>\n")
+    strcat(buf, "    <script src=\"/app.js\"></script>\n")
+    strcat(buf, "</body>\n</html>\n")
+
+
+# ---------------------------------------------------------------------------
+# Dynamic route handlers
+# ---------------------------------------------------------------------------
+
+# Build a "Hello, <name>!" HTML page.  `name` is a null-terminated string
+# extracted from the query parameter.  Writes into `buf` and returns the
+# number of bytes written.
+pub def hello_page(buf: ptr[char], buf_size: int32, name: ptr[char]) -> uint64:
+    html_head(buf, buf_size, "Hello")
+
+    strcat(buf, "            <h1>Hello, ")
+    strcat(buf, name)
+    strcat(buf, "!</h1>\n")
+    strcat(buf, "            <p>Welcome to the Forge website. This is a dynamically generated page.</p>\n")
+    strcat(buf, "            <p><a href=\"/\">Back to Home</a></p>\n")
+
+    html_footer(buf)
+    return strlen(buf)
+
+
+# Build a counter page showing a random "visitor count".
+pub def counter_page(buf: ptr[char], buf_size: int32) -> uint64:
+    var r: int32 = rand()
+    if r < 0:
+        r = 0 - r
+    # Keep the count in a reasonable range
+    r = r % 1000
+
+    html_head(buf, buf_size, "Counter")
+
+    var num_buf: [byte; 32]
+    zero_bytes(num_buf as ptr[uint8], 32 as uint64)
+    format_i32(num_buf as ptr[char], r)
+
+    strcat(buf, "            <h1>Page Counter</h1>\n")
+    strcat(buf, "            <p>Total page views: ")
+    strcat(buf, num_buf as ptr[char])
+    strcat(buf, "</p>\n")
+    strcat(buf, "            <p>This number is randomly generated on each visit (fork-based concurrency does not share state).</p>\n")
+    strcat(buf, "            <p><a href=\"/\">Back to Home</a></p>\n")
+
+    html_footer(buf)
+    return strlen(buf)
+
+
+# ---------------------------------------------------------------------------
+# JSON API endpoints
+# ---------------------------------------------------------------------------
+
+# Build a JSON status response: {"status":"ok","service":"forge-web"}
+pub def api_status(buf: ptr[char], buf_size: int32) -> uint64:
+    zero_bytes(buf as ptr[uint8], buf_size as uint64)
+    strncpy(buf, "{\"status\":\"ok\",\"service\":\"forge-web\",\"version\":\"1.0\"}\n", buf_size as uint64)
+    return strlen(buf)
+
+
+# Build a JSON response with a random number: {"value":N}
+pub def api_random(buf: ptr[char], buf_size: int32) -> uint64:
+    var r: int32 = rand()
+    if r < 0:
+        r = 0 - r
+    r = r % 10000
+
+    zero_bytes(buf as ptr[uint8], buf_size as uint64)
+    strncpy(buf, "{\"value\":", buf_size as uint64)
+
+    var num_buf: [byte; 32]
+    zero_bytes(num_buf as ptr[uint8], 32 as uint64)
+    format_i32(num_buf as ptr[char], r)
+    strcat(buf, num_buf as ptr[char])
+
+    strcat(buf, "}\n")
+    return strlen(buf)

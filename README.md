@@ -14,7 +14,9 @@ external toolchain.
   `for`/`while`/`loop`, `match`/`case`, `break`/`continue`, `unsafe`, `extern`,
   `struct`, `as` casts, `import`/`from ... import`
 - Emits native machine code + object format directly from Rust (ELF64 or flat binary)
-- Working module system: `std.*` imports resolve to `core/<name>.dev`
+- Working module system: `std.*` imports resolve to `core/<name>.dev`, and
+  user-defined modules resolve to local `.dev` files by walking up from the
+  entry source directory
 - Width-correct volatile memory access and a growing standard library
 - Bare-metal boot sector written entirely in Forge (no inline assembly required)
 
@@ -116,6 +118,109 @@ qemu-system-x86_64 -fda boot.bin -nographic
 # After a few seconds the output will contain:
 # Booting from Floppy...
 # Hello, Forge bootloader!
+```
+
+## Multi-module projects
+
+Forge supports splitting programs across multiple `.dev` source files.  Imports
+are resolved relative to the entry file's directory, walking up the tree — the
+same search strategy used for `std.*` modules.
+
+### Import syntax
+
+```dev
+import myutils              # import all items from myutils.dev
+from myutils import helper # import only `helper`
+```
+
+All imported modules are recursively loaded and merged into a single
+compilation unit before type checking.  This means `forgec` always takes a
+single entry file as input; it resolves and pulls in all transitive imports
+automatically.
+
+### Example layout
+
+```
+examples/multimod/
+├── multimod.dev          # entry file — imports utils.dev
+└── utils.dev             # user module — imported by multimod.dev
+```
+
+`examples/multimod/utils.dev`:
+
+```dev
+package utils
+
+from std.io import puts
+
+pub def is_even(n: int32) -> bool:
+    return n % 2 == 0
+
+pub def clamp(v: int32, lo: int32, hi: int32) -> int32:
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v
+```
+
+`examples/multimod/multimod.dev`:
+
+```dev
+package multimod
+
+import utils
+from utils import is_even
+
+pub def main() -> int32:
+    if is_even(42) && clamp(100, 0, 50) == 50:
+        puts("multimod ok\n")
+        return 0
+    return 1
+```
+
+Compile and run:
+
+```bash
+./target/release/forgec examples/multimod/multimod.dev -o multimod \
+    --target x86_64-unknown-linux-gnu
+./multimod
+```
+
+### Limitations
+
+- **Flat namespace**: all items from every imported module are merged into a
+  single namespace.  Name conflicts between modules are reported as errors.
+- **Single entry point**: `forgec` takes one `.dev` file; all other modules are
+  pulled in via `import` / `from ... import`.
+- **Directory-based module paths**: `import pkg.sub` resolves to
+  `pkg/sub.dev` relative to the entry file's directory.
+
+### Makefile template
+
+Because `forgec` resolves all imports at compile time and emits a single
+binary, a Makefile only needs to list the entry file:
+
+```makefile
+FORGEC = ./target/release/forgec
+TARGET = x86_64-unknown-linux-gnu
+
+all: main
+
+main: main.dev
+	$(FORGEC) main.dev -o main --target $(TARGET)
+
+clean:
+	rm -f main
+
+.PHONY: all clean
+```
+
+For build-dependency tracking, list all `.dev` files the entry file imports:
+
+```makefile
+main: main.dev utils.dev helpers.dev
+	$(FORGEC) main.dev -o main --target $(TARGET)
 ```
 
 ## Supported targets

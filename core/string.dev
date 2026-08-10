@@ -40,3 +40,73 @@ pub def strncmp(a: ptr[char], b: ptr[char], n: uint64) -> int32:
                 return 0
             i = i + 1
     return 0
+
+# Find the first occurrence of the substring `needle` in `haystack`.
+# Returns a pointer to the start of the match, or null if not found.
+pub def strstr(haystack: ptr[char], needle: ptr[char]) -> ptr[char]:
+    unsafe:
+        var h: ptr[char] = haystack
+        var n: uint64 = strlen(needle)
+        if n == 0:
+            return h
+        while load_u8(h) > 0:
+            var j: uint64 = 0
+            while j < n:
+                let hc: uint8 = load_u8(h + j)
+                let nc: uint8 = load_u8(needle + j)
+                if hc != nc:
+                    break
+                if hc == 0:
+                    return null as ptr[char]
+                j = j + 1
+            if j == n:
+                return h
+            h = h + 1
+        return null as ptr[char]
+
+# Find the first occurrence of the character `c` in `s`.
+# Returns a pointer to the match, or null if not found.
+pub def strchr(s: ptr[char], c: int32) -> ptr[char]:
+    unsafe:
+        var p: ptr[char] = s
+        while load_u8(p) > 0:
+            if load_u8(p) == c as uint8:
+                return p
+            p = p + 1
+        if c == 0:
+            return p
+        return null as ptr[char]
+
+# Append the null-terminated string `src` to `dest`.  `dest` must have enough
+# space to hold both strings.  Returns a pointer to `dest`.
+pub def strcat(dest: ptr[char], src: ptr[char]) -> ptr[char]:
+    unsafe:
+        var d: ptr[char] = dest
+        while load_u8(d) > 0:
+            d = d + 1
+        var s: ptr[char] = src
+        while load_u8(s) > 0:
+            *d = load_u8(s) as char
+            d = d + 1
+            s = s + 1
+        *d = 0 as char
+    return dest
+
+# Copy up to `n` bytes from `src` to `dest`.  If `src` is shorter than `n`,
+# the remaining bytes of `dest` are filled with null bytes.  Returns `dest`.
+pub def strncpy(dest: ptr[char], src: ptr[char], n: uint64) -> ptr[char]:
+    unsafe:
+        var s: ptr[char] = src
+        var d: ptr[char] = dest
+        var i: uint64 = 0
+        while i < n:
+            let c: uint8 = load_u8(s + i)
+            if c == 0:
+                var j: uint64 = i
+                while j < n:
+                    store_u8(d as ptr[uint8] + j, 0)
+                    j = j + 1
+                return dest
+            store_u8(d as ptr[uint8] + i, c)
+            i = i + 1
+    return dest

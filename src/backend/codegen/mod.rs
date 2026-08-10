@@ -128,6 +128,18 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         cg.func_labels.insert("_dev_read".to_string(), re);
         let cl = cg.asm.new_label();
         cg.func_labels.insert("_dev_close".to_string(), cl);
+        let op = cg.asm.new_label();
+        cg.func_labels.insert("_dev_open".to_string(), op);
+        let ls = cg.asm.new_label();
+        cg.func_labels.insert("_dev_lseek".to_string(), ls);
+        let un = cg.asm.new_label();
+        cg.func_labels.insert("_dev_unlink".to_string(), un);
+        let fk = cg.asm.new_label();
+        cg.func_labels.insert("_dev_fork".to_string(), fk);
+        let fc = cg.asm.new_label();
+        cg.func_labels.insert("_dev_fcntl".to_string(), fc);
+        let ss = cg.asm.new_label();
+        cg.func_labels.insert("_dev_setsockopt".to_string(), ss);
         let need_alloc = prog
             .externs
             .iter()
@@ -539,6 +551,13 @@ pub(super) fn type_size(ty: &Type) -> usize {
         Type::I64 | Type::U64 | Type::F64 | Type::Ptr(_) => 8,
         Type::Struct(name) => panic!("struct size for {} must come from layout table", name),
         _ => 8,
+    }
+}
+
+pub(super) fn ptr_elem_size(ty: &Type) -> Option<usize> {
+    match ty {
+        Type::Ptr(inner) => Some(type_size(inner)),
+        _ => None,
     }
 }
 

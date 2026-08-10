@@ -90,9 +90,32 @@ impl<'p> CodeGen<'p> {
 
         if op.is_arithmetic() {
             match op {
-                BinOp::Add => self.asm.add(Reg::Eax, Reg::Ecx),
+                BinOp::Add => {
+                    // C-style pointer arithmetic: when one operand is a
+                    // pointer and the other an integer, scale the integer by
+                    // the pointee size before adding.  All scalar sizes are
+                    // powers of two, so the scaling is a shift.
+                    if let (Some(elem), true) = (ptr_elem_size(&left.ty), right.ty.is_integer()) {
+                        if elem > 1 {
+                            self.asm.shl(Reg::Eax, elem.trailing_zeros() as i8);
+                        }
+                        self.asm.add(Reg::Eax, Reg::Ecx);
+                    } else if let (Some(elem), true) = (ptr_elem_size(&right.ty), left.ty.is_integer()) {
+                        if elem > 1 {
+                            self.asm.shl(Reg::Ecx, elem.trailing_zeros() as i8);
+                        }
+                        self.asm.add(Reg::Eax, Reg::Ecx);
+                    } else {
+                        self.asm.add(Reg::Eax, Reg::Ecx);
+                    }
+                }
                 BinOp::Sub => {
                     self.asm.mov(Reg::Edx, Reg::Eax); // right -> Edx
+                    if let (Some(elem), true) = (ptr_elem_size(&left.ty), right.ty.is_integer()) {
+                        if elem > 1 {
+                            self.asm.shl(Reg::Edx, elem.trailing_zeros() as i8);
+                        }
+                    }
                     self.asm.mov(Reg::Eax, Reg::Ecx); // left -> Eax
                     self.asm.sub(Reg::Eax, Reg::Edx);
                 }

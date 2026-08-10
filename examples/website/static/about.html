@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About - Forge Website</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <header>
+        <h1>About Forge</h1>
+        <nav>
+            <a href="/">Home</a>
+            <a href="/about">About</a>
+            <a href="/counter">Counter</a>
+            <a href="/api/status">API Status</a>
+        </nav>
+    </header>
+    <main>
+        <section>
+            <h2>Project Overview</h2>
+            <p>Forge is a systems programming language compiler (forgec) that targets x86_64 and x86_32 Linux.</p>
+            <p>This website is a demonstration of a full web application written entirely in Forge, showcasing:</p>
+        </section>
+        <section>
+            <h2>Features</h2>
+            <ul>
+                <li>HTTP server with routing</li>
+                <li>Dynamic page generation</li>
+                <li>Static file serving (HTML, CSS, JS)</li>
+                <li>JSON API endpoints</li>
+                <li>Multi-process concurrency (fork)</li>
+                <li>Proper HTTP headers and content types</li>
+            </ul>
+        </section>
+        <section>
+            <h2>Routes</h2>
+            <table>
+                <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+                <tr><td>GET</td><td>/</td><td>Home page (index.html)</td></tr>
+                <tr><td>GET</td><td>/about</td><td>About page</td></tr>
+                <tr><td>GET</td><td>/hello?name=X</td><td>Dynamic greeting page</td></tr>
+                <tr><td>GET</td><td>/api/status</td><td>Server status (JSON)</td></tr>
+                <tr><td>GET</td><td>/api/random</td><td>Random number (JSON)</td></tr>
+                <tr><td>GET</td><td>/counter</td><td>Page view counter</td></tr>
+                <tr><td>GET</td><td>/style.css</td><td>Stylesheet</td></tr>
+                <tr><td>GET</td><td>/app.js</td><td>Client-side JavaScript</td></tr>
+            </table>
+        </section>
+    </main>
+    <footer>
+        <p>&copy; 2024 Forge Project</p>
+    </footer>
+</body>
+</html>

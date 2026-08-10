@@ -1,0 +1,16 @@
+package utils
+
+from std.io import puts
+
+pub def is_even(n: int32) -> bool:
+    return n % 2 == 0
+
+pub def clamp(v: int32, lo: int32, hi: int32) -> int32:
+    if v < lo:
+        return lo
+    if v > hi:
+        return hi
+    return v
+
+def debug_print(msg: ptr[char]) -> void:
+    puts(msg)

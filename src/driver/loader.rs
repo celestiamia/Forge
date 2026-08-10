@@ -1,16 +1,22 @@
 //! Module loader and import resolver for the Forge driver.
 //!
-//! The first milestone supports a tiny module system:
+//! The module system supports two kinds of imports:
 //!
-//!   - `import std.io` imports all public names from `core/io.dev` unqualified.
-//!   - `import std.io as io` is accepted but the alias is not yet enforced;
-//!     names are still imported unqualified.
-//!   - `from std.io import puts, putchar` imports selected public names.
-//!   - `from std.io import *` imports all public names.
+//!   - **Standard library modules**: `import std.io` or `from std.io import puts, putchar`.
+//!     These resolve to `core/<name>.dev` by walking up from the entry source
+//!     directory looking for a `core/` directory containing `<name>.dev`.
+//!     Both `pub` and private items are merged so that wrapper functions in
+//!     stdlib modules can call internal helpers (e.g. `puts` calls `_dev_puts`).
 //!
-//! Only `std.*` modules are resolved in this milestone.  They are located by
-//! walking up from the entry source directory looking for a `core/` directory
-//! containing `<name>.dev`.
+//!   - **User-defined modules**: `import mymod` or `from mymod import helper`.
+//!     These resolve to `<name>.dev` (or `<name>/<sub>.dev` for dotted paths)
+//!     by walking up from the entry source directory.  All items — including
+//!     non-`pub` ones — are merged into the entry module's namespace, and name
+//!     conflicts across modules are reported as errors.
+//!
+//! The `import std.io as io` and `from std.io import *` forms are also accepted.
+//! All resolved modules are recursively loaded and merged into a single module
+//! before semantic analysis and lowering.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -70,9 +76,12 @@ pub fn load_modules(entry_source: &str, entry_path: &Path) -> Result<ModuleGraph
 /// Merge the entry module and all transitively imported modules into a single
 /// module.
 ///
-/// All public items from every loaded module are cloned into the merged module
-/// so that the lowerer can resolve them in a single namespace.  Private items
-/// are also merged so that imported wrappers can call their internal helpers.
+/// All items from every loaded module are cloned into the merged module so that
+/// the lowerer and codegen can resolve them in a single namespace.  This
+/// includes private items (e.g. the stdlib's `_dev_*` externs that are called by
+/// public wrappers like `puts`).  Name conflicts across modules are detected
+/// and reported as errors — users should give each module's non-`pub` items
+/// unique names to avoid conflicts.
 pub fn merge_modules(graph: ModuleGraph) -> Result<Module> {
     let mut merged = Module {
         package: graph.entry.package.clone(),
@@ -136,9 +145,31 @@ fn resolve_module_path(path: &[String], entry_path: &Path) -> Result<PathBuf> {
         );
     }
 
+    resolve_local_module(path, entry_path)
+}
+
+/// Resolve a user-defined (non-`std`) module path to a `.dev` file by walking
+/// up the directory tree from the entry file, mirroring the stdlib search.
+fn resolve_local_module(path: &[String], entry_path: &Path) -> Result<PathBuf> {
+    let name = path.join("/");
+    let mut dir = entry_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    loop {
+        let candidate = dir.join(&name).with_extension("dev");
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
     bail!(
-        "only `std.*` modules are supported in the first milestone (got `{}`)",
-        path.join(".")
+        "cannot resolve module `{}`: {}.dev not found near {}",
+        name,
+        name,
+        entry_path.display()
     );
 }
 

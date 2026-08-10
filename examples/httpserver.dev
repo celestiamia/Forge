@@ -1,96 +1,183 @@
 package httpserver
 
-# A minimal HTTP server in Forge.
+# A full-featured HTTP server in Forge.
+#
+# Features demonstrated:
+#   - SO_REUSEADDR on the listening socket (setsockopt)
+#   - Concurrent request handling via fork()
+#   - GET request parsing (method, path, ?name= query parameter)
+#   - Dynamic response content based on query parameters
+#   - Multiple routes: /, /hello?name=..., /json, and 404 fallback
+#   - Proper HTTP header generation with Content-Length
 
 import std.io
 import std.string
+import std.fmt
+import std.mem
+import std.volatile
 
-# Constants
-const AF_INET: int32 = 2
-const SOCK_STREAM: int32 = 1
 const PORT: int32 = 8080
 const BACKLOG: int32 = 10
-const BUF_SIZE: int32 = 4096
-
-# HTTP response template
-const HTTP_RESPONSE: ptr[char] = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 13\r\n\r\nHello, Forge!"
 
 pub def main() -> int32:
-    # Create socket
+    # Create listening socket
     var sockfd: int32 = socket(AF_INET, SOCK_STREAM, 0)
     if sockfd < 0:
         puts("Failed to create socket")
         return 1
 
-    # Prepare sockaddr_in structure (16 bytes)
-    # struct sockaddr_in {
-    #     sa_family_t    sin_family;   // 2 bytes
-    #     in_port_t      sin_port;     // 2 bytes (network byte order)
-    #     struct in_addr sin_addr;     // 4 bytes
-    #     unsigned char  sin_zero[8];  // 8 bytes
-    # }
-    var addr: [byte; 16] = zeroed()
+    # SO_REUSEADDR: allows restarting the server immediately after exit
+    var optval: [byte; 4]
+    zero_bytes(optval as ptr[uint8], 4 as uint64)
+    optval[0] = (1 as byte)
+    if setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, optval as ptr[char], 4) < 0:
+        puts("Warning: SO_REUSEADDR failed")
+
+    # Set FD_CLOEXEC on the listening socket (close-on-exec for child processes)
+    var flags: int64 = fcntl(sockfd, F_GETFD, 0)
+    if flags >= 0:
+        fcntl(sockfd, F_SETFD, flags | FD_CLOEXEC)
+
+    # Build sockaddr_in: { sin_family(2), sin_port(2), sin_addr(4), sin_zero(8) }
+    var addr: [byte; 16]
+    zero_bytes(addr as ptr[uint8], 16 as uint64)
     addr[0] = (AF_INET & 0xFF) as byte
     addr[1] = ((AF_INET >> 8) & 0xFF) as byte
-    
-    # Port in network byte order (big endian)
     addr[2] = ((PORT >> 8) & 0xFF) as byte
     addr[3] = (PORT & 0xFF) as byte
-    
-    # INADDR_ANY (0.0.0.0) - already zeroed
 
-    # Bind socket
-    var ret: int32 = bind(sockfd, addr as ptr[char], 16)
-    if ret < 0:
-        puts("Failed to bind socket")
+    if bind(sockfd, addr as ptr[char], 16) < 0:
+        puts("Failed to bind")
         close(sockfd)
         return 1
 
-    # Listen
-    ret = listen(sockfd, BACKLOG)
-    if ret < 0:
+    if listen(sockfd, BACKLOG) < 0:
         puts("Failed to listen")
         close(sockfd)
         return 1
 
-    puts("Server listening on port 8080...")
+    puts("HTTP server listening on port 8080...")
 
-    # Accept loop
-    var client_addr: [byte; 16] = zeroed()
-    var addrlen: int32 = 16
-    
+    # Accept loop with fork() for concurrent connections
     while true:
-        var clientfd: int32 = accept(sockfd, client_addr as ptr[char], &addrlen)
+        var clientfd: int32 = accept(sockfd, null as ptr[char], null as ptr[int32])
         if clientfd < 0:
-            puts("Failed to accept connection")
             continue
 
-        # Read request
-        var buf: [byte; 4096] = zeroed_buf()
-        var nread: int32 = read(clientfd, buf as ptr[char], BUF_SIZE)
-        if nread > 0:
-            puts("Received request")
-            # Send response
-            var response_len: uint64 = strlen(HTTP_RESPONSE)
-            write(clientfd, HTTP_RESPONSE, response_len as int32)
+        var pid: int32 = fork()
+        if pid < 0:
+            puts("fork failed")
+            close(clientfd)
+            continue
 
-        close(clientfd)
+        if pid == 0:
+            # Child process: handle client then exit
+            close(sockfd)
+            handle_client(clientfd)
+            close(clientfd)
+            exit(0)
+        else:
+            # Parent: close client fd, continue accepting
+            close(clientfd)
 
     close(sockfd)
     return 0
 
-def zeroed() -> [byte; 16]:
-    var arr: [byte; 16]
-    var i: int32 = 0
-    while i < 16:
-        arr[i] = 0
-        i = i + 1
-    return arr
 
-def zeroed_buf() -> [byte; 4096]:
-    var arr: [byte; 4096]
-    var i: int32 = 0
-    while i < 4096:
-        arr[i] = 0
-        i = i + 1
-    return arr
+def handle_client(fd: int32) -> void:
+    var req: [byte; 8192]
+    zero_bytes(req as ptr[uint8], 8192 as uint64)
+
+    var nread: int32 = read(fd, req as ptr[char], 8192)
+    if nread <= 0:
+        return
+
+    # Check for "GET " at start of request line (G=71, E=69, T=84, space=32)
+    if req[0] == 71 && req[1] == 69 && req[2] == 84 && req[3] == 32:
+        handle_get(fd, req as ptr[char])
+    else:
+        var msg: ptr[char] = "HTTP/1.1 405 Method Not Allowed\r\nContent-Length: 0\r\n\r\n"
+        write(fd, msg, strlen(msg) as int32)
+
+
+def handle_get(fd: int32, req: ptr[char]) -> void:
+    # Route based on path in the request line: "GET <path> HTTP/1.1"
+    var hello_path: ptr[char] = strstr(req, "GET /hello")
+    var json_path: ptr[char] = strstr(req, "GET /json")
+    var root_path: ptr[char] = strstr(req, "GET / HTTP")
+
+    if hello_path != (null as ptr[char]):
+        serve_hello(fd, req)
+    elif json_path != (null as ptr[char]):
+        serve_json(fd)
+    elif root_path != (null as ptr[char]):
+        serve_root(fd)
+    else:
+        serve_404(fd)
+
+
+def serve_hello(fd: int32, req: ptr[char]) -> void:
+    # Build body: "Hello, <name>!\n"
+    var body: [byte; 256]
+    zero_bytes(body as ptr[uint8], 256 as uint64)
+
+    # Start with "Hello, "
+    strncpy(body as ptr[char], "Hello, ", 256)
+
+    # Look for ?name= query parameter
+    var name_ptr: ptr[char] = strstr(req, "?name=")
+    if name_ptr == (null as ptr[char]):
+        strcat(body as ptr[char], "World")
+    else:
+        # Extract the name value from the query string
+        unsafe:
+            name_ptr = name_ptr + 6
+            var name_len: int32 = 0
+            while load_u8(name_ptr + name_len) > 0 && load_u8(name_ptr + name_len) != 32 && load_u8(name_ptr + name_len) != 38:
+                name_len = name_len + 1
+            strncpy(body as ptr[char] + 7, name_ptr, name_len as uint64)
+
+    strcat(body as ptr[char], "!\n")
+    send_text_response(fd, body as ptr[char])
+
+
+def serve_json(fd: int32) -> void:
+    var body: ptr[char] = "{\"status\":\"ok\",\"service\":\"Forge HTTP Server\"}\n"
+    send_response(fd, "HTTP/1.1 200 OK\r\n", "Content-Type: application/json\r\n", body)
+
+
+def serve_root(fd: int32) -> void:
+    var body: ptr[char] = "Welcome to the Forge HTTP Server\nEndpoints: /hello?name=YourName  /json\n"
+    send_response(fd, "HTTP/1.1 200 OK\r\n", "Content-Type: text/plain\r\n", body)
+
+
+def serve_404(fd: int32) -> void:
+    var body: ptr[char] = "404 Not Found\n"
+    send_response(fd, "HTTP/1.1 404 Not Found\r\n", "Content-Type: text/plain\r\n", body)
+
+
+def send_text_response(fd: int32, body: ptr[char]) -> void:
+    send_response(fd, "HTTP/1.1 200 OK\r\n", "Content-Type: text/plain\r\n", body)
+
+
+def send_response(fd: int32, status: ptr[char], content_type: ptr[char], body: ptr[char]) -> void:
+    var resp: [byte; 4096]
+    zero_bytes(resp as ptr[uint8], 4096 as uint64)
+
+    var body_len: int32 = strlen(body) as int32
+
+    # Build: status line + content-type + content-length + body
+    strncpy(resp as ptr[char], status, 4096)
+    strcat(resp as ptr[char], content_type)
+    strcat(resp as ptr[char], "Content-Length: ")
+
+    # Format the body length as a decimal string
+    var len_buf: [byte; 32]
+    zero_bytes(len_buf as ptr[uint8], 32 as uint64)
+    format_i32(len_buf as ptr[char], body_len)
+    strcat(resp as ptr[char], len_buf as ptr[char])
+    strcat(resp as ptr[char], "\r\n\r\n")
+    strcat(resp as ptr[char], body)
+
+    var total: int32 = strlen(resp as ptr[char]) as int32
+    write(fd, resp as ptr[char], total)

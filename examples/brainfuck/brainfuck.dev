@@ -1,0 +1,144 @@
+package brainfuck
+
+# A brainfuck interpreter written in Forge.
+#
+# Build and run:
+#   ./target/release/forgec examples/brainfuck/brainfuck.dev -o bf
+#   ./bf examples/hello.bf
+#
+# The program is read from the file given on the command line; anything you
+# pipe to standard input is available to the `,` command.  Brainfuck has
+# exactly eight commands, each a single character:
+#
+#   >  move the data pointer right
+#   <  move the data pointer left
+#   +  increment the current cell (wrapping)
+#   -  decrement the current cell (wrapping)
+#   .  write the current cell to stdout as a byte
+#   ,  read one byte from stdin into the current cell (0 at EOF)
+#   [  jump forward past the matching ] if the current cell is zero
+#   ]  jump back to the matching [ if the current cell is non-zero
+#
+# Every other character in the program is ignored, as in classic brainfuck.
+#
+# This example also demonstrates how to receive argc/argv in main: the hosted
+# runtime passes them whenever the main function declares parameters, so
+# `pub def main(argc: int32, argv: ptr[ptr[char]])` receives the command line.
+
+from std.io import puts, putchar, getchar
+from std.io import open, read, close, lseek, O_RDONLY, SEEK_SET, SEEK_END
+from std.mem import zero_bytes
+from std.volatile import load_u8
+
+# The classic brainfuck tape has 30,000 cells.
+const TAPE_SIZE: int32 = 30000
+
+# Maximum program length accepted.
+const PROG_SIZE: int64 = 65536
+
+pub def main(argc: int32, argv: ptr[ptr[char]]) -> int32:
+    if argc < 2:
+        puts("usage: bf <program.bf>\n")
+        return 1
+
+    var prog_path: ptr[char]
+    unsafe:
+        prog_path = argv[1]
+
+    var fd: int32 = open(prog_path, O_RDONLY, 0)
+    if fd < 0:
+        puts("brainfuck: cannot open program file\n")
+        return 1
+
+    var size: int64 = lseek(fd, 0, SEEK_END)
+    lseek(fd, 0, SEEK_SET)
+    if size <= 0:
+        puts("brainfuck: empty program\n")
+        close(fd)
+        return 1
+    if size > PROG_SIZE:
+        size = PROG_SIZE
+
+    var prog: [byte; 65536]
+    let nread: int32 = read(fd, prog as ptr[char], size as int32)
+    close(fd)
+    if nread <= 0:
+        puts("brainfuck: could not read program\n")
+        return 1
+
+    run(prog as ptr[char], nread)
+    return 0
+
+# Execute a brainfuck program stored at `prog` with length `len`.
+def run(prog: ptr[char], len: int32) -> void:
+    var tape: [byte; 30000]
+    zero_bytes(tape as ptr[uint8], TAPE_SIZE as uint64)
+
+    var dp: int32 = 0
+    var pc: int32 = 0
+    while pc < len:
+        let c: uint8 = fetch(prog, pc)
+        if c == 62:      # >
+            dp = dp + 1
+            if dp >= TAPE_SIZE:
+                dp = TAPE_SIZE - 1
+        elif c == 60:    # <
+            dp = dp - 1
+            if dp < 0:
+                dp = 0
+        elif c == 43:    # +
+            tape[dp] = tape[dp] + 1
+        elif c == 45:    # -
+            tape[dp] = tape[dp] - 1
+        elif c == 46:    # .
+            putchar(tape[dp] as int32)
+        elif c == 44:    # ,
+            let v: int32 = getchar()
+            if v < 0:
+                tape[dp] = 0
+            else:
+                tape[dp] = v as byte
+        elif c == 91:    # [
+            if tape[dp] == 0:
+                pc = match_forward(prog, len, pc)
+        elif c == 93:    # ]
+            if tape[dp] != 0:
+                pc = match_backward(prog, len, pc)
+        pc = pc + 1
+
+# Load program byte `i`; keeps the unsafe indexing in one place.
+def fetch(prog: ptr[char], i: int32) -> uint8:
+    unsafe:
+        return load_u8(prog as ptr[uint8] + i as uint64)
+
+# Given the '[' at index `pc`, return the index of its matching ']',
+# or `len` if the program is unbalanced.
+def match_forward(prog: ptr[char], len: int32, pc: int32) -> int32:
+    var depth: int32 = 1
+    var i: int32 = pc + 1
+    while i < len:
+        let c: uint8 = fetch(prog, i)
+        if c == 91:
+            depth = depth + 1
+        elif c == 93:
+            depth = depth - 1
+            if depth == 0:
+                return i
+        i = i + 1
+    return len
+
+# Given the ']' at index `pc`, return the index of its matching '[',
+# or 0 if the program is unbalanced.
+def match_backward(prog: ptr[char], len: int32, pc: int32) -> int32:
+    var depth: int32 = 1
+    var i: int32 = pc - 1
+    while i >= 0:
+        let c: uint8 = fetch(prog, i)
+        if c == 93:
+            depth = depth + 1
+        elif c == 91:
+            depth = depth - 1
+            if depth == 0:
+                return i
+        i = i - 1
+    return 0
