@@ -66,11 +66,11 @@ mod tests {
     }
 
     fn bin(op: BinOp, l: Expr, r: Expr) -> Expr {
-        Expr::Binary(BinaryExpr { op, left: Box::new(l), right: Box::new(r) })
+        Expr::Binary(BinaryExpr { span: Span::unknown(), op, left: Box::new(l), right: Box::new(r) })
     }
 
     fn call(callee: Expr, args: Vec<Expr>) -> Expr {
-        Expr::Call(CallExpr { callee: Box::new(callee), args })
+        Expr::Call(CallExpr { span: Span::unknown(), callee: Box::new(callee), args })
     }
 
     fn ty_name(s: &str) -> TypeExpr {
@@ -176,6 +176,7 @@ mod tests {
             None,
             Block {
                 stmts: vec![Stmt::Expr(Expr::Deref(DerefExpr {
+                    span: Span::unknown(),
                     expr: Box::new(ident("p")),
                 }))],
             },
@@ -198,6 +199,7 @@ mod tests {
             }],
         });
         let access = Expr::Field(FieldExpr {
+            span: Span::unknown(),
             object: Box::new(ident("u")),
             field: "i".to_string(),
         });
@@ -214,6 +216,7 @@ mod tests {
             Vec::new(),
             Some(ty_name("f64")),
             body(Expr::Cast(CastExpr {
+                span: Span::unknown(),
                 expr: Box::new(int(1)),
                 ty: Box::new(ty_name("f64")),
             })),
@@ -250,6 +253,7 @@ mod tests {
             Block {
                 stmts: vec![Stmt::UnsafeBlock(Block {
                     stmts: vec![Stmt::Expr(Expr::Deref(DerefExpr {
+                        span: Span::unknown(),
                         expr: Box::new(ident("p")),
                     }))],
                 })],
@@ -269,6 +273,7 @@ mod tests {
                 stmts: vec![
                     let_init("x", int(0)),
                     Stmt::Expr(Expr::RefMut(RefMutExpr {
+                        span: Span::unknown(),
                         expr: Box::new(ident("x")),
                     })),
                 ],
@@ -293,6 +298,7 @@ mod tests {
         });
         let body = Block {
             stmts: vec![Stmt::Expr(Expr::Match(MatchExpr {
+                span: Span::unknown(),
                 scrutinee: Box::new(ident("c")),
                 cases: vec![
                     MatchCase {

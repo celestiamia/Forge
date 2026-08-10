@@ -161,6 +161,10 @@ pub enum ExprKind {
     /// effects and the trailing expression is the value of the block.
     Block(Vec<Stmt>, Box<Expr>),
     Asm { template: String, constraints: String, inputs: Vec<(Expr, String)>, output: Option<(Type, String)>, clobbers: Vec<String> },
+    /// `sizeof(T)` — compile-time constant size of a type in bytes.
+    SizeOf(Type),
+    /// `offsetof(T, field)` — compile-time constant byte offset of a struct field.
+    OffsetOf { ty: Type, field: usize },
 }
 
 #[derive(Clone, Debug)]

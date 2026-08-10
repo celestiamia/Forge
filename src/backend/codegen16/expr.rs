@@ -64,6 +64,17 @@ impl<'p> CodeGen16<'p> {
                 self.eval_expr(trailing)?;
             }
             ExprKind::Asm { .. } => bail!("inline assembly is not supported by the 16-bit backend"),
+            ExprKind::SizeOf(ty) => {
+                let size = type_size_16(ty);
+                self.asm.mov16_imm(Reg16::Ax, size as u16);
+            }
+            ExprKind::OffsetOf { ty, field } => {
+                let off = match ty {
+                    Type::Struct(name) => self.field_offset(ty, *field)? as u16,
+                    _ => bail!("offsetof on non-struct type"),
+                };
+                self.asm.mov16_imm(Reg16::Ax, off);
+            }
         }
         Ok(())
     }

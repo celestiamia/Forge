@@ -71,18 +71,85 @@ impl LowerCtx<'_> {
             ast::Expr::Index(i) => self.lower_index(i),
             ast::Expr::Asm(a) => self.lower_asm(a),
             ast::Expr::Match(m) => self.lower_match_expr(m),
-            ast::Expr::SizeOf(_) => bail!("sizeof is not supported in the first milestone"),
-            ast::Expr::OffsetOf(_) => bail!("offsetof is not supported in the first milestone"),
+            ast::Expr::SizeOf(s) => {
+                let ty = self.lower_type(&s.ty)?;
+                Ok(ir::Expr::new(ir::ExprKind::SizeOf(ty), ir::Type::U64))
+            }
+            ast::Expr::OffsetOf(o) => {
+                let ty = self.lower_type(&o.ty)?;
+                let field_idx = match &ty {
+                    ir::Type::Struct(name) => {
+                        let def = self.structs.get(name)
+                            .ok_or_else(|| anyhow::anyhow!("unknown struct: {}", name))?;
+                        def.fields.iter().position(|(n, _)| n == &o.field)
+                            .ok_or_else(|| anyhow::anyhow!("unknown field {}.{}", name, o.field))?
+                    }
+                    _ => bail!("offsetof on non-struct type"),
+                };
+                Ok(ir::Expr::new(ir::ExprKind::OffsetOf { ty, field: field_idx }, ir::Type::U64))
+            }
             ast::Expr::If(_) => bail!("if-expressions are not supported in the first milestone"),
             ast::Expr::Block(_) => bail!("block expressions are not supported in the first milestone"),
             ast::Expr::Loop(_) => bail!("loop expressions are not supported in the first milestone"),
             ast::Expr::Break => bail!("break is not supported in expression position"),
             ast::Expr::Continue => bail!("continue is not supported in expression position"),
             ast::Expr::Tuple(_) => bail!("tuples are not supported in the first milestone"),
-            ast::Expr::Array(_) => bail!("array literals are not supported in the first milestone"),
+            ast::Expr::Array(elems) => {
+                if elems.is_empty() {
+                    bail!("empty array literals are not supported");
+                }
+                let elem_ty = self.lower_expr(&elems[0])?.ty.clone();
+                let count = elems.len();
+                let ptr_ty = ir::Type::Ptr(Box::new(elem_ty.clone()));
+
+                // Allocate stack space
+                let slot_name = self.fresh_temp("$arr");
+                let mut stmts = vec![ir::Stmt::StackAlloc {
+                    name: slot_name.clone(),
+                    elem_ty: elem_ty.clone(),
+                    count,
+                }];
+
+                // Store each element using pointer arithmetic
+                for (i, elem) in elems.iter().enumerate() {
+                    let value = self.lower_expr(elem)?;
+                    let var_expr = ir::Expr::new(
+                        ir::ExprKind::Var(slot_name.clone()),
+                        ptr_ty.clone(),
+                    );
+                    let idx_expr = ir::Expr::new(
+                        ir::ExprKind::Lit(ir::Literal::Int(i as i64)),
+                        ir::Type::I64,
+                    );
+                    let addr = ir::Expr::new(
+                        ir::ExprKind::Bin {
+                            op: ir::BinOp::Add,
+                            left: Box::new(var_expr),
+                            right: Box::new(idx_expr),
+                        },
+                        ptr_ty.clone(),
+                    );
+                    stmts.push(ir::Stmt::Assign {
+                        lhs: ir::LValue::Deref(addr),
+                        rhs: value,
+                    });
+                }
+
+                // Return a block expression yielding the pointer
+                let result_expr = ir::Expr::new(
+                    ir::ExprKind::Var(slot_name),
+                    ptr_ty.clone(),
+                );
+                Ok(ir::Expr::new(
+                    ir::ExprKind::Block(stmts, Box::new(result_expr)),
+                    ptr_ty,
+                ))
+            }
             ast::Expr::Range(_) => bail!("range expressions are only allowed in for-loops"),
             ast::Expr::RefMut(_) => bail!("refmut expressions are not supported in the first milestone"),
-            ast::Expr::StructLiteral { .. } => bail!("struct literals are not supported in the first milestone"),
+            ast::Expr::StructLiteral { name, fields } => {
+                self.lower_struct_literal(name, fields)
+            }
             ast::Expr::UnsafeBlock(_) => bail!("unsafe block expressions are not supported in the first milestone"),
         }
     }

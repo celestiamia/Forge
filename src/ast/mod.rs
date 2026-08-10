@@ -1,9 +1,34 @@
 //! Abstract syntax tree for the Forge language.
 //!
 //! The AST is intentionally plain: paths are represented as `Vec<String>`,
-//! recursive nodes use `Box`, and nodes do not carry source spans.  This keeps
-//! the parser focused on syntax while still providing enough structure for
-//! downstream analysis.
+//! recursive nodes use `Box`, and expression nodes carry source spans for
+//! error reporting.  This keeps the parser focused on syntax while still
+//! providing enough structure for downstream analysis.
+
+// ---------------------------------------------------------------------------
+// Source spans
+// ---------------------------------------------------------------------------
+
+/// A source span: 1-based line and column numbers marking a region of source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Span {
+    pub line: usize,
+    pub col: usize,
+}
+
+impl Span {
+    pub fn new(line: usize, col: usize) -> Self {
+        Self { line, col }
+    }
+
+    pub fn unknown() -> Self {
+        Self { line: 0, col: 0 }
+    }
+
+    pub fn is_unknown(&self) -> bool {
+        self.line == 0 && self.col == 0
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Module
@@ -276,8 +301,42 @@ pub enum Expr {
     Continue,
 }
 
+impl Expr {
+    /// Return the source span of this expression, if available.
+    pub fn span(&self) -> Option<Span> {
+        match self {
+            Expr::Binary(e) => Some(e.span),
+            Expr::Unary(e) => Some(e.span),
+            Expr::Call(e) => Some(e.span),
+            Expr::Field(e) => Some(e.span),
+            Expr::Index(e) => Some(e.span),
+            Expr::Cast(e) => Some(e.span),
+            Expr::Asm(e) => Some(e.span),
+            Expr::SizeOf(e) => Some(e.span),
+            Expr::OffsetOf(e) => Some(e.span),
+            Expr::Deref(e) => Some(e.span),
+            Expr::Ref(e) => Some(e.span),
+            Expr::RefMut(e) => Some(e.span),
+            Expr::If(e) => Some(e.span),
+            Expr::Match(e) => Some(e.span),
+            Expr::Range(e) => Some(e.span),
+            Expr::StructLiteral { .. }
+            | Expr::Literal(_)
+            | Expr::Ident(_)
+            | Expr::Tuple(_)
+            | Expr::Array(_)
+            | Expr::Block(_)
+            | Expr::UnsafeBlock(_)
+            | Expr::Loop(_)
+            | Expr::Break
+            | Expr::Continue => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BinaryExpr {
+    pub span: Span,
     pub op: BinOp,
     pub left: Box<Expr>,
     pub right: Box<Expr>,
@@ -285,36 +344,42 @@ pub struct BinaryExpr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnaryExpr {
+    pub span: Span,
     pub op: UnOp,
     pub operand: Box<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallExpr {
+    pub span: Span,
     pub callee: Box<Expr>,
     pub args: Vec<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldExpr {
+    pub span: Span,
     pub object: Box<Expr>,
     pub field: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexExpr {
+    pub span: Span,
     pub object: Box<Expr>,
     pub index: Box<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CastExpr {
+    pub span: Span,
     pub expr: Box<Expr>,
     pub ty: Box<TypeExpr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AsmExpr {
+    pub span: Span,
     pub template: String,
     pub inputs: Vec<AsmOperand>,
     pub outputs: Vec<AsmOperand>,
@@ -329,22 +394,26 @@ pub struct AsmOperand {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SizeOfExpr {
+    pub span: Span,
     pub ty: TypeExpr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OffsetOfExpr {
+    pub span: Span,
     pub ty: TypeExpr,
     pub field: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DerefExpr {
+    pub span: Span,
     pub expr: Box<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RefExpr {
+    pub span: Span,
     pub expr: Box<Expr>,
 }
 
@@ -352,6 +421,7 @@ pub type RefMutExpr = RefExpr;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RangeExpr {
+    pub span: Span,
     pub start: Option<Box<Expr>>,
     pub end: Option<Box<Expr>>,
     pub inclusive: bool,
@@ -359,6 +429,7 @@ pub struct RangeExpr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IfExpr {
+    pub span: Span,
     pub condition: Box<Expr>,
     pub then_block: Block,
     pub else_block: Option<Block>,
@@ -366,6 +437,7 @@ pub struct IfExpr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchExpr {
+    pub span: Span,
     pub scrutinee: Box<Expr>,
     pub cases: Vec<MatchCase>,
 }

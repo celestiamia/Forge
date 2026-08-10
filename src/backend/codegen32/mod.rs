@@ -246,6 +246,17 @@ mod layout;
 mod runtime;
 
 impl<'p> CodeGen<'p> {
+    pub(super) fn type_size_bytes(&self, ty: &Type) -> usize {
+        match ty {
+            Type::Struct(name) => {
+                self.struct_layouts.get(name)
+                    .map(|l| l.size)
+                    .unwrap_or_else(|| type_size(ty))
+            }
+            _ => type_size(ty),
+        }
+    }
+
     pub(super) fn new(prog: &'p Program) -> Self {
         let mut layouts = HashMap::new();
         for s in &prog.structs {

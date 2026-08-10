@@ -497,6 +497,10 @@ pub fn idiv(buf: &mut Vec<u8>, rm: Operand) {
     encode_unary(buf, 7, rm, 0xF7);
 }
 
+pub fn udiv(buf: &mut Vec<u8>, rm: Operand) {
+    encode_unary(buf, 6, rm, 0xF7);
+}
+
 fn encode_shift_rm64_imm8(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand, imm: i8) {
     let ext = match op {
         ShiftOp::Shl => 4,
@@ -577,6 +581,130 @@ pub fn movsxd_r64_rm32(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
     rex.emit(buf);
     buf.push(0x63);
     buf.extend(suffix);
+}
+
+// ----------------------------------------------------------------------------
+// SSE scalar floating-point encoders
+// ----------------------------------------------------------------------------
+
+/// `movsd xmm, xmm` (double-precision move)
+pub fn movsd_xmm_xmm(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+    buf.push(0xF2);
+    let mut rex = Rex::new(false);
+    rex.r = dst.is_high();
+    rex.b = src.is_high();
+    rex.emit(buf);
+    buf.push(0x0F);
+    buf.push(0x10);
+    buf.push(modrm(0b11, dst.enc(), src.enc()));
+}
+
+/// `movsd xmm, m64` (load double from memory)
+pub fn movsd_xmm_mem(buf: &mut Vec<u8>, dst: Reg, src: Mem) {
+    buf.push(0xF2);
+    let mut rex = Rex::new(false);
+    rex.r = dst.is_high();
+    let suffix = modrm_mem_suffix(&mut rex, dst.enc(), src);
+    rex.emit(buf);
+    buf.push(0x0F);
+    buf.push(0x10);
+    buf.extend(suffix);
+}
+
+/// `movsd m64, xmm` (store double to memory)
+pub fn movsd_mem_xmm(buf: &mut Vec<u8>, dst: Mem, src: Reg) {
+    buf.push(0xF2);
+    let mut rex = Rex::new(false);
+    rex.r = src.is_high();
+    let suffix = modrm_mem_suffix(&mut rex, src.enc(), dst);
+    rex.emit(buf);
+    buf.push(0x0F);
+    buf.push(0x11);
+    buf.extend(suffix);
+}
+
+/// `addsd xmm, xmm` (double-precision add)
+pub fn addsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+    buf.push(0xF2);
+    let mut rex = Rex::new(false);
+    rex.r = dst.is_high();
+    rex.b = src.is_high();
+    rex.emit(buf);
+    buf.push(0x0F);
+    buf.push(0x58);
+    buf.push(modrm(0b11, dst.enc(), src.enc()));
+}
+
+/// `subsd xmm, xmm` (double-precision subtract)
+pub fn subsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+    buf.push(0xF2);
+    let mut rex = Rex::new(false);
+    rex.r = dst.is_high();
+    rex.b = src.is_high();
+    rex.emit(buf);
+    buf.push(0x0F);
+    buf.push(0x5C);
+    buf.push(modrm(0b11, dst.enc(), src.enc()));
+}
+
+/// `mulsd xmm, xmm` (double-precision multiply)
+pub fn mulsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+    buf.push(0xF2);
+    let mut rex = Rex::new(false);
+    rex.r = dst.is_high();
+    rex.b = src.is_high();
+    rex.emit(buf);
+    buf.push(0x0F);
+    buf.push(0x59);
+    buf.push(modrm(0b11, dst.enc(), src.enc()));
+}
+
+/// `divsd xmm, xmm` (double-precision divide)
+pub fn divsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+    buf.push(0xF2);
+    let mut rex = Rex::new(false);
+    rex.r = dst.is_high();
+    rex.b = src.is_high();
+    rex.emit(buf);
+    buf.push(0x0F);
+    buf.push(0x5E);
+    buf.push(modrm(0b11, dst.enc(), src.enc()));
+}
+
+/// `cvtsi2sd xmm, r64` (convert signed int to double)
+pub fn cvtsi2sd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+    buf.push(0xF2);
+    let mut rex = Rex::new(true);
+    rex.r = dst.is_high();
+    rex.b = src.is_high();
+    rex.emit(buf);
+    buf.push(0x0F);
+    buf.push(0x2A);
+    buf.push(modrm(0b11, dst.enc(), src.enc()));
+}
+
+/// `cvttsd2si r64, xmm` (convert double to signed int with truncation)
+pub fn cvttsd2si(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+    buf.push(0xF2);
+    let mut rex = Rex::new(true);
+    rex.r = dst.is_high();
+    rex.b = src.is_high();
+    rex.emit(buf);
+    buf.push(0x0F);
+    buf.push(0x2C);
+    buf.push(modrm(0b11, dst.enc(), src.enc()));
+}
+
+/// `ucomisd xmm, xmm` (unordered compare double)
+pub fn ucomisd(buf: &mut Vec<u8>, a: Reg, b: Reg) {
+    buf.push(0x66);
+    let mut rex = Rex::new(false);
+    rex.r = a.is_high();
+    rex.b = b.is_high();
+    rex.emit(buf);
+    buf.push(0x0F);
+    buf.push(0x2E);
+    buf.push(modrm(0b11, a.enc(), b.enc()));
 }
 
 /// Encode a generic `Inst` to bytes. This is the high-level dispatcher.

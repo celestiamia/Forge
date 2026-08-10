@@ -231,6 +231,10 @@ pub enum TypedExprKind {
     Loop(TypedBlock),
     Break,
     Continue,
+    StructLiteral {
+        name: String,
+        fields: Vec<(String, TypedExpr)>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

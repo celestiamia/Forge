@@ -199,18 +199,17 @@ impl<'a> LowerCtx<'a> {
             ast::TypeExpr::Name(n) => match n.as_str() {
                 "void" => Ok(ir::Type::Void),
                 "bool" => Ok(ir::Type::Bool),
-                "int8" => Ok(ir::Type::I8),
-                "int16" => Ok(ir::Type::I16),
-                "int32" => Ok(ir::Type::I32),
-                "int64" => Ok(ir::Type::I64),
-                "uint8" => Ok(ir::Type::U8),
-                "uint16" => Ok(ir::Type::U16),
-                "uint32" => Ok(ir::Type::U32),
-                "uint64" => Ok(ir::Type::U64),
-                "float32" => Ok(ir::Type::F32),
-                "float64" => Ok(ir::Type::F64),
+                "i8" | "int8" => Ok(ir::Type::I8),
+                "i16" | "int16" => Ok(ir::Type::I16),
+                "i32" | "int32" | "int" => Ok(ir::Type::I32),
+                "i64" | "int64" => Ok(ir::Type::I64),
+                "u8" | "uint8" | "byte" => Ok(ir::Type::U8),
+                "u16" | "uint16" => Ok(ir::Type::U16),
+                "u32" | "uint32" | "uint" => Ok(ir::Type::U32),
+                "u64" | "uint64" => Ok(ir::Type::U64),
+                "f32" | "float32" => Ok(ir::Type::F32),
+                "f64" | "float64" | "float" => Ok(ir::Type::F64),
                 "char" => Ok(ir::Type::Char),
-                "byte" => Ok(ir::Type::U8),
                 "usize" => Ok(ir::Type::U64),
                 "isize" => Ok(ir::Type::I64),
                 other => {
@@ -225,7 +224,12 @@ impl<'a> LowerCtx<'a> {
             | ast::TypeExpr::Own(inner)
             | ast::TypeExpr::Ref(inner)
             | ast::TypeExpr::RefMut(inner) => Ok(ir::Type::Ptr(Box::new(self.lower_type(inner)?))),
-            ast::TypeExpr::Slice(_) => bail!("slices are not supported in the first milestone"),
+            ast::TypeExpr::Slice(inner) => {
+                // Represent a slice as a pointer to the element type.
+                // For the first milestone, we lose the length information.
+                let elem = self.lower_type(inner)?;
+                Ok(ir::Type::Ptr(Box::new(elem)))
+            }
             ast::TypeExpr::Array(inner, size) => {
                 let _count = match &size.as_ref() {
                     ast::Expr::Literal(ast::Literal::Int(n)) => *n as usize,
@@ -250,6 +254,69 @@ impl<'a> LowerCtx<'a> {
 
     fn infer_expr_type(&self, expr: &ir::Expr) -> Result<ir::Type> {
         Ok(expr.ty.clone())
+    }
+
+    fn lower_struct_literal(
+        &mut self,
+        name: &str,
+        fields: &Vec<(String, ast::Expr)>,
+    ) -> Result<ir::Expr> {
+        let struct_def = self.structs.get(name)
+            .ok_or_else(|| anyhow::anyhow!("unknown struct: {}", name))?
+            .clone();
+        let ptr_ty = ir::Type::Ptr(Box::new(ir::Type::Struct(name.to_string())));
+
+        // Calculate struct size (sum of field sizes, rounded up to 8)
+        let total_size: usize = struct_def.fields.iter().map(|(_, ty)| {
+            match ty {
+                ir::Type::I8 | ir::Type::U8 | ir::Type::Char | ir::Type::Bool => 1,
+                ir::Type::I16 | ir::Type::U16 => 2,
+                ir::Type::I32 | ir::Type::U32 | ir::Type::F32 => 4,
+                _ => 8,
+            }
+        }).sum();
+        let count = ((total_size + 7) / 8).max(1);
+
+        // Allocate stack space for the struct
+        let slot_name = self.fresh_temp("$struct");
+        let mut stmts = vec![ir::Stmt::StackAlloc {
+            name: slot_name.clone(),
+            elem_ty: ir::Type::I64,
+            count,
+        }];
+
+        // Store each field at its offset
+        for (fname, expr) in fields {
+            let value = self.lower_expr(expr)?;
+            let idx = struct_def.fields.iter().position(|(n, _)| n == fname)
+                .ok_or_else(|| anyhow::anyhow!("unknown field {}.{}", name, fname))?;
+
+            let var_expr = ir::Expr::new(
+                ir::ExprKind::Var(slot_name.clone()),
+                ptr_ty.clone(),
+            );
+            let gep = ir::Expr::new(
+                ir::ExprKind::Gep {
+                    base: Box::new(var_expr),
+                    field: idx,
+                },
+                ptr_ty.clone(),
+            );
+            stmts.push(ir::Stmt::Assign {
+                lhs: ir::LValue::Deref(gep),
+                rhs: value,
+            });
+        }
+
+        // Return a block expression that yields the pointer to the struct
+        let result_expr = ir::Expr::new(
+            ir::ExprKind::Var(slot_name),
+            ptr_ty.clone(),
+        );
+        Ok(ir::Expr::new(
+            ir::ExprKind::Block(stmts, Box::new(result_expr)),
+            ptr_ty,
+        ))
     }
 }
 

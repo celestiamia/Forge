@@ -85,11 +85,22 @@ impl Context {
             Expr::Array(a) => {
                 let mut elems = Vec::new();
                 let mut elem_ty = Type::Unknown;
+                // When the expected type is a pointer, treat the array literal
+                // as a pointer to the element type (matching the IR representation).
+                let is_ptr_expected = matches!(expected, Some(t) if t.is_pointer());
                 if let Some(Type::Array { elem: expected_elem, .. }) = expected {
-                    elem_ty = *expected_elem.clone();
-                    for e in a {
-                        let te = self.check_expr(e, Some(&elem_ty));
-                        elems.push(te);
+                    if !is_ptr_expected {
+                        elem_ty = *expected_elem.clone();
+                        for e in a {
+                            let te = self.check_expr(e, Some(&elem_ty));
+                            elems.push(te);
+                        }
+                    } else {
+                        elem_ty = *expected_elem.clone();
+                        for e in a {
+                            let te = self.check_expr(e, Some(&elem_ty));
+                            elems.push(te);
+                        }
                     }
                 } else {
                     for (i, e) in a.iter().enumerate() {
@@ -100,7 +111,24 @@ impl Context {
                         elems.push(te);
                     }
                 }
-                let ty = Type::array(elem_ty.clone(), elems.len() as u64);
+                let ty = if is_ptr_expected {
+                    // Find the pointee type from the expected pointer
+                    match expected {
+                        Some(t) if t.is_pointer() => {
+                            // Extract the inner type from the pointer
+                            if let Type::Pointer { pointee } = t {
+                                Type::pointer(*pointee.clone())
+                            } else if let Type::Ref { pointee } = t {
+                                Type::pointer(*pointee.clone())
+                            } else {
+                                Type::pointer(elem_ty.clone())
+                            }
+                        }
+                        _ => Type::pointer(elem_ty.clone()),
+                    }
+                } else {
+                    Type::array(elem_ty.clone(), elems.len() as u64)
+                };
                 TypedExpr::new(TypedExprKind::Array(elems), ty)
             }
             Expr::Range(r) => {
@@ -131,9 +159,39 @@ impl Context {
             Expr::Break => TypedExpr::new(TypedExprKind::Break, Type::Unknown),
             Expr::Continue => TypedExpr::new(TypedExprKind::Continue, Type::Unknown),
             Expr::StructLiteral { name, fields } => {
-                let _ = (name, fields);
-                self.error("struct literals are not supported in the first milestone".to_string());
-                TypedExpr::new(TypedExprKind::Literal(Literal::Null), Type::Unknown)
+                let struct_info = self.adts.get(name).cloned();
+                if let Some(info) = struct_info {
+                    if info.kind != AdtKind::Struct {
+                        self.error(format!("`{}` is not a struct type", name));
+                    }
+                    let mut field_values = Vec::new();
+                    for (fname, expr) in fields {
+                        if let Some(finfo) = info.fields.iter().find(|f| &f.name == fname) {
+                            let te = self.check_expr(expr, Some(&finfo.ty));
+                            if !compatible(&finfo.ty, &te.ty) && !te.ty.is_unknown() {
+                                self.error(format!(
+                                    "field `{}` expected `{}`, found `{}`",
+                                    fname, finfo.ty, te.ty
+                                ));
+                            }
+                            field_values.push((fname.clone(), te));
+                        } else {
+                            self.error(format!("struct `{}` has no field `{}`", name, fname));
+                            field_values.push((fname.clone(), self.check_expr(expr, None)));
+                        }
+                    }
+                    let ty = Type::Struct {
+                        name: name.clone(),
+                        fields: info.fields.clone(),
+                    };
+                    TypedExpr::new(
+                        TypedExprKind::StructLiteral { name: name.clone(), fields: field_values },
+                        ty,
+                    )
+                } else {
+                    self.error(format!("unknown struct type `{}`", name));
+                    TypedExpr::new(TypedExprKind::Literal(Literal::Null), Type::Unknown)
+                }
             }
             Expr::UnsafeBlock(b) => {
                 let old = self.in_unsafe;

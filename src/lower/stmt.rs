@@ -142,6 +142,19 @@ impl LowerCtx<'_> {
         ty: ir::Type,
         init: Option<ir::Expr>,
     ) -> Result<Vec<ir::Stmt>> {
+        // If the initializer is a struct literal, inline its block and bind
+        // the resulting pointer to the variable.
+        if let Some(ir::Expr { kind: ir::ExprKind::Block(stmts, result), .. }) = init {
+            let mut stmts = stmts.clone();
+            let var_ty = result.ty.clone();
+            stmts.push(ir::Stmt::Let {
+                name: name.to_string(),
+                ty: var_ty.clone(),
+                init: Some(*result.clone()),
+            });
+            self.vars.insert(name.to_string(), var_ty);
+            return Ok(stmts);
+        }
         if let Some(ast::TypeExpr::Array(elem, size)) = declared {
             let count = match size.as_ref() {
                 ast::Expr::Literal(ast::Literal::Int(n)) => *n as usize,

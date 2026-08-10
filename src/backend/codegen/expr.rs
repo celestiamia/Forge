@@ -11,7 +11,10 @@ impl<'p> CodeGen<'p> {
                     let lab = self.string_label(s);
                     self.asm.lea_rip(Reg::Rax, lab);
                 }
-                Literal::Float(_) => bail!("floating point is not implemented in the x64 backend"),
+                Literal::Float(v) => {
+                    let bits = v.to_bits();
+                    self.asm.movabs(Reg::Rax, bits);
+                }
                 Literal::Null => self.asm.mov(Reg::Rax, 0i32),
             },
             ExprKind::Var(name) => {
@@ -43,6 +46,11 @@ impl<'p> CodeGen<'p> {
                             .lea(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset));
                         self.load_from_addr(&e.ty)?;
                     }
+                    Type::F32 | Type::F64 => {
+                        // Load float bits from stack into RAX
+                        self.asm
+                            .mov(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset));
+                    }
                     _ => {
                         self.asm
                             .mov(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset));
@@ -72,6 +80,17 @@ impl<'p> CodeGen<'p> {
                 self.eval_expr(trailing)?;
             }
             ExprKind::Asm { .. } => bail!("inline assembly is not implemented in the x64 backend"),
+            ExprKind::SizeOf(ty) => {
+                let size = self.type_size_bytes(ty);
+                self.asm.mov(Reg::Rax, size as i32);
+            }
+            ExprKind::OffsetOf { ty, field } => {
+                let off = match ty {
+                    Type::Struct(name) => self.field_offset(name, *field)?,
+                    _ => bail!("offsetof on non-struct type"),
+                };
+                self.asm.mov(Reg::Rax, off as i32);
+            }
         }
         Ok(())
     }
@@ -79,6 +98,11 @@ impl<'p> CodeGen<'p> {
     pub(super) fn eval_bin(&mut self, op: BinOp, left: &Expr, right: &Expr, _ty: &Type) -> Result<()> {
         if op.is_logical() {
             return self.eval_logical(op, left, right);
+        }
+
+        // Floating-point arithmetic: route through SSE
+        if left.ty.is_float() && (op.is_arithmetic() || op.is_comparison()) {
+            return self.eval_float_bin(op, left, right);
         }
 
         self.eval_expr(left)?;
@@ -127,13 +151,15 @@ impl<'p> CodeGen<'p> {
                     self.asm.imul(Reg::Rax, Reg::Rdx);
                 }
                 BinOp::Div | BinOp::Mod => {
-                    if !left.ty.is_signed() {
-                        bail!("unsigned division is not implemented in the x64 backend");
-                    }
                     self.asm.mov(Reg::R11, Reg::Rax);
                     self.asm.mov(Reg::Rax, Reg::R10); // dividend
-                    self.asm.cqo();
-                    self.asm.idiv(Reg::R11);
+                    if left.ty.is_signed() {
+                        self.asm.cqo();
+                        self.asm.idiv(Reg::R11);
+                    } else {
+                        self.asm.xor(Reg::Rdx, Reg::Rdx);
+                        self.asm.div(Reg::R11);
+                    }
                     if op == BinOp::Mod {
                         self.asm.mov(Reg::Rax, Reg::Rdx); // remainder
                     }
@@ -167,6 +193,65 @@ impl<'p> CodeGen<'p> {
         let cond = cond_for_cmp(op, &left.ty)?;
         self.asm.setcc(cond, Reg::Rax.r8());
         self.asm.movzx8(Reg::Rax, Reg::Rax);
+        Ok(())
+    }
+
+    pub(super) fn eval_float_bin(&mut self, op: BinOp, left: &Expr, right: &Expr) -> Result<()> {
+        // Evaluate left and right, each producing f64 bits in RAX.
+        // Move to XMM registers via stack, perform operation, return bits in RAX.
+        self.eval_expr(left)?;
+        self.asm.push(Reg::Rax);
+        self.asm.movsd_xmm_mem(Reg::Xmm0, Mem::base(Reg::Rsp)); // left -> XMM0
+        self.asm.pop(Reg::Rax);
+
+        self.eval_expr(right)?;
+        self.asm.push(Reg::Rax);
+        self.asm.movsd_xmm_mem(Reg::Xmm1, Mem::base(Reg::Rsp)); // right -> XMM1
+        self.asm.pop(Reg::Rax);
+
+        match op {
+            BinOp::Add => self.asm.addsd(Reg::Xmm0, Reg::Xmm1),
+            BinOp::Sub => self.asm.subsd(Reg::Xmm0, Reg::Xmm1),
+            BinOp::Mul => self.asm.mulsd(Reg::Xmm0, Reg::Xmm1),
+            BinOp::Div => self.asm.divsd(Reg::Xmm0, Reg::Xmm1),
+            BinOp::Mod => {
+                // a mod b = a - (a/b)*b, but for simplicity: a - trunc(a/b)*b
+                // Use: XMM0 = a, XMM1 = b
+                // XMM2 = a / b
+                self.asm.movsd_xmm_xmm(Reg::Xmm2, Reg::Xmm0);
+                self.asm.divsd(Reg::Xmm2, Reg::Xmm1);
+                // Truncate to integer and back
+                self.asm.push(Reg::Rax);
+                self.asm.movsd_mem_xmm(Mem::base(Reg::Rsp), Reg::Xmm2);
+                self.asm.pop(Reg::Rax);
+                // For now, just do a - (a/b)*b using integer truncation
+                self.asm.cvttsd2si(Reg::Rax, Reg::Xmm2);
+                self.asm.cvtsi2sd(Reg::Xmm2, Reg::Rax);
+                self.asm.mulsd(Reg::Xmm2, Reg::Xmm1);
+                self.asm.subsd(Reg::Xmm0, Reg::Xmm2);
+            }
+            _ => {
+                // Comparison ops
+                self.asm.ucomisd(Reg::Xmm0, Reg::Xmm1);
+                let cond = match op {
+                    BinOp::Eq => Cond::E,
+                    BinOp::Ne => Cond::Ne,
+                    BinOp::Lt => Cond::B,  // below (unordered-safe: use B for lt)
+                    BinOp::Le => Cond::Be,
+                    BinOp::Gt => Cond::A,
+                    BinOp::Ge => Cond::Ae,
+                    _ => unreachable!(),
+                };
+                self.asm.setcc(cond, Reg::Rax.r8());
+                self.asm.movzx8(Reg::Rax, Reg::Rax);
+                return Ok(());
+            }
+        }
+
+        // Store XMM0 result to stack, load bits into RAX
+        self.asm.push(Reg::Rax);
+        self.asm.movsd_mem_xmm(Mem::base(Reg::Rsp), Reg::Xmm0);
+        self.asm.pop(Reg::Rax);
         Ok(())
     }
 
@@ -239,7 +324,33 @@ impl<'p> CodeGen<'p> {
                 self.asm.movzx8(Reg::Rax, Reg::Rax);
             }
             (Type::U16, _) if to.is_integer() => {
-                self.asm.movzx8(Reg::Rax, Reg::Rax); // movzx16 missing; use 8 as placeholder
+                self.asm.movzx16(Reg::Rax, Reg::Rax);
+            }
+            // Integer to float cast
+            (src, Type::F64) if src.is_integer() => {
+                // src is integer in RAX, convert to double in XMM0, return bits in RAX
+                self.asm.cvtsi2sd(Reg::Xmm0, Reg::Rax);
+                self.asm.push(Reg::Rax);
+                self.asm.movsd_mem_xmm(Mem::base(Reg::Rsp), Reg::Xmm0);
+                self.asm.pop(Reg::Rax);
+            }
+            (src, Type::F32) if src.is_integer() => {
+                self.asm.cvtsi2sd(Reg::Xmm0, Reg::Rax);
+                self.asm.push(Reg::Rax);
+                self.asm.movsd_mem_xmm(Mem::base(Reg::Rsp), Reg::Xmm0);
+                self.asm.pop(Reg::Rax);
+            }
+            // Float to integer cast
+            (Type::F64 | Type::F32, to) if to.is_integer() => {
+                // f64 bits in RAX, move to XMM, convert, result in RAX
+                self.asm.push(Reg::Rax);
+                self.asm.movsd_xmm_mem(Reg::Xmm0, Mem::base(Reg::Rsp));
+                self.asm.pop(Reg::Rax);
+                self.asm.cvttsd2si(Reg::Rax, Reg::Xmm0);
+            }
+            // Float to float (f32 <-> f64, treat as bits)
+            (Type::F32, Type::F64) | (Type::F64, Type::F32) => {
+                // For now, just pass through bits (both are 64-bit on stack)
             }
             (_, Type::I64 | Type::U64) => {}
             (_, _) => {}

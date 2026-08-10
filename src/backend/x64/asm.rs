@@ -376,6 +376,10 @@ impl Assembler {
         encode::idiv(&mut self.buf, rm.into_op());
     }
 
+    pub fn div(&mut self, rm: impl IntoOp) {
+        encode::udiv(&mut self.buf, rm.into_op());
+    }
+
     pub fn shl(&mut self, dst: impl IntoOp, imm: i8) {
         encode::shl_rm64_imm8(&mut self.buf, dst.into_op(), imm);
     }
@@ -446,5 +450,49 @@ impl Assembler {
 
     pub fn mfence(&mut self) {
         encode::mfence(&mut self.buf);
+    }
+
+    // ------------------------------------------------------------------------
+    // SSE scalar double-precision floating-point instructions
+    // ------------------------------------------------------------------------
+
+    pub fn movsd_xmm_xmm(&mut self, dst: Reg, src: Reg) {
+        encode::movsd_xmm_xmm(&mut self.buf, dst, src);
+    }
+
+    pub fn movsd_xmm_mem(&mut self, dst: Reg, src: Mem) {
+        encode::movsd_xmm_mem(&mut self.buf, dst, src);
+    }
+
+    pub fn movsd_mem_xmm(&mut self, dst: Mem, src: Reg) {
+        encode::movsd_mem_xmm(&mut self.buf, dst, src);
+    }
+
+    pub fn addsd(&mut self, dst: Reg, src: Reg) {
+        encode::addsd(&mut self.buf, dst, src);
+    }
+
+    pub fn subsd(&mut self, dst: Reg, src: Reg) {
+        encode::subsd(&mut self.buf, dst, src);
+    }
+
+    pub fn mulsd(&mut self, dst: Reg, src: Reg) {
+        encode::mulsd(&mut self.buf, dst, src);
+    }
+
+    pub fn divsd(&mut self, dst: Reg, src: Reg) {
+        encode::divsd(&mut self.buf, dst, src);
+    }
+
+    pub fn cvtsi2sd(&mut self, dst: Reg, src: Reg) {
+        encode::cvtsi2sd(&mut self.buf, dst, src);
+    }
+
+    pub fn cvttsd2si(&mut self, dst: Reg, src: Reg) {
+        encode::cvttsd2si(&mut self.buf, dst, src);
+    }
+
+    pub fn ucomisd(&mut self, a: Reg, b: Reg) {
+        encode::ucomisd(&mut self.buf, a, b);
     }
 }

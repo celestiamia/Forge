@@ -370,7 +370,8 @@ pub(super) fn emit_stmt(&mut self, s: &Stmt) -> Result<()> {
         let slot = if let Some(s) = self.locals.get(name) {
             s.clone()
         } else {
-            self.alloc_named_slot(name, 8, 8)
+            let (size, align) = self.var_size_align(ty);
+            self.alloc_named_slot(name, size, align)
         };
         if let Some(e) = init {
             self.eval_expr(e)?;
@@ -551,6 +552,34 @@ pub(super) fn type_size(ty: &Type) -> usize {
         Type::I64 | Type::U64 | Type::F64 | Type::Ptr(_) => 8,
         Type::Struct(name) => panic!("struct size for {} must come from layout table", name),
         _ => 8,
+    }
+}
+
+impl<'p> CodeGen<'p> {
+    pub(super) fn type_size_bytes(&self, ty: &Type) -> usize {
+        match ty {
+            Type::Struct(name) => {
+                self.struct_layouts.get(name)
+                    .map(|l| l.size)
+                    .unwrap_or_else(|| type_size(ty))
+            }
+            _ => type_size(ty),
+        }
+    }
+
+    /// Return the (size, align) for a local variable of the given type.
+    pub(super) fn var_size_align(&self, ty: &Type) -> (usize, usize) {
+        match ty {
+            Type::Struct(name) => {
+                if let Some(layout) = self.struct_layouts.get(name) {
+                    return (layout.size.max(8), layout.align.max(8));
+                }
+            }
+            _ => {}
+        }
+        let size = type_size(ty);
+        let align = type_align(ty);
+        (size.max(8), align.max(8))
     }
 }
 

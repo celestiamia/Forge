@@ -72,6 +72,11 @@ impl Parser {
             .unwrap_or((0, 0))
     }
 
+    pub(super) fn current_span(&self) -> Span {
+        let (line, col) = self.line_col();
+        Span::new(line, col)
+    }
+
     pub(super) fn error(&self, message: impl Into<String>) -> ParseError {
         let (line, col) = self.line_col();
         ParseError {
