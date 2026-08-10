@@ -16,9 +16,8 @@ pub def show(buf: ptr[char], n: int32) -> int32:
     return 0
 
 # Exercise the bump allocator together with the integer formatter across
-# zero, small positives, negatives, and multi-digit values.  INT32_MIN
-# (-2147483648) is deliberately avoided: its negation overflows int32 and is
-# not handled by the formatter.
+# zero, small positives, negatives, multi-digit values, and INT32_MIN
+# (-2147483648) which overflows int32 on negation (handled via int64).
 pub def main() -> int32:
     let buf: ptr[char] = alloc(16)
     if buf == null:
@@ -31,4 +30,5 @@ pub def main() -> int32:
     show(buf, 100)
     show(buf, 2147483647)
     show(buf, -2147483647)
+    show(buf, -2147483648)
     return 0

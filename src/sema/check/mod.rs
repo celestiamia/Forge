@@ -4,7 +4,7 @@
 //! `ast::Module`, producing a `TypedModule` where every expression is annotated
 //! with its resolved Forge type.
 
-use crate::sema::ast::{self, BinOp, Block, Expr, Import, Item, Literal, Pattern, Stmt, TypeExpr, UnOp};
+use crate::sema::ast::{self, BinOp, Block, Expr, Import, Item, Literal, Pattern, Span, Stmt, TypeExpr, UnOp};
 use crate::sema::error::{Error, Loc};
 use crate::sema::typed::*;
 use crate::ty::{Type, Field as TyField, Variant as TyVariant};
@@ -125,6 +125,19 @@ impl Context {
             self.file.as_ref().map(|f| Loc::with_file(f.clone())).unwrap_or_else(Loc::unknown),
             message,
         ));
+    }
+
+    pub(super) fn error_at(&mut self, span: ast::Span, message: impl Into<String>) {
+        let loc = if span.is_unknown() {
+            self.file.as_ref().map(|f| Loc::with_file(f.clone())).unwrap_or_else(Loc::unknown)
+        } else {
+            Loc {
+                file: self.file.clone(),
+                line: if span.line > 0 { Some(span.line) } else { None },
+                col: if span.col > 0 { Some(span.col) } else { None },
+            }
+        };
+        self.errors.push(Error::new(loc, message));
     }
 
     // Type expression resolution

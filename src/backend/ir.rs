@@ -21,6 +21,9 @@ pub enum Type {
     Void,
     Ptr(Box<Type>),
     Struct(String),
+    /// A slice: pointer to element type + length. Represented as a pair of
+    /// stack slots (data pointer, length) in the current IR.
+    Slice(Box<Type>),
 }
 
 impl Type {
@@ -42,6 +45,10 @@ impl Type {
 
     pub fn is_numeric(&self) -> bool {
         self.is_integer() || self.is_float()
+    }
+
+    pub fn is_slice(&self) -> bool {
+        matches!(self, Type::Slice(_))
     }
 
     pub fn width_bits(&self) -> u32 {
@@ -184,6 +191,8 @@ pub enum BinOp {
     Mul,
     Div,
     Mod,
+    FloorDiv,
+    Power,
     Eq,
     Ne,
     Lt,
@@ -201,7 +210,7 @@ pub enum BinOp {
 
 impl BinOp {
     pub fn is_arithmetic(&self) -> bool {
-        matches!(self, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod)
+        matches!(self, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::FloorDiv)
     }
     pub fn is_comparison(&self) -> bool {
         matches!(self, BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge)

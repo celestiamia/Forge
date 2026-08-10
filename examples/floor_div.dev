@@ -1,0 +1,16 @@
+package test
+from std.io import puts
+from std.fmt import format_i32
+from std.alloc import alloc
+pub def main() -> int32:
+    var buf: ptr[char] = alloc(16)
+    format_i32(buf, -7 // 2)
+    puts(buf)
+    puts("\n")
+    format_i32(buf, 7 // 2)
+    puts(buf)
+    puts("\n")
+    format_i32(buf, -10 // 3)
+    puts(buf)
+    puts("\n")
+    return 0

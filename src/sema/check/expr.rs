@@ -189,7 +189,7 @@ impl Context {
                         ty,
                     )
                 } else {
-                    self.error(format!("unknown struct type `{}`", name));
+                    self.error_at(expr.span().unwrap_or_else(Span::unknown), format!("unknown struct type `{}`", name));
                     TypedExpr::new(TypedExprKind::Literal(Literal::Null), Type::Unknown)
                 }
             }
@@ -237,10 +237,10 @@ impl Context {
             let target = self.check_expr(&b.left, None);
             let value = self.check_expr(&b.right, Some(&target.ty));
             if !self.is_mutable_lvalue(&target) {
-                self.error("cannot assign to immutable or non-lvalue expression".to_string());
+                self.error_at(b.span, "cannot assign to immutable or non-lvalue expression".to_string());
             }
             if !value.ty.is_unknown() && !target.ty.is_unknown() && value.ty != target.ty {
-                self.error(format!(
+                self.error_at(b.span, format!(
                     "assignment expected `{}`, found `{}`",
                     target.ty, value.ty
                 ));
@@ -260,10 +260,10 @@ impl Context {
                 let left = self.check_expr(&b.left, Some(&Type::Bool));
                 let right = self.check_expr(&b.right, Some(&Type::Bool));
                 if !left.ty.is_unknown() && left.ty != Type::Bool {
-                    self.error(format!("`{}` expected bool, found `{}`", op_name(b.op), left.ty));
+                    self.error_at(b.span, format!("`{}` expected bool, found `{}`", op_name(b.op), left.ty));
                 }
                 if !right.ty.is_unknown() && right.ty != Type::Bool {
-                    self.error(format!("`{}` expected bool, found `{}`", op_name(b.op), right.ty));
+                    self.error_at(b.span, format!("`{}` expected bool, found `{}`", op_name(b.op), right.ty));
                 }
                 (left, right, Type::Bool)
             }
@@ -292,7 +292,7 @@ impl Context {
                         && right.ty.is_pointer()
                         && (left_nullish || right_nullish));
                 if !compatible {
-                    self.error(format!(
+                    self.error_at(b.span, format!(
                         "comparison `{}` between incompatible types `{}` and `{}`",
                         op_name(b.op), left.ty, right.ty
                     ));
@@ -303,10 +303,10 @@ impl Context {
                 let left = self.check_expr(&b.left, expected.filter(|t| t.is_integer()));
                 let right = self.check_expr(&b.right, Some(&left.ty).filter(|t| t.is_integer()));
                 if !left.ty.is_unknown() && !left.ty.is_integer() {
-                    self.error(format!("bitwise op `{}` requires integer, found `{}`", op_name(b.op), left.ty));
+                    self.error_at(b.span, format!("bitwise op `{}` requires integer, found `{}`", op_name(b.op), left.ty));
                 }
                 if !right.ty.is_unknown() && !right.ty.is_integer() {
-                    self.error(format!("bitwise op `{}` requires integer, found `{}`", op_name(b.op), right.ty));
+                    self.error_at(b.span, format!("bitwise op `{}` requires integer, found `{}`", op_name(b.op), right.ty));
                 }
                 let result_ty = left.ty.clone();
                 (left, right, result_ty)
@@ -318,23 +318,23 @@ impl Context {
                 // Pointer arithmetic is allowed only inside unsafe blocks.
                 let result_ty = if left.ty.is_pointer() && right.ty.is_integer() {
                     if !self.in_unsafe {
-                        self.error("pointer arithmetic requires `unsafe`".to_string());
+                        self.error_at(b.span, "pointer arithmetic requires `unsafe`".to_string());
                     }
                     left.ty.clone()
                 } else if right.ty.is_pointer() && left.ty.is_integer() && b.op == Add {
                     if !self.in_unsafe {
-                        self.error("pointer arithmetic requires `unsafe`".to_string());
+                        self.error_at(b.span, "pointer arithmetic requires `unsafe`".to_string());
                     }
                     right.ty.clone()
                 } else {
                     if !left.ty.is_unknown() && !left.ty.is_numeric() {
-                        self.error(format!("arithmetic op `{}` requires numeric type, found `{}`", op_name(b.op), left.ty));
+                        self.error_at(b.span, format!("arithmetic op `{}` requires numeric type, found `{}`", op_name(b.op), left.ty));
                     }
                     if !right.ty.is_unknown() && !right.ty.is_numeric() {
-                        self.error(format!("arithmetic op `{}` requires numeric type, found `{}`", op_name(b.op), right.ty));
+                        self.error_at(b.span, format!("arithmetic op `{}` requires numeric type, found `{}`", op_name(b.op), right.ty));
                     }
                     if !left.ty.is_unknown() && !right.ty.is_unknown() && left.ty != right.ty {
-                        self.error(format!(
+                        self.error_at(b.span, format!(
                             "arithmetic `{}` between incompatible types `{}` and `{}`",
                             op_name(b.op), left.ty, right.ty
                         ));
@@ -344,11 +344,32 @@ impl Context {
                 (left, right, result_ty)
             }
             Assign => unreachable!("assignment handled above"),
-            FloorDiv | Power => {
-                self.error(format!("`{}` is not supported in the first milestone", op_name(b.op)));
-                let left = self.check_expr(&b.left, None);
-                let right = self.check_expr(&b.right, None);
-                (left, right, Type::Unknown)
+            FloorDiv => {
+                let left = self.check_expr(&b.left, expected.filter(|t| t.is_numeric()));
+                let right = self.check_expr(&b.right, Some(&left.ty).filter(|t| t.is_numeric()));
+                let result_ty = left.ty.clone();
+                if !left.ty.is_unknown() && !left.ty.is_numeric() {
+                    self.error_at(b.span, format!("floor division `{}` requires numeric type, found `{}`", op_name(b.op), left.ty));
+                }
+                if !right.ty.is_unknown() && !right.ty.is_numeric() {
+                    self.error_at(b.span, format!("floor division `{}` requires numeric type, found `{}`", op_name(b.op), right.ty));
+                }
+                if !left.ty.is_unknown() && !right.ty.is_unknown() && left.ty != right.ty {
+                    self.error_at(b.span, format!("floor division `{}` between incompatible types `{}` and `{}`", op_name(b.op), left.ty, right.ty));
+                }
+                (left, right, result_ty)
+            }
+            Power => {
+                let left = self.check_expr(&b.left, expected.filter(|t| t.is_numeric()));
+                let right = self.check_expr(&b.right, Some(&left.ty).filter(|t| t.is_numeric()));
+                let result_ty = left.ty.clone();
+                if !left.ty.is_unknown() && !left.ty.is_numeric() {
+                    self.error_at(b.span, format!("power operator `{}` requires numeric type, found `{}`", op_name(b.op), left.ty));
+                }
+                if !right.ty.is_unknown() && !right.ty.is_numeric() {
+                    self.error_at(b.span, format!("power operator `{}` requires numeric type, found `{}`", op_name(b.op), right.ty));
+                }
+                (left, right, result_ty)
             }
         };
 

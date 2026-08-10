@@ -151,6 +151,30 @@ impl<'p> CodeGen<'p> {
                         self.asm.mov(Reg::Eax, Reg::Edx); // remainder
                     }
                 }
+                BinOp::FloorDiv => {
+                    // Floor division: floor(a/b)
+                    self.asm.push(Reg::Eax);          // save divisor
+                    self.asm.mov(Reg::Eax, Reg::Ecx); // dividend
+                    if left.ty.is_signed() {
+                        self.asm.cdq();
+                        self.asm.pop(Reg::Ecx); // divisor
+                        self.asm.idiv(Reg::Ecx);
+                        // Adjust: if remainder != 0 and quotient < 0, quotient -= 1
+                        self.asm.push(Reg::Eax); // save quotient
+                        self.asm.test(Reg::Edx, Reg::Edx);
+                        let skip = self.asm.new_label();
+                        self.asm.je(skip);
+                        self.asm.pop(Reg::Eax);
+                        self.asm.test(Reg::Eax, Reg::Eax);
+                        self.asm.jcc(Cond::Ge, skip);
+                        self.asm.dec(Reg::Eax);
+                        self.bind_label(skip);
+                    } else {
+                        self.asm.xor(Reg::Edx, Reg::Edx);
+                        self.asm.pop(Reg::Ecx);
+                        self.asm.div(Reg::Ecx);
+                    }
+                }
                 _ => unreachable!(),
             }
             return Ok(());

@@ -404,7 +404,7 @@ impl Parser {
                 expr = Expr::StructLiteral { name, fields };
             } else if self.peek() == &Token::As {
                 self.advance();
-                let ty = self.parse_type()?;
+                let ty = self.parse_type_noskip()?;
                 expr = Expr::Cast(CastExpr { span: self.current_span(),
                     expr: Box::new(expr),
                     ty: Box::new(ty),

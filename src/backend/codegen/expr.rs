@@ -51,6 +51,12 @@ impl<'p> CodeGen<'p> {
                         self.asm
                             .mov(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset));
                     }
+                    Type::Slice(_) => {
+                        # [allow(unreachable_code)]
+                        // For now, just load the data pointer
+                        self.asm
+                            .mov(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset));
+                    }
                     _ => {
                         self.asm
                             .mov(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset));
@@ -162,6 +168,30 @@ impl<'p> CodeGen<'p> {
                     }
                     if op == BinOp::Mod {
                         self.asm.mov(Reg::Rax, Reg::Rdx); // remainder
+                    }
+                }
+                BinOp::FloorDiv => {
+                    // Floor division: floor(a/b)
+                    // For unsigned: same as trunc division
+                    // For signed: if remainder != 0 and quotient < 0, subtract 1
+                    self.asm.mov(Reg::R11, Reg::Rax); // divisor
+                    self.asm.mov(Reg::Rax, Reg::R10); // dividend
+                    if left.ty.is_signed() {
+                        self.asm.cqo();
+                        self.asm.idiv(Reg::R11); // rax = quotient, rdx = remainder
+                        // Adjust: if remainder != 0 and quotient < 0, quotient -= 1
+                        self.asm.push(Reg::Rax); // save quotient
+                        self.asm.test(Reg::Rdx, Reg::Rdx);
+                        let skip = self.asm.new_label();
+                        self.asm.je(skip); // remainder == 0, no adjustment
+                        self.asm.pop(Reg::Rax); // restore quotient
+                        self.asm.test(Reg::Rax, Reg::Rax);
+                        self.asm.jcc(Cond::Ge, skip); // quotient >= 0, signs were same
+                        self.asm.dec(Reg::Rax); // floor = trunc - 1
+                        self.bind_label(skip);
+                    } else {
+                        self.asm.xor(Reg::Rdx, Reg::Rdx);
+                        self.asm.div(Reg::R11);
                     }
                 }
                 _ => unreachable!(),
@@ -328,25 +358,25 @@ impl<'p> CodeGen<'p> {
             }
             // Integer to float cast
             (src, Type::F64) if src.is_integer() => {
-                // src is integer in RAX, convert to double in XMM0, return bits in RAX
-                self.asm.cvtsi2sd(Reg::Xmm0, Reg::Rax);
+                // src is integer in RAX, convert to double in XMM7, return bits in RAX
+                self.asm.cvtsi2sd(Reg::Xmm7, Reg::Rax);
                 self.asm.push(Reg::Rax);
-                self.asm.movsd_mem_xmm(Mem::base(Reg::Rsp), Reg::Xmm0);
+                self.asm.movsd_mem_xmm(Mem::base(Reg::Rsp), Reg::Xmm7);
                 self.asm.pop(Reg::Rax);
             }
             (src, Type::F32) if src.is_integer() => {
-                self.asm.cvtsi2sd(Reg::Xmm0, Reg::Rax);
+                self.asm.cvtsi2sd(Reg::Xmm7, Reg::Rax);
                 self.asm.push(Reg::Rax);
-                self.asm.movsd_mem_xmm(Mem::base(Reg::Rsp), Reg::Xmm0);
+                self.asm.movsd_mem_xmm(Mem::base(Reg::Rsp), Reg::Xmm7);
                 self.asm.pop(Reg::Rax);
             }
             // Float to integer cast
             (Type::F64 | Type::F32, to) if to.is_integer() => {
                 // f64 bits in RAX, move to XMM, convert, result in RAX
                 self.asm.push(Reg::Rax);
-                self.asm.movsd_xmm_mem(Reg::Xmm0, Mem::base(Reg::Rsp));
+                self.asm.movsd_xmm_mem(Reg::Xmm7, Mem::base(Reg::Rsp));
                 self.asm.pop(Reg::Rax);
-                self.asm.cvttsd2si(Reg::Rax, Reg::Xmm0);
+                self.asm.cvttsd2si(Reg::Rax, Reg::Xmm7);
             }
             // Float to float (f32 <-> f64, treat as bits)
             (Type::F32, Type::F64) | (Type::F64, Type::F32) => {

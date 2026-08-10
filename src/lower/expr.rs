@@ -173,6 +173,22 @@ impl LowerCtx<'_> {
     }
 
     fn lower_binary(&mut self, b: &ast::BinaryExpr) -> Result<ir::Expr> {
+        // Power desugars to a runtime call
+       if b.op == ast::BinOp::Power {
+            let left = self.lower_expr(&b.left)?;
+            let right = self.lower_expr(&b.right)?;
+            if !left.ty.is_integer() || !right.ty.is_integer() {
+                bail!("power operator requires integer operands, found `{:?}` and `{:?}`", left.ty, right.ty);
+            }
+            let ty = left.ty.clone();
+            return Ok(ir::Expr::new(
+                ir::ExprKind::Call {
+                    func: "__forge_pow".to_string(),
+                    args: vec![left, right],
+                },
+                ty,
+            ));
+        }
         let left = self.lower_expr(&b.left)?;
         let right = self.lower_expr(&b.right)?;
         let op = self.lower_binop(b.op)?;
@@ -379,8 +395,8 @@ impl LowerCtx<'_> {
             ast::BinOp::Gt => Ok(ir::BinOp::Gt),
             ast::BinOp::Ge => Ok(ir::BinOp::Ge),
             ast::BinOp::Assign => bail!("assignment is a statement, not an expression"),
-            ast::BinOp::FloorDiv => bail!("floor division is not supported in the first milestone"),
-            ast::BinOp::Power => bail!("power operator is not supported in the first milestone"),
+            ast::BinOp::FloorDiv => Ok(ir::BinOp::FloorDiv),
+            ast::BinOp::Power => Ok(ir::BinOp::Power),
         }
     }
 }

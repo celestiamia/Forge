@@ -1,20 +1,19 @@
 package std.fmt
 
-# Format a signed 32-bit integer as decimal text into `buf`, null-terminated.
+# Format a signed integer as decimal text into `buf`, null-terminated.
 #
 # Returns the number of characters written, excluding the null terminator.
-# The buffer must hold at least 12 bytes (sign + 10 digits + null).  The value
-# INT32_MIN (-2147483648) is not handled because its negation overflows int32.
+# The buffer must hold at least 12 bytes (sign + 10 digits + null).
 pub def format_i32(buf: ptr[char], value: int32) -> uint64:
     var neg: uint8 = 0
-    var v: int32 = value
+    var v: int64 = value as int64
     if v < 0:
         neg = 1
         v = 0 - v
 
     # Count the decimal digits of the magnitude.
     var n: uint64 = 0
-    var t: int32 = v
+    var t: int64 = v
     if t == 0:
         n = 1
     else:
@@ -36,14 +35,84 @@ pub def format_i32(buf: ptr[char], value: int32) -> uint64:
             idx = idx - 1
             *(buf + idx) = 48 as char
         else:
+            var d: int64 = 0
             while v > 0:
                 idx = idx - 1
-                var d: int32 = v % 10
-                *(buf + idx) = (48 + d) as char
+                d = v % 10
+                *(buf + idx) = (48 + (d as int32)) as char
                 v = v / 10
 
         if neg != 0:
             idx = idx - 1
             *(buf + idx) = 45 as char
+
+    return total
+
+# Format a 64-bit float as decimal text into `buf`, null-terminated.
+#
+# Writes up to 6 decimal places.  The buffer must hold at least 24 bytes.
+# Returns the number of characters written, excluding the null terminator.
+pub def format_f64(buf: ptr[char], value: float64) -> uint64:
+    var neg: uint8 = 0
+    var v: float64 = value
+    if v < 0.0:
+        neg = 1
+        v = 0.0 - v
+
+    # Split into integer and fractional parts
+    var int_part: int64 = v as int64
+    var frac_part: float64 = v - int_part as float64
+
+    # Format integer part
+    var n: uint64 = 0
+    var t: int64 = int_part
+    if t == 0:
+        n = 1
+    else:
+        while t > 0:
+            n = n + 1
+            t = t / 10
+
+    var total: uint64 = n
+    if neg != 0:
+        total = total + 1
+
+    unsafe:
+        # Write integer part backwards
+        var idx: uint64 = total
+        if int_part == 0:
+            idx = idx - 1
+            *(buf + idx) = 48 as char
+        else:
+            var w: int64 = int_part
+            var d: int64 = 0
+            while w > 0:
+                idx = idx - 1
+                d = w % 10
+                *(buf + idx) = (48 + (d as int32)) as char
+                w = w / 10
+
+        if neg != 0:
+            idx = idx - 1
+            *(buf + idx) = 45 as char
+
+        # Decimal point
+        *(buf + total) = 46 as char
+        total = total + 1
+
+        # Fractional part: up to 6 digits
+        var frac: float64 = frac_part
+        var places: uint64 = 0
+        var digit_val: int32 = 0
+        while places < 6:
+            frac = frac * 10.0
+            digit_val = frac as int32
+            *(buf + total) = (48 + digit_val) as char
+            total = total + 1
+            frac = frac - digit_val as float64
+            places = places + 1
+
+        # Null terminator
+        *(buf + total) = 0 as char
 
     return total

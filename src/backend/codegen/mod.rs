@@ -150,6 +150,8 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
             let f = cg.asm.new_label();
             cg.func_labels.insert("_dev_free".to_string(), f);
         }
+        let pow = cg.asm.new_label();
+        cg.func_labels.insert("__forge_pow".to_string(), pow);
         l
     } else {
         *cg.func_labels
@@ -551,6 +553,7 @@ pub(super) fn type_size(ty: &Type) -> usize {
         Type::I32 | Type::U32 | Type::F32 => 4,
         Type::I64 | Type::U64 | Type::F64 | Type::Ptr(_) => 8,
         Type::Struct(name) => panic!("struct size for {} must come from layout table", name),
+        Type::Slice(_) => 16, // ptr (8) + len (8)
         _ => 8,
     }
 }
@@ -563,6 +566,7 @@ impl<'p> CodeGen<'p> {
                     .map(|l| l.size)
                     .unwrap_or_else(|| type_size(ty))
             }
+            Type::Slice(_) => 16,
             _ => type_size(ty),
         }
     }
@@ -575,6 +579,7 @@ impl<'p> CodeGen<'p> {
                     return (layout.size.max(8), layout.align.max(8));
                 }
             }
+            Type::Slice(_) => return (16, 8),
             _ => {}
         }
         let size = type_size(ty);
@@ -595,7 +600,7 @@ pub(super) fn type_align(ty: &Type) -> usize {
         Type::I8 | Type::U8 | Type::Char | Type::Bool => 1,
         Type::I16 | Type::U16 => 2,
         Type::I32 | Type::U32 | Type::F32 => 4,
-        Type::I64 | Type::U64 | Type::F64 | Type::Ptr(_) => 8,
+        Type::I64 | Type::U64 | Type::F64 | Type::Ptr(_) | Type::Slice(_) => 8,
         Type::Struct(_) => 8,
         _ => 8,
     }

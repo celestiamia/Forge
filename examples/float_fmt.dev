@@ -1,0 +1,15 @@
+package float_fmt
+
+from std.io import puts
+from std.fmt import format_f64
+from std.alloc import alloc
+
+pub def main() -> int32:
+    var buf: ptr[char] = alloc(32)
+    format_f64(buf, 3.14)
+    puts(buf)
+    puts("\n")
+    format_f64(buf, -12.5)
+    puts(buf)
+    puts("\n")
+    return 0

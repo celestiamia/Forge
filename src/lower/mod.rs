@@ -225,10 +225,8 @@ impl<'a> LowerCtx<'a> {
             | ast::TypeExpr::Ref(inner)
             | ast::TypeExpr::RefMut(inner) => Ok(ir::Type::Ptr(Box::new(self.lower_type(inner)?))),
             ast::TypeExpr::Slice(inner) => {
-                // Represent a slice as a pointer to the element type.
-                // For the first milestone, we lose the length information.
                 let elem = self.lower_type(inner)?;
-                Ok(ir::Type::Ptr(Box::new(elem)))
+                Ok(ir::Type::Slice(Box::new(elem)))
             }
             ast::TypeExpr::Array(inner, size) => {
                 let _count = match &size.as_ref() {

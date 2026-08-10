@@ -25,6 +25,7 @@ impl<'p> CodeGen<'p> {
         self.emit_dev_setsockopt()?;
         self.emit_dev_alloc()?;
         self.emit_dev_free()?;
+        self.emit_forge_pow();
         self.emit_entry_point(start_label)?;
         Ok(())
     }
@@ -291,6 +292,28 @@ impl<'p> CodeGen<'p> {
             self.asm.ret();
         }
         Ok(())
+    }
+
+    /// Integer exponentiation: rdi^rsi → rax
+    /// Simple loop-based: result = 1; while exp > 0: result *= base; exp--
+    fn emit_forge_pow(&mut self) {
+        let lab = *self.func_labels.get("__forge_pow").unwrap();
+        self.bind_label(lab);
+        // rdi = base, rsi = exp
+        self.asm.push(Reg::Rbp);
+        self.asm.mov(Reg::Rbp, Reg::Rsp);
+        self.asm.mov(Reg::Rax, 1i32); // result = 1
+        let loop_lab = self.asm.new_label();
+        let end_lab = self.asm.new_label();
+        self.bind_label(loop_lab);
+        self.asm.test(Reg::Rsi, Reg::Rsi);
+        self.asm.je(end_lab);
+        self.asm.imul(Reg::Rax, Reg::Rdi);
+        self.asm.dec(Reg::Rsi);
+        self.asm.jmp(loop_lab);
+        self.bind_label(end_lab);
+        self.asm.pop(Reg::Rbp);
+        self.asm.ret();
     }
 
     fn emit_entry_point(&mut self, start_label: u32) -> Result<()> {

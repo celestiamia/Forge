@@ -1,0 +1,21 @@
+package power
+
+from std.io import puts
+from std.fmt import format_i32
+from std.alloc import alloc
+
+pub def main() -> int32:
+    var buf: ptr[char] = alloc(16)
+    var a: int32 = 2 ** 10
+    format_i32(buf, a)
+    puts(buf)
+    puts("\n")
+    var b: int32 = 3 ** 4
+    format_i32(buf, b)
+    puts(buf)
+    puts("\n")
+    var c: int32 = 5 ** 0
+    format_i32(buf, c)
+    puts(buf)
+    puts("\n")
+    return 0
