@@ -31,27 +31,35 @@ qemu-system-x86_64 -fda boot.bin -nographic
 
 Source in `src/`. Single Rust crate (`forgec`), edition 2024.
 
-**Pipeline:** `lexer/` → `parser/` → `sema/` (type check) → `lower.rs` (AST→IR) → `backend/` (codegen) → `obj/` (ELF/flat writer)
+**Pipeline:** `src/lexer/` → `src/parser/` → `src/sema/` (type check) → `src/lower/` (AST→IR) → `src/backend/codegen/` (codegen) → `src/backend/ir.rs` (IR) → `src/obj/` (ELF/flat writer)
 
-`mir/` directory is empty (not yet wired).
+`src/mir/` directory is empty (not yet wired).
 
-**Target smux** in `driver/mod.rs:80-90`:
+**Module structure:** Single Rust crate (`forgec`), edition 2024, in `src/`.
+
+**Type system:** `src/ty/mod.rs` defines the `Type` enum (not `ty/prims.rs`). `src/backend/ir.rs` defines a parallel IR `Type` enum and `BinOp` enum with methods like `is_integer()`, `is_float()`, `is_signed()`.
+
+**Target classification** in `src/driver/mod.rs:79`:
 - `x86_64-unknown-linux-gnu` / `native` → hosted, x86_64, ELF64
-- `x86_32-unknown-linux-gnu` → hosted, x86_32, ELF32
+- `x86_32-unknown-linux-gnu` → hosted, x86_32, ELF32 (no float support)
 - `x86_16-boot` → freestanding, x86_16, flat
 
 ## Forge language quirks
 
 - Python-like indentation; `.dev` extension
-- Type names are dual-spelled: `i32`/`int32`/`int`, `u32`/`uint32`/`uint`, `byte`/`u8`, `f64`/`float64`/`float`. Single table in `ty/prims.rs` governs both sema and lowerer.
+- Type names are dual-spelled: `i32`/`int32`/`int`, `u32`/`uint32`/`uint`, `byte`/`u8`, `f64`/`float64`/`float`. Single table in `ty/mod.rs` governs both sema and lowerer.
 - `let` = immutable, `var` = mutable
 - `pub def main()` → mangled to `_forge_main` in hosted targets (runtime `_start` calls it)
-- Hosted runtime helpers (`_dev_puts`, `_dev_exit`, etc.) declared `extern` in `core/*.dev`; the compiler emits them in `backend/codegen.rs`
+- Hosted runtime helpers (`_dev_puts`, `_dev_exit`, etc.) declared `extern` in `core/*.dev`; the compiler emits them in `src/backend/codegen/runtime.rs`
 - `@freestanding` attribute bypasses hosted runtime requirements
+- Power operator (`**`) requires integer operands; desugars to `__forge_pow` runtime call (loop-based, integer-only)
+- Floor division (`//`) is floor-toward-negative-infinity; floor division by zero panics at runtime
+- `unsafe` blocks bypass pointer safety checks
+- `as` is a postfix cast operator in the expression grammar
 
 ## Module system
 
-`std.<name>` imports resolve to `core/<name>.dev` by walking up from source directory. Only `std.*` modules are supported. See `driver/loader.rs`.
+`from std.<name> import ...` resolves to `core/<name>.dev` by walking up from source directory. Only `std.*` modules are supported. See `src/driver/loader.rs`.
 
 Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `fmt`.
 
@@ -61,6 +69,9 @@ Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `
 - Bootloader test spawns QEMU (`qemu-system-x86_64` must be on PATH), sleeps 2s, then kills it
 - `getchar` and `guess` tests write to stdin
 - `tests/lexer_tests.rs` and `tests/parser_tests.rs` contain only placeholder tests
+- Importing any `std.*` module compiles the **entire** module file — x86_32 tests fail if the stdlib uses `float64` (not supported on x86_32)
+- `obj::tests::tiny_static_elf*` tests can occasionally fail due to test parallelism; run isolation if needed
+- Example `.dev` files are also integration test fixtures — adding a new example used as a test fixture is fine
 
 ## Codegen notes
 
@@ -69,6 +80,9 @@ Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `
 - No optimizer — every unsafe deref emits a real memory access (effectively volatile)
 - Struct fields are laid out sequentially without padding in the first milestone
 - x86_64: System V AMD64 ABI (args in RDI, RSI, RDX, RCX, R8, R9)
+- Float values are stored as 64-bit integer bit patterns in 64-bit slots/RAX
+- Integer-to-float and float-to-integer casts use **XMM7** (scratch), not XMM0 — XMM0 is used by `eval_float_bin` for binary operations and will be clobbered
+- Parser `parse_type` and `parse_type_atom` call `skip_newlines()` internally; use `parse_type_noskip()` from the `as` handler in `parse_postfix` to avoid consuming newlines that the postfix loop needs to see
 
 ## Inline assembly
 
@@ -76,7 +90,12 @@ Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `
 
 ## What not to touch
 
-- `mir/` is scaffolding for future work; not wired into the pipeline
-- `ty/prims.rs` primitive_kind() is the **single source of truth** for type names — sema and lowerer both route through it
+- `src/mir/` is scaffolding for future work; not wired into the pipeline
+- `src/ty/mod.rs` `Type` enum is the source of truth for type names — sema and lowerer both route through it
 - Type names `i128`/`uint128` are intentionally unmapped (no backend supports them)
 - `.gitignore` comments warn: do NOT gitignore bare `core` (would exclude the `core/` stdlib dir)
+
+## Parser gotchas
+
+- `as` casts in `var` or assignment declarations inside `while`/`else` blocks can trigger parser bugs — prefer `var x: int64 = expr` then `(x as int32)` in expressions, or hoist `var` declarations outside loops
+- Consecutive `var` declarations in while-loop bodies inside `unsafe` blocks are fragile
