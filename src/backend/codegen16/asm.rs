@@ -199,13 +199,14 @@ impl Encoder {
         self.emit_imm16(imm);
     }
 
-    pub(super) fn mov_seg_ax(&mut self, seg: SegReg) {
+    pub(super) fn mov_seg_ax(&mut self, seg: SegReg) -> Result<()> {
         match seg {
             SegReg::Ds => self.emit_slice(&[0x8E, 0xD8]),
             SegReg::Es => self.emit_slice(&[0x8E, 0xC0]),
             SegReg::Ss => self.emit_slice(&[0x8E, 0xD0]),
-            SegReg::Cs => unreachable!(),
+            SegReg::Cs => bail!("loading into CS segment register is not supported"),
         }
+        Ok(())
     }
 
     pub(super) fn lea_bp(&mut self, dst: Reg16, off: i8) {

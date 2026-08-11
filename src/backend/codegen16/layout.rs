@@ -43,7 +43,7 @@ impl<'p> CodeGen16<'p> {
             .ok_or_else(|| anyhow!("field index out of range"))
     }
 
-    pub(super) fn load_slot(&mut self, slot: Slot16) {
+    pub(super) fn load_slot(&mut self, slot: Slot16) -> Result<()> {
         match slot.width {
             1 => {
                 self.asm.load8_bp(Reg8::Al, slot.offset);
@@ -54,16 +54,18 @@ impl<'p> CodeGen16<'p> {
                 }
             }
             2 => self.asm.load16_bp(Reg16::Ax, slot.offset),
-            _ => unreachable!(),
+            _ => bail!("unhandled slot width: {}", slot.width),
         }
+        Ok(())
     }
 
-    pub(super) fn store_slot(&mut self, slot: Slot16, _src16: Reg16, src8: Reg8) {
+    pub(super) fn store_slot(&mut self, slot: Slot16, _src16: Reg16, src8: Reg8) -> Result<()> {
         match slot.width {
             1 => self.asm.store8_bp(slot.offset, src8),
             2 => self.asm.store16_bp(slot.offset, Reg16::Ax),
-            _ => unreachable!(),
+            _ => bail!("unhandled slot width: {}", slot.width),
         }
+        Ok(())
     }
 
 }

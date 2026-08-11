@@ -161,7 +161,7 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         cg.bind_label(lab);
         let value = match init {
             Literal::Int(v) => {
-                let size = ty.byte_size();
+                let size = ty.byte_size()?;
                 match size {
                     1 => (v as i8).to_le_bytes().to_vec(),
                     2 => (v as i16).to_le_bytes().to_vec(),
@@ -193,7 +193,7 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         cg.asm.push_byte(0);
     }
 
-    let bytes = cg.asm.into_bytes();
+    let bytes = cg.asm.into_bytes()?;
     let split = *cg.label_offsets.get(&rodata_start).unwrap_or(&bytes.len());
     let mut code = bytes[..split].to_vec();
     let mut rodata = bytes[split..].to_vec();
@@ -295,10 +295,10 @@ impl<'p> CodeGen<'p> {
         let entry = *self.func_labels.get(&f.name).unwrap();
         self.bind_label(entry);
 
-        self.asm.push(Reg::Ebp);
-        self.asm.mov(Reg::Ebp, Reg::Esp);
+        self.asm.push(Reg::Ebp)?;
+        self.asm.mov(Reg::Ebp, Reg::Esp)?;
         let sub_imm_offset = self.asm.len() + 2; // opcode + modrm
-        self.asm.sub(Reg::Esp, 0i32);
+        self.asm.sub(Reg::Esp, 0i32)?;
 
         let slot = self.alloc_slot(4, 4);
         self.addr_tmp = slot.offset;
@@ -309,9 +309,9 @@ impl<'p> CodeGen<'p> {
         for (i, (name, _ty)) in f.params.iter().enumerate() {
             let slot = self.locals.get(name).unwrap();
             self.asm
-                .mov(Reg::Eax, Mem::base_disp(Reg::Ebp, (8 + i * 4) as i32));
+                .mov(Reg::Eax, Mem::base_disp(Reg::Ebp, (8 + i * 4) as i32))?;
             self.asm
-                .mov(Mem::base_disp(Reg::Ebp, slot.offset), Reg::Eax);
+                .mov(Mem::base_disp(Reg::Ebp, slot.offset), Reg::Eax)?;
         }
 
         self.ret_label = self.asm.new_label();
@@ -322,7 +322,7 @@ impl<'p> CodeGen<'p> {
 
         self.bind_label(self.ret_label);
         self.asm.leave();
-        self.asm.ret();
+        self.asm.ret()?;
 
         let frame = align_up(self.frame_size, 16);
         self.asm.patch_i32(sub_imm_offset, frame as i32);
@@ -336,36 +336,36 @@ impl<'p> CodeGen<'p> {
                 let slot = self.alloc_named_slot(name, 4, 4);
                 if let Some(e) = init {
                     self.eval_expr(e)?;
-                    self.store_scalar(slot.offset);
+                    self.store_scalar(slot.offset)?;
                 }
                 let _ = ty;
             }
             Stmt::StackAlloc { name, elem_ty, count } => {
-                let elem_size = elem_ty.byte_size();
+                let elem_size = elem_ty.byte_size()?;
                 let raw_size = elem_size * *count;
                 let align = elem_size.max(1);
                 let raw_slot = self.alloc_slot(raw_size, align);
                 let ptr_slot = self.alloc_named_slot(name, 4, 4);
                 self.asm
-                    .lea(Reg::Eax, Mem::base_disp(Reg::Ebp, raw_slot.offset));
-                self.store_scalar(ptr_slot.offset);
+                    .lea(Reg::Eax, Mem::base_disp(Reg::Ebp, raw_slot.offset))?;
+                self.store_scalar(ptr_slot.offset)?;
             }
             Stmt::Assign { lhs, rhs } => {
                 self.lvalue_addr(lhs)?; // address in EAX
                 self.asm
-                    .mov(Mem::base_disp(Reg::Ebp, self.addr_tmp), Reg::Eax);
+                    .mov(Mem::base_disp(Reg::Ebp, self.addr_tmp), Reg::Eax)?;
                 self.eval_expr(rhs)?; // value in EAX
                 self.asm
-                    .mov(Reg::Edx, Mem::base_disp(Reg::Ebp, self.addr_tmp));
+                    .mov(Reg::Edx, Mem::base_disp(Reg::Ebp, self.addr_tmp))?;
                 let width = self.lvalue_store_width(lhs);
-                self.store_width(width, Reg::Edx, Reg::Eax);
+                self.store_width(width, Reg::Edx, Reg::Eax)?;
             }
             Stmt::Return(None) => {
-                self.asm.jmp(self.ret_label);
+                self.asm.jmp(self.ret_label)?;
             }
             Stmt::Return(Some(e)) => {
                 self.eval_expr(e)?;
-                self.asm.jmp(self.ret_label);
+                self.asm.jmp(self.ret_label)?;
             }
             Stmt::Expr(e) => {
                 self.eval_expr(e)?;
@@ -379,17 +379,17 @@ impl<'p> CodeGen<'p> {
                     None
                 };
                 self.eval_expr(cond)?;
-                self.asm.test(Reg::Eax, Reg::Eax);
+                self.asm.test(Reg::Eax, Reg::Eax)?;
                 if let Some(l) = else_lab {
-                    self.asm.je(l);
+                    self.asm.je(l)?;
                 } else {
-                    self.asm.je(end_lab);
+                    self.asm.je(end_lab)?;
                 }
                 self.bind_label(then_lab);
                 for st in then {
                     self.emit_stmt(st)?;
                 }
-                self.asm.jmp(end_lab);
+                self.asm.jmp(end_lab)?;
                 if let Some(l) = else_lab {
                     self.bind_label(l);
                     for st in else_.as_ref().unwrap() {
@@ -405,12 +405,12 @@ impl<'p> CodeGen<'p> {
                 self.loop_end_stack.push(end);
                 self.bind_label(head);
                 self.eval_expr(cond)?;
-                self.asm.test(Reg::Eax, Reg::Eax);
-                self.asm.je(end);
+                self.asm.test(Reg::Eax, Reg::Eax)?;
+                self.asm.je(end)?;
                 for st in body {
                     self.emit_stmt(st)?;
                 }
-                self.asm.jmp(head);
+                self.asm.jmp(head)?;
                 self.bind_label(end);
                 self.loop_head_stack.pop();
                 self.loop_end_stack.pop();
@@ -425,15 +425,15 @@ impl<'p> CodeGen<'p> {
                 self.loop_end_stack.push(end);
                 self.bind_label(head);
                 self.eval_expr(cond)?;
-                self.asm.test(Reg::Eax, Reg::Eax);
-                self.asm.je(end);
+                self.asm.test(Reg::Eax, Reg::Eax)?;
+                self.asm.je(end)?;
                 for st in body {
                     self.emit_stmt(st)?;
                 }
                 if let Some(st) = step {
                     self.eval_expr(st)?;
                 }
-                self.asm.jmp(head);
+                self.asm.jmp(head)?;
                 self.bind_label(end);
                 self.loop_head_stack.pop();
                 self.loop_end_stack.pop();
@@ -441,12 +441,12 @@ impl<'p> CodeGen<'p> {
             Stmt::Break => {
                 let end = *self.loop_end_stack.last()
                     .ok_or_else(|| anyhow::anyhow!("break outside of loop"))?;
-                self.asm.jmp(end);
+                self.asm.jmp(end)?;
             }
             Stmt::Continue => {
                 let head = *self.loop_head_stack.last()
                     .ok_or_else(|| anyhow::anyhow!("continue outside of loop"))?;
-                self.asm.jmp(head);
+                self.asm.jmp(head)?;
             }
             Stmt::Unsafe(b) => {
                 for st in b {

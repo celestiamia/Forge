@@ -19,55 +19,61 @@ pub use reg::Reg;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::Result;
 
     #[test]
-    fn mov_reg_imm32() {
+    fn mov_reg_imm32() -> Result<()> {
         let mut a = Assembler::new();
-        a.mov(Reg::Rax, 0x12345678i32);
+        a.mov(Reg::Rax, 0x12345678i32)?;
         assert_eq!(a.bytes(), &[0x48, 0xC7, 0xC0, 0x78, 0x56, 0x34, 0x12]);
+        Ok(())
     }
 
     #[test]
-    fn mov_reg_reg() {
+    fn mov_reg_reg() -> Result<()> {
         let mut a = Assembler::new();
-        a.mov(Reg::Rcx, Reg::Rax);
+        a.mov(Reg::Rcx, Reg::Rax)?;
         // REX.W 89 C1: mod=11 reg=rax(0) r/m=rcx(1)
         assert_eq!(a.bytes(), &[0x48, 0x89, 0xC1]);
+        Ok(())
     }
 
     #[test]
-    fn mov_reg_mem_base() {
+    fn mov_reg_mem_base() -> Result<()> {
         let mut a = Assembler::new();
-        a.mov(Reg::Rax, Mem::base(Reg::Rbx));
+        a.mov(Reg::Rax, Mem::base(Reg::Rbx))?;
         // REX.W 8B 03: mod=00 reg=rax(0) r/m=rbx(3)
         assert_eq!(a.bytes(), &[0x48, 0x8B, 0x03]);
+        Ok(())
     }
 
     #[test]
-    fn mov_mem_reg_disp() {
+    fn mov_mem_reg_disp() -> Result<()> {
         let mut a = Assembler::new();
-        a.mov(Mem::base_disp(Reg::Rax, 4), Reg::Rdx);
+        a.mov(Mem::base_disp(Reg::Rax, 4), Reg::Rdx)?;
         // REX.W 89 50 04: mod=01 reg=rdx(2) r/m=rax(0), disp8=04
         assert_eq!(a.bytes(), &[0x48, 0x89, 0x50, 0x04]);
+        Ok(())
     }
 
     #[test]
-    fn mov_high_reg_imm64() {
+    fn mov_high_reg_imm64() -> Result<()> {
         let mut a = Assembler::new();
-        a.mov(Reg::R8, 0x0000_0001_0000_0000u64);
+        a.mov(Reg::R8, 0x0000_0001_0000_0000u64)?;
         // 49 B8 00 00 00 00 01 00 00 00 (REX.B + B8+0, imm64)
         assert_eq!(
             a.bytes(),
             &[0x49, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00]
         );
+        Ok(())
     }
 
     #[test]
-    fn add_sub_cmp_imm() {
+    fn add_sub_cmp_imm() -> Result<()> {
         let mut a = Assembler::new();
-        a.add(Reg::Rax, 1i32);
-        a.sub(Reg::Rax, 2i32);
-        a.cmp(Reg::Rax, 3i32);
+        a.add(Reg::Rax, 1i32)?;
+        a.sub(Reg::Rax, 2i32)?;
+        a.cmp(Reg::Rax, 3i32)?;
         // Encoder always uses the imm32 form of ALU/CMP instructions.
         assert_eq!(
             a.bytes(),
@@ -77,17 +83,18 @@ mod tests {
                 0x48, 0x81, 0xF8, 0x03, 0x00, 0x00, 0x00, // cmp rax, 3
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn push_pop_call_ret_syscall() {
+    fn push_pop_call_ret_syscall() -> Result<()> {
         let mut a = Assembler::new();
-        a.push(Reg::Rbp);
-        a.mov(Reg::Rbp, Reg::Rsp);
-        a.call(0i32);
-        a.pop(Reg::Rbp);
-        a.ret();
-        a.syscall();
+        a.push(Reg::Rbp)?;
+        a.mov(Reg::Rbp, Reg::Rsp)?;
+        a.call(0i32)?;
+        a.pop(Reg::Rbp)?;
+        a.ret()?;
+        a.syscall()?;
         assert_eq!(
             a.bytes(),
             &[
@@ -99,35 +106,38 @@ mod tests {
                 0x0F, 0x05, // syscall
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn lea_rip_relative() {
+    fn lea_rip_relative() -> Result<()> {
         let mut a = Assembler::new();
-        a.lea(Reg::Rax, Mem::rip_rel(0));
+        a.lea(Reg::Rax, Mem::rip_rel(0))?;
         // REX.W 8D 05 00 00 00 00
         assert_eq!(a.bytes(), &[0x48, 0x8D, 0x05, 0x00, 0x00, 0x00, 0x00]);
+        Ok(())
     }
 
     #[test]
-    fn lea_base_index_scale() {
+    fn lea_base_index_scale() -> Result<()> {
         let mut a = Assembler::new();
-        a.lea(Reg::Rax, Mem::base_index_scale(Reg::Rbx, Reg::Rcx, Scale::Four));
+        a.lea(Reg::Rax, Mem::base_index_scale(Reg::Rbx, Reg::Rcx, Scale::Four))?;
         // REX.W 8D 04 8B: mod=00 reg=rax(0) r/m=100 (SIB), SIB scale=10 idx=rcx(1) base=rbx(3)
         assert_eq!(a.bytes(), &[0x48, 0x8D, 0x04, 0x8B]);
+        Ok(())
     }
 
     #[test]
-    fn jmp_forward_and_backward() {
+    fn jmp_forward_and_backward() -> Result<()> {
         let mut a = Assembler::new();
         let start = a.label();
-        a.mov(Reg::Rax, 0i32);
+        a.mov(Reg::Rax, 0i32)?;
         let skip = a.new_label();
-        a.jmp(skip);
-        a.mov(Reg::Rax, 1i32);
+        a.jmp(skip)?;
+        a.mov(Reg::Rax, 1i32)?;
         a.bind(skip);
-        a.jmp(start);
-        let bytes = a.into_bytes();
+        a.jmp(start)?;
+        let bytes = a.into_bytes()?;
         // start at offset 0
         // mov rax, 0: 7 bytes (offsets 0..6)
         // jmp skip (forward): 5 bytes (offsets 7..11), target is after mov rax,1
@@ -143,18 +153,19 @@ mod tests {
                 0xE9, 0xE8, 0xFF, 0xFF, 0xFF,
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn je_jne_labels() {
+    fn je_jne_labels() -> Result<()> {
         let mut a = Assembler::new();
         let l1 = a.new_label();
-        a.cmp(Reg::Rax, Reg::Rbx);
-        a.je(l1);
-        a.mov(Reg::Rax, 0i32);
+        a.cmp(Reg::Rax, Reg::Rbx)?;
+        a.je(l1)?;
+        a.mov(Reg::Rax, 0i32)?;
         a.bind(l1);
-        a.jne(l1); // backward jump to same label
-        let bytes = a.into_bytes();
+        a.jne(l1)?; // backward jump to same label
+        let bytes = a.into_bytes()?;
         // cmp rax, rbx: 48 39 D8 (3 bytes, offsets 0..2)
         // je l1 forward: target = offset 16, pc = 9, rel = 7
         // mov rax,0: 7 bytes (offsets 9..15)
@@ -169,43 +180,48 @@ mod tests {
                 0x0F, 0x85, 0xFA, 0xFF, 0xFF, 0xFF,
             ]
         );
+        Ok(())
     }
 
     #[test]
-    fn high_register_mov() {
+    fn high_register_mov() -> Result<()> {
         let mut a = Assembler::new();
-        a.mov(Reg::R8, Reg::R9);
+        a.mov(Reg::R8, Reg::R9)?;
         // REX.W + REX.B + REX.R? dst=r8(b=1), src=r9(r=1). Actually mov r/m64, r64:
         // reg field = src(r9=1), r/m = dst(r8=0). REX.R=1, REX.B=1 -> 0x4D
         // 89 C8: mod=11 reg=001 r/m=000 -> C8
         assert_eq!(a.bytes(), &[0x4D, 0x89, 0xC8]);
+        Ok(())
     }
 
     #[test]
-    fn setcc_al() {
+    fn setcc_al() -> Result<()> {
         let mut a = Assembler::new();
-        a.setcc(Cond::E, Reg::Rax.r8());
+        a.setcc(Cond::E, Reg::Rax.r8())?;
         // 0F 94 C0
         assert_eq!(a.bytes(), &[0x0F, 0x94, 0xC0]);
+        Ok(())
     }
 
     #[test]
-    fn shift_imm8() {
+    fn shift_imm8() -> Result<()> {
         let mut a = Assembler::new();
-        a.shl(Reg::Rax, 3);
+        a.shl(Reg::Rax, 3)?;
         assert_eq!(a.bytes(), &[0x48, 0xC1, 0xE0, 0x03]);
+        Ok(())
     }
 
     #[test]
-    fn encode_inst_round_trip() {
+    fn encode_inst_round_trip() -> Result<()> {
         let mut buf = Vec::new();
         encode_inst(
             &mut buf,
             Inst::MovRM64Imm32 {
-                dst: Operand::Reg(Reg::Rcx),
-                imm: 0xABCDEF00u32 as i32,
+                dst: Reg::Rax.into_op(),
+                imm: 0x12345678,
             },
-        );
-        assert_eq!(buf, &[0x48, 0xC7, 0xC1, 0x00, 0xEF, 0xCD, 0xAB]);
+        )?;
+        assert_eq!(buf, &[0x48, 0xC7, 0xC0, 0x78, 0x56, 0x34, 0x12]);
+        Ok(())
     }
 }

@@ -1,0 +1,57 @@
+package std.gc
+
+# Garbage-collected heap management.  These helpers are emitted by the compiler
+# as part of the hosted runtime (see `src/backend/codegen/gc.rs`) and are
+# declared `extern` here so Forge's type checker can see them.  `std.alloc`
+# provides the `alloc`/`free` wrappers around `_dev_alloc`/`_dev_free`.
+#
+# The runtime manages a 4 MiB heap (`.bss`) with a first-fit free-list allocator
+# and a conservative mark-and-sweep collector.  Collection runs automatically
+# when an allocation cannot be satisfied from the free list (heap exhaustion);
+# it can also be triggered explicitly with `collect()`.  Memory is conservative:
+# every 8-byte word on the stack (from RSP up to the high-water mark captured at
+# program start) and in the read-only data segment is scanned as a candidate
+# root pointer.  Because the compiler spills local pointers to stack slots, no
+# live pointer is ever held only in a register across a collection.
+
+extern def _dev_gc_collect() -> void
+extern def _dev_gc_leak_check() -> uint64
+extern def _dev_gc_alloc_count() -> uint64
+extern def _dev_gc_free_count() -> uint64
+extern def _dev_gc_collections() -> uint64
+extern def _dev_gc_heap_live() -> uint64
+extern def _dev_gc_heap_capacity() -> uint64
+
+# Run a conservative mark-and-sweep collection.  Reachable blocks are kept;
+# unreachable (garbage) blocks are swept back onto the free list so their memory
+# can be reused by subsequent allocations.
+pub def collect() -> void:
+    _dev_gc_collect()
+
+# Count the bytes occupied by USED blocks that are *unreachable* from the stack
+# or read-only data (i.e. genuine leaks), **without reclaiming them**.  Returns
+# zero when the heap is uninitialised or every live block is reachable.  Use this
+# to diagnose lost references without disturbing the heap, then call `collect()`
+# to reclaim them.
+pub def leak_check() -> uint64:
+    return _dev_gc_leak_check()
+
+# Number of successful allocations since the program started.
+pub def alloc_count() -> uint64:
+    return _dev_gc_alloc_count()
+
+# Number of successful frees since the program started.
+pub def free_count() -> uint64:
+    return _dev_gc_free_count()
+
+# Number of collections performed (automatic + explicit).
+pub def collections() -> uint64:
+    return _dev_gc_collections()
+
+# Bytes currently committed to live (used) blocks.
+pub def heap_live() -> uint64:
+    return _dev_gc_heap_live()
+
+# Total bytes available in the heap arena.
+pub def heap_capacity() -> uint64:
+    return _dev_gc_heap_capacity()

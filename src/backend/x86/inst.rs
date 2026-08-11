@@ -63,6 +63,7 @@ pub enum Operand {
     Imm8(i8),
     Imm16(i16),
     Imm32(i32),
+    Imm64(i64),
 }
 
 /// Trait for converting common Rust values and register/memory expressions
@@ -96,6 +97,11 @@ impl IntoOp for i16 {
 impl IntoOp for i32 {
     fn into_op(self) -> Operand {
         Operand::Imm32(self)
+    }
+}
+impl IntoOp for i64 {
+    fn into_op(self) -> Operand {
+        Operand::Imm64(self)
     }
 }
 impl IntoOp for u8 {

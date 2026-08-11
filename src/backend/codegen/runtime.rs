@@ -23,8 +23,7 @@ impl<'p> CodeGen<'p> {
         self.emit_dev_fork()?;
         self.emit_dev_fcntl()?;
         self.emit_dev_setsockopt()?;
-        self.emit_dev_alloc()?;
-        self.emit_dev_free()?;
+        self.emit_gc_runtime()?;
         self.emit_forge_pow();
         self.emit_entry_point(start_label)?;
         Ok(())
@@ -270,30 +269,6 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
-    fn emit_dev_alloc(&mut self) -> Result<()> {
-        if let Some(&a) = self.func_labels.get("_dev_alloc") {
-            self.bind_label(a);
-            let patch_off = self.asm.len() + 2;
-            self.alloc_ptr_patch = Some(patch_off);
-            self.asm.movabs(Reg::Rax, 0);
-            self.asm.mov(Reg::Rcx, Mem::base(Reg::Rax));
-            self.asm.mov(Reg::Rdx, Reg::Rcx);
-            self.asm.add(Reg::Rdx, Reg::Rdi);
-            self.asm.mov(Mem::base(Reg::Rax), Reg::Rdx);
-            self.asm.mov(Reg::Rax, Reg::Rcx);
-            self.asm.ret();
-        }
-        Ok(())
-    }
-
-    fn emit_dev_free(&mut self) -> Result<()> {
-        if let Some(&f) = self.func_labels.get("_dev_free") {
-            self.bind_label(f);
-            self.asm.ret();
-        }
-        Ok(())
-    }
-
     /// Integer exponentiation: rdi^rsi → rax
     /// Simple loop-based: result = 1; while exp > 0: result *= base; exp--
     fn emit_forge_pow(&mut self) {
@@ -318,6 +293,9 @@ impl<'p> CodeGen<'p> {
 
     fn emit_entry_point(&mut self, start_label: u32) -> Result<()> {
         self.bind_label(start_label);
+        // Capture the stack high-water mark before the runtime touches the stack
+        // so the conservative GC knows the top of its root range.
+        self.emit_gc_stack_top_capture()?;
         let main_lab = *self
             .func_labels
             .get("_forge_main")

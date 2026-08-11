@@ -1,9 +1,16 @@
 //! Core 32-bit x86 instruction encoding helpers: ModR/M, SIB, immediates,
 //! and per-instruction encoders.
+//!
+//! All encoders return [`anyhow::Result`] and report structural encoding
+//! failures (bad operands, out-of-range immediates, unresolved labels used in
+//! the raw encoder) via [`crate::backend::error::EncodeError`] rather than
+//! panicking, mirroring the 64-bit encoder.
 
 #![allow(dead_code)]
 
+use crate::backend::error::{fmt_operand32, EncodeError};
 use crate::backend::x86::{AluOp, Cond, Inst, JmpTarget, Mem, Operand, Reg, Scale, ShiftOp};
+use anyhow::{bail, Result};
 
 pub fn emit_u8(buf: &mut Vec<u8>, v: u8) {
     buf.push(v);
@@ -25,39 +32,44 @@ pub fn sib(scale: u8, index: u8, base: u8) -> u8 {
     ((scale & 3) << 6) | ((index & 7) << 3) | (base & 7)
 }
 
-fn encode_modrm_sib_disp(reg_op: u8, rm: Operand, out: &mut Vec<u8>) {
+fn encode_modrm_sib_disp(reg_op: u8, rm: Operand, out: &mut Vec<u8>) -> Result<()> {
     match rm {
         Operand::Reg(r) => {
             out.push(modrm(0b11, reg_op, r.enc()));
+            Ok(())
         }
         Operand::Mem(mem) => encode_mem(reg_op, mem, out),
-        _ => panic!("invalid r/m operand: {:?}", rm),
+        _ => bail!(EncodeError::InvalidRmOperand {
+            operand: fmt_operand32(&rm),
+        }),
     }
 }
 
-pub fn modrm_suffix(reg_op: u8, rm: Operand) -> Vec<u8> {
+pub fn modrm_suffix(reg_op: u8, rm: Operand) -> Result<Vec<u8>> {
     let mut out = Vec::new();
-    encode_modrm_sib_disp(reg_op, rm, &mut out);
-    out
+    encode_modrm_sib_disp(reg_op, rm, &mut out)?;
+    Ok(out)
 }
 
-fn encode_mem(reg_op: u8, mem: Mem, out: &mut Vec<u8>) {
+fn encode_mem(reg_op: u8, mem: Mem, out: &mut Vec<u8>) -> Result<()> {
     match mem {
         Mem::Disp32(disp) => {
+            // [disp32] in 32-bit mode: mod=00, r/m=101 (the special no-SIB form).
             out.push(modrm(0b00, reg_op, 0b101));
             emit_i32(out, disp);
         }
-        Mem::Base(base) => encode_base_mem(reg_op, base, None, Scale::One, 0, out),
+        Mem::Base(base) => encode_base_mem(reg_op, base, None, Scale::One, 0, out)?,
         Mem::BaseDisp(base, disp) => {
-            encode_base_mem(reg_op, base, None, Scale::One, disp, out)
+            encode_base_mem(reg_op, base, None, Scale::One, disp, out)?
         }
         Mem::BaseIndexScale(base, index, scale) => {
-            encode_base_mem(reg_op, base, Some(index), scale, 0, out)
+            encode_base_mem(reg_op, base, Some(index), scale, 0, out)?
         }
         Mem::BaseIndexScaleDisp(base, index, scale, disp) => {
-            encode_base_mem(reg_op, base, Some(index), scale, disp, out)
+            encode_base_mem(reg_op, base, Some(index), scale, disp, out)?
         }
     }
+    Ok(())
 }
 
 fn encode_base_mem(
@@ -67,13 +79,15 @@ fn encode_base_mem(
     scale: Scale,
     disp: i32,
     out: &mut Vec<u8>,
-) {
+) -> Result<()> {
     let base_enc = base.enc();
     let index_enc = match index {
         None => 0b100,
         Some(r) => {
             if matches!(r, Reg::Esp) {
-                panic!("ESP cannot be used as an index register");
+                bail!(EncodeError::InvalidIndexRegister {
+                    reg: format!("{:?}", r),
+                });
             }
             r.enc()
         }
@@ -106,58 +120,66 @@ fn encode_base_mem(
         }
         0b01 => out.push(disp as i8 as u8),
         0b10 => emit_i32(out, disp),
-        _ => unreachable!(),
+        _ => bail!(EncodeError::InvalidModBits { mod_bits }),
     }
+    Ok(())
 }
 
 // ----------------------------------------------------------------------------
 // Per-instruction encoders
 // ----------------------------------------------------------------------------
 
-pub fn mov_rm32_r32(buf: &mut Vec<u8>, dst: Operand, src: Reg) {
-    let suffix = modrm_suffix(src.enc(), dst);
+pub fn mov_rm32_r32(buf: &mut Vec<u8>, dst: Operand, src: Reg) -> Result<()> {
+    let suffix = modrm_suffix(src.enc(), dst)?;
     buf.push(0x89);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn mov_r32_rm32(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
-    let suffix = modrm_suffix(dst.enc(), src);
+pub fn mov_r32_rm32(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
+    let suffix = modrm_suffix(dst.enc(), src)?;
     buf.push(0x8B);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn mov_rm32_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) {
-    let suffix = modrm_suffix(0, dst); // /0
+pub fn mov_rm32_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) -> Result<()> {
+    let suffix = modrm_suffix(0, dst)?; // /0
     buf.push(0xC7);
     buf.extend(suffix);
     emit_i32(buf, imm);
+    Ok(())
 }
 
-pub fn mov_r32_imm32(buf: &mut Vec<u8>, dst: Reg, imm: i32) {
+pub fn mov_r32_imm32(buf: &mut Vec<u8>, dst: Reg, imm: i32) -> Result<()> {
     buf.push(0xB8 + dst.enc());
     emit_i32(buf, imm);
+    Ok(())
 }
 
-pub fn mov_rm8_r8(buf: &mut Vec<u8>, dst: Mem, src: Reg) {
-    let suffix = modrm_suffix(src.enc(), Operand::Mem(dst));
+pub fn mov_rm8_r8(buf: &mut Vec<u8>, dst: Mem, src: Reg) -> Result<()> {
+    let suffix = modrm_suffix(src.enc(), Operand::Mem(dst))?;
     buf.push(0x88);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn mov_rm16_r16(buf: &mut Vec<u8>, dst: Mem, src: Reg) {
-    let suffix = modrm_suffix(src.enc(), Operand::Mem(dst));
+pub fn mov_rm16_r16(buf: &mut Vec<u8>, dst: Mem, src: Reg) -> Result<()> {
+    let suffix = modrm_suffix(src.enc(), Operand::Mem(dst))?;
     buf.push(0x66);
     buf.push(0x89);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn mov_rm32_r32_store(buf: &mut Vec<u8>, dst: Mem, src: Reg) {
-    let suffix = modrm_suffix(src.enc(), Operand::Mem(dst));
+pub fn mov_rm32_r32_store(buf: &mut Vec<u8>, dst: Mem, src: Reg) -> Result<()> {
+    let suffix = modrm_suffix(src.enc(), Operand::Mem(dst))?;
     buf.push(0x89);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn alu_rm32_r32(buf: &mut Vec<u8>, op: AluOp, dst: Operand, src: Reg) {
+pub fn alu_rm32_r32(buf: &mut Vec<u8>, op: AluOp, dst: Operand, src: Reg) -> Result<()> {
     let opcode = match op {
         AluOp::Add => 0x01,
         AluOp::Sub => 0x29,
@@ -165,15 +187,16 @@ pub fn alu_rm32_r32(buf: &mut Vec<u8>, op: AluOp, dst: Operand, src: Reg) {
         AluOp::Or => 0x09,
         AluOp::Xor => 0x31,
     };
-    let suffix = modrm_suffix(src.enc(), dst);
+    let suffix = modrm_suffix(src.enc(), dst)?;
     buf.push(opcode);
     buf.extend(suffix);
+    Ok(())
 }
 
 /// Encode `op r32, r/m32` (register destination, register-or-memory source),
 /// e.g. `add eax, [ebp+8]`. The `reg` field of ModR/M holds the destination
 /// register and the `r/m` field holds the source.
-pub fn alu_r32_rm32(buf: &mut Vec<u8>, op: AluOp, dst: Reg, src: Operand) {
+pub fn alu_r32_rm32(buf: &mut Vec<u8>, op: AluOp, dst: Reg, src: Operand) -> Result<()> {
     let opcode = match op {
         AluOp::Add => 0x03,
         AluOp::Sub => 0x2B,
@@ -181,12 +204,13 @@ pub fn alu_r32_rm32(buf: &mut Vec<u8>, op: AluOp, dst: Reg, src: Operand) {
         AluOp::Or => 0x0B,
         AluOp::Xor => 0x33,
     };
-    let suffix = modrm_suffix(dst.enc(), src);
+    let suffix = modrm_suffix(dst.enc(), src)?;
     buf.push(opcode);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn alu_rm32_imm32(buf: &mut Vec<u8>, op: AluOp, dst: Operand, imm: i32) {
+pub fn alu_rm32_imm32(buf: &mut Vec<u8>, op: AluOp, dst: Operand, imm: i32) -> Result<()> {
     let ext = match op {
         AluOp::Add => 0,
         AluOp::Or => 1,
@@ -194,224 +218,252 @@ pub fn alu_rm32_imm32(buf: &mut Vec<u8>, op: AluOp, dst: Operand, imm: i32) {
         AluOp::Sub => 5,
         AluOp::Xor => 6,
     };
-    let suffix = modrm_suffix(ext, dst);
+    let suffix = modrm_suffix(ext, dst)?;
     buf.push(0x81);
     buf.extend(suffix);
     emit_i32(buf, imm);
+    Ok(())
 }
 
-pub fn cmp_rm32_r32(buf: &mut Vec<u8>, dst: Operand, src: Reg) {
-    let suffix = modrm_suffix(src.enc(), dst);
+pub fn cmp_rm32_r32(buf: &mut Vec<u8>, dst: Operand, src: Reg) -> Result<()> {
+    let suffix = modrm_suffix(src.enc(), dst)?;
     buf.push(0x39);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn cmp_rm32_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) {
-    let suffix = modrm_suffix(7, dst); // /7
+pub fn cmp_rm32_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) -> Result<()> {
+    let suffix = modrm_suffix(7, dst)?; // /7
     buf.push(0x81);
     buf.extend(suffix);
     emit_i32(buf, imm);
+    Ok(())
 }
 
-pub fn test_rm32_r32(buf: &mut Vec<u8>, dst: Operand, src: Reg) {
-    let suffix = modrm_suffix(src.enc(), dst);
+pub fn test_rm32_r32(buf: &mut Vec<u8>, dst: Operand, src: Reg) -> Result<()> {
+    let suffix = modrm_suffix(src.enc(), dst)?;
     buf.push(0x85);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn test_rm32_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) {
-    let suffix = modrm_suffix(0, dst); // /0
+pub fn test_rm32_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) -> Result<()> {
+    let suffix = modrm_suffix(0, dst)?; // /0
     buf.push(0xF7);
     buf.extend(suffix);
     emit_i32(buf, imm);
+    Ok(())
 }
 
-fn encode_unary(buf: &mut Vec<u8>, ext: u8, rm: Operand, opcode: u8) {
-    let suffix = modrm_suffix(ext, rm);
+fn encode_unary(buf: &mut Vec<u8>, ext: u8, rm: Operand, opcode: u8) -> Result<()> {
+    let suffix = modrm_suffix(ext, rm)?;
     buf.push(opcode);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn neg(buf: &mut Vec<u8>, rm: Operand) {
-    encode_unary(buf, 3, rm, 0xF7);
+pub fn neg(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_unary(buf, 3, rm, 0xF7)
 }
 
-pub fn inc(buf: &mut Vec<u8>, rm: Operand) {
-    encode_unary(buf, 0, rm, 0xFF);
+pub fn inc(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_unary(buf, 0, rm, 0xFF)
 }
 
-pub fn dec(buf: &mut Vec<u8>, rm: Operand) {
-    encode_unary(buf, 1, rm, 0xFF);
+pub fn dec(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_unary(buf, 1, rm, 0xFF)
 }
 
-pub fn push_reg(buf: &mut Vec<u8>, reg: Reg) {
+pub fn push_reg(buf: &mut Vec<u8>, reg: Reg) -> Result<()> {
     buf.push(0x50 + reg.enc());
+    Ok(())
 }
 
-pub fn push_imm32(buf: &mut Vec<u8>, imm: i32) {
+pub fn push_imm32(buf: &mut Vec<u8>, imm: i32) -> Result<()> {
     buf.push(0x68);
     emit_i32(buf, imm);
+    Ok(())
 }
 
-pub fn pop(buf: &mut Vec<u8>, reg: Reg) {
+pub fn pop(buf: &mut Vec<u8>, reg: Reg) -> Result<()> {
     buf.push(0x58 + reg.enc());
+    Ok(())
 }
 
-pub fn call_rel32(buf: &mut Vec<u8>, rel: i32) {
+pub fn call_rel32(buf: &mut Vec<u8>, rel: i32) -> Result<()> {
     buf.push(0xE8);
     emit_i32(buf, rel);
+    Ok(())
 }
 
-pub fn ret(buf: &mut Vec<u8>) {
+pub fn ret(buf: &mut Vec<u8>) -> Result<()> {
     buf.push(0xC3);
+    Ok(())
 }
 
-pub fn jmp_rel32(buf: &mut Vec<u8>, rel: i32) {
+pub fn jmp_rel32(buf: &mut Vec<u8>, rel: i32) -> Result<()> {
     buf.push(0xE9);
     emit_i32(buf, rel);
+    Ok(())
 }
 
-pub fn jcc_rel32(buf: &mut Vec<u8>, cond: Cond, rel: i32) {
+pub fn jcc_rel32(buf: &mut Vec<u8>, cond: Cond, rel: i32) -> Result<()> {
     buf.push(0x0F);
     buf.push(0x80 + cond.opcode_offset());
     emit_i32(buf, rel);
+    Ok(())
 }
 
-pub fn setcc(buf: &mut Vec<u8>, cond: Cond, dst: Operand) {
-    let suffix = modrm_suffix(0, dst); // /0
+pub fn setcc(buf: &mut Vec<u8>, cond: Cond, dst: Operand) -> Result<()> {
+    let suffix = modrm_suffix(0, dst)?; // /0
     buf.push(0x0F);
     buf.push(0x90 + cond.opcode_offset());
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn syscall(buf: &mut Vec<u8>) {
+pub fn syscall(buf: &mut Vec<u8>) -> Result<()> {
     buf.extend_from_slice(&[0x0F, 0x05]);
+    Ok(())
 }
 
-pub fn int(buf: &mut Vec<u8>, imm: u8) {
-    buf.push(0xCD);
-    buf.push(imm);
+pub fn int(buf: &mut Vec<u8>, imm: u8) -> Result<()> {
+    buf.extend_from_slice(&[0xCD, imm]);
+    Ok(())
 }
 
-pub fn lea_r32_mem(buf: &mut Vec<u8>, dst: Reg, src: Mem) {
-    let suffix = modrm_mem_suffix(dst.enc(), src);
+pub fn lea_r32_mem(buf: &mut Vec<u8>, dst: Reg, src: Mem) -> Result<()> {
+    let suffix = modrm_mem_suffix(dst.enc(), src)?;
     buf.push(0x8D);
     buf.extend(suffix);
+    Ok(())
 }
 
-fn modrm_mem_suffix(reg_op: u8, mem: Mem) -> Vec<u8> {
+fn modrm_mem_suffix(reg_op: u8, mem: Mem) -> Result<Vec<u8>> {
     let mut out = Vec::new();
-    encode_mem(reg_op, mem, &mut out);
-    out
+    encode_mem(reg_op, mem, &mut out)?;
+    Ok(out)
 }
 
-pub fn cdq(buf: &mut Vec<u8>) {
+pub fn cdq(buf: &mut Vec<u8>) -> Result<()> {
     buf.push(0x99);
+    Ok(())
 }
 
-pub fn imul_r32_rm32(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
-    let suffix = modrm_suffix(dst.enc(), src);
+pub fn imul_r32_rm32(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
+    let suffix = modrm_suffix(dst.enc(), src)?;
     buf.extend_from_slice(&[0x0F, 0xAF]);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn idiv(buf: &mut Vec<u8>, rm: Operand) {
-    encode_unary(buf, 7, rm, 0xF7);
+pub fn idiv(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_unary(buf, 7, rm, 0xF7)
 }
 
-pub fn div(buf: &mut Vec<u8>, rm: Operand) {
-    encode_unary(buf, 6, rm, 0xF7);
+pub fn div(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_unary(buf, 6, rm, 0xF7)
 }
 
-fn encode_shift_rm32_imm8(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand, imm: i8) {
+fn encode_shift_rm32_imm8(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand, imm: i8) -> Result<()> {
     let ext = match op {
         ShiftOp::Shl => 4,
         ShiftOp::Shr => 5,
         ShiftOp::Sar => 7,
     };
-    let suffix = modrm_suffix(ext, rm);
+    let suffix = modrm_suffix(ext, rm)?;
     buf.push(0xC1);
     buf.extend(suffix);
     emit_i8(buf, imm);
+    Ok(())
 }
 
-pub fn shl_rm32_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) {
-    encode_shift_rm32_imm8(buf, ShiftOp::Shl, rm, imm);
+pub fn shl_rm32_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) -> Result<()> {
+    encode_shift_rm32_imm8(buf, ShiftOp::Shl, rm, imm)
 }
 
-pub fn shr_rm32_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) {
-    encode_shift_rm32_imm8(buf, ShiftOp::Shr, rm, imm);
+pub fn shr_rm32_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) -> Result<()> {
+    encode_shift_rm32_imm8(buf, ShiftOp::Shr, rm, imm)
 }
 
-pub fn sar_rm32_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) {
-    encode_shift_rm32_imm8(buf, ShiftOp::Sar, rm, imm);
+pub fn sar_rm32_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) -> Result<()> {
+    encode_shift_rm32_imm8(buf, ShiftOp::Sar, rm, imm)
 }
 
-fn encode_shift_rm32_cl(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand) {
+fn encode_shift_rm32_cl(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand) -> Result<()> {
     let ext = match op {
         ShiftOp::Shl => 4,
         ShiftOp::Shr => 5,
         ShiftOp::Sar => 7,
     };
-    let suffix = modrm_suffix(ext, rm);
+    let suffix = modrm_suffix(ext, rm)?;
     buf.push(0xD3);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn shl_rm32_cl(buf: &mut Vec<u8>, rm: Operand) {
-    encode_shift_rm32_cl(buf, ShiftOp::Shl, rm);
+pub fn shl_rm32_cl(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_shift_rm32_cl(buf, ShiftOp::Shl, rm)
 }
 
-pub fn shr_rm32_cl(buf: &mut Vec<u8>, rm: Operand) {
-    encode_shift_rm32_cl(buf, ShiftOp::Shr, rm);
+pub fn shr_rm32_cl(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_shift_rm32_cl(buf, ShiftOp::Shr, rm)
 }
 
-pub fn sar_rm32_cl(buf: &mut Vec<u8>, rm: Operand) {
-    encode_shift_rm32_cl(buf, ShiftOp::Sar, rm);
+pub fn sar_rm32_cl(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_shift_rm32_cl(buf, ShiftOp::Sar, rm)
 }
 
-pub fn movzx_r32_rm8(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
-    let suffix = modrm_suffix(dst.enc(), src);
+pub fn movzx_r32_rm8(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
+    let suffix = modrm_suffix(dst.enc(), src)?;
     buf.extend_from_slice(&[0x0F, 0xB6]);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn movsx_r32_rm8(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
-    let suffix = modrm_suffix(dst.enc(), src);
+pub fn movsx_r32_rm8(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
+    let suffix = modrm_suffix(dst.enc(), src)?;
     buf.extend_from_slice(&[0x0F, 0xBE]);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn movsx_r32_rm16(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
-    let suffix = modrm_suffix(dst.enc(), src);
+pub fn movsx_r32_rm16(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
+    let suffix = modrm_suffix(dst.enc(), src)?;
     buf.extend_from_slice(&[0x0F, 0xBF]);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn movzx_r32_rm16(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
-    let suffix = modrm_suffix(dst.enc(), src);
+pub fn movzx_r32_rm16(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
+    let suffix = modrm_suffix(dst.enc(), src)?;
     buf.extend_from_slice(&[0x0F, 0xB7]);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn lfence(buf: &mut Vec<u8>) {
+pub fn lfence(buf: &mut Vec<u8>) -> Result<()> {
     buf.extend_from_slice(&[0x0F, 0xAE, 0xE8]);
+    Ok(())
 }
 
-pub fn sfence(buf: &mut Vec<u8>) {
+pub fn sfence(buf: &mut Vec<u8>) -> Result<()> {
     buf.extend_from_slice(&[0x0F, 0xAE, 0xF8]);
+    Ok(())
 }
 
-pub fn mfence(buf: &mut Vec<u8>) {
+pub fn mfence(buf: &mut Vec<u8>) -> Result<()> {
     buf.extend_from_slice(&[0x0F, 0xAE, 0xF0]);
+    Ok(())
 }
 
-pub fn rdtsc(buf: &mut Vec<u8>) {
+pub fn rdtsc(buf: &mut Vec<u8>) -> Result<()> {
     buf.extend_from_slice(&[0x0F, 0x31]);
+    Ok(())
 }
 
 /// Encode a generic `Inst` to bytes.
-pub fn encode_inst(buf: &mut Vec<u8>, inst: Inst) {
+pub fn encode_inst(buf: &mut Vec<u8>, inst: Inst) -> Result<()> {
     match inst {
         Inst::MovRM32Imm32 { dst, imm } => mov_rm32_imm32(buf, dst, imm),
         Inst::MovRM32R32 { dst, src } => mov_rm32_r32(buf, dst, src),
@@ -434,7 +486,7 @@ pub fn encode_inst(buf: &mut Vec<u8>, inst: Inst) {
         Inst::JmpRel32(rel) => jmp_rel32(buf, rel),
         Inst::Jcc { cond, target } => match target {
             JmpTarget::Rel32(rel) => jcc_rel32(buf, cond, rel),
-            JmpTarget::Label(_) => panic!("Jcc with label must be emitted via Assembler"),
+            JmpTarget::Label(_) => bail!(EncodeError::LabelJumpInEncoder),
         },
         Inst::Setcc { cond, dst } => setcc(buf, cond, dst),
         Inst::Syscall => syscall(buf),

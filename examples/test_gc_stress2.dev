@@ -1,0 +1,34 @@
+package stress2
+
+from std.io import puts
+from std.alloc import alloc
+from std.gc import collect, leak_check, collections, heap_live
+
+pub def main() -> int32:
+    # Fill the 4 MiB heap with 16 KiB blocks, dropping each reference after
+    # allocating (only the current block stays reachable).  When the free list
+    # runs out, the allocator must run a collection, sweep the dropped blocks,
+    # and keep handing out memory until the loop finishes.
+    var i: int32 = 0
+    var total: int32 = 0
+    while i < 1024:
+        var p: ptr[char] = alloc(16384)
+        if p == (0 as ptr[char]):
+            puts("alloc returned null\n")
+            return 1
+        i = i + 1
+        total = total + 16384
+    # Every block except the last one is unreachable -> they must have been
+    # reclaimed by the automatic collections; nothing may leak.
+    collect()
+    if leak_check() != 0:
+        puts("leak after auto-gc\n")
+        return 2
+    if heap_live() > 16384:
+        puts("live too high\n")
+        return 3
+    if collections() == 0:
+        puts("no collection ran\n")
+        return 4
+    puts("stress2 ok\n")
+    return 0

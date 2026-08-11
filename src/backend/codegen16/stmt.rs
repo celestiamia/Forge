@@ -10,7 +10,7 @@ impl<'p> CodeGen16<'p> {
                     .ok_or_else(|| anyhow!("unknown local: {}", name))?;
                 if let Some(e) = init {
                     self.eval_expr(e)?;
-                    self.store_slot(slot, Reg16::Ax, Reg8::Al);
+                    self.store_slot(slot, Reg16::Ax, Reg8::Al)?;
                 }
             }
             Stmt::StackAlloc { name, .. } => {
@@ -23,7 +23,7 @@ impl<'p> CodeGen16<'p> {
                     .get(name)
                     .ok_or_else(|| anyhow!("missing array pointer slot: {}", name))?;
                 self.asm.lea_bp(Reg16::Ax, raw_off);
-                self.store_slot(slot, Reg16::Ax, Reg8::Al);
+                self.store_slot(slot, Reg16::Ax, Reg8::Al)?;
             }
             Stmt::Assign { lhs, rhs } => {
                 self.lvalue_addr(lhs)?;

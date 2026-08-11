@@ -24,7 +24,7 @@ impl<'p> CodeGen16<'p> {
                     .locals
                     .get(name)
                     .ok_or_else(|| anyhow!("unknown variable: {}", name))?;
-                self.load_slot(*slot);
+                self.load_slot(*slot)?;
             }
             ExprKind::Bin { op, left, right } => self.eval_bin(*op, left, right, &e.ty)?,
             ExprKind::Call { func, args } => self.eval_call(func, args)?,
@@ -113,7 +113,7 @@ impl<'p> CodeGen16<'p> {
                         self.asm.mov16_rr(Reg16::Ax, Reg16::Dx);
                     }
                 }
-                _ => unreachable!(),
+                _ => bail!("unhandled binary op {:?}", op),
             }
             return Ok(());
         }
@@ -133,7 +133,7 @@ impl<'p> CodeGen16<'p> {
         match op {
             BinOp::And => self.asm.je_short_lab(shortcut),
             BinOp::Or => self.asm.jne_short_lab(shortcut),
-            _ => unreachable!(),
+            _ => bail!("unhandled binary op {:?}", op),
         }
         self.eval_expr(right)?;
         self.asm.test_ax_ax();
@@ -144,7 +144,7 @@ impl<'p> CodeGen16<'p> {
         match op {
             BinOp::And => self.asm.mov16_imm(Reg16::Ax, 0),
             BinOp::Or => self.asm.mov16_imm(Reg16::Ax, 1),
-            _ => unreachable!(),
+            _ => bail!("unhandled binary op {:?}", op),
         }
         self.asm.bind(end);
         Ok(())

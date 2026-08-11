@@ -1,0 +1,28 @@
+package test_gc
+
+from std.io import puts
+from std.alloc import alloc, free
+from std.gc import collect, leak_check, heap_capacity, collections
+from std.fmt import format_i32
+
+pub def show(n: int32) -> void:
+    var buf: ptr[char] = alloc(16)
+    var len: uint64 = format_i32(buf, n)
+    unsafe:
+        *(buf + len) = (10 as char)
+        *(buf + (len + 1)) = (0 as char)
+    puts(buf)
+    free(buf)
+
+pub def main() -> int32:
+    # Test 1: Simple leak probe - allocate and don't free.  `p` is still a live
+    # local in this frame, so the conservative collector finds it as a root and
+    # leak_check reports 0.  Dropping the reference (e.g. by overwriting `p` or
+    # returning from the frame) makes the block unreachable instead.
+    var p: ptr[char] = alloc(64)
+    show(leak_check() as int32)  # 0: still reachable via the live local
+    collect()
+    show(leak_check() as int32)  # 0: still reachable
+    show(heap_capacity() as int32)
+    show(collections() as int32)
+    return 0

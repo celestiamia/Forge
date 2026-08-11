@@ -1,0 +1,26 @@
+package test_reuse
+
+from std.io import puts
+from std.alloc import alloc, free
+from std.gc import collect, leak_check, heap_capacity, collections
+from std.fmt import format_i32
+
+pub def show(n: int32) -> void:
+    var buf: ptr[char] = alloc(16)
+    var len: uint64 = format_i32(buf, n)
+    unsafe:
+        *(buf + len) = (10 as char)
+        *(buf + (len + 1)) = (0 as char)
+    puts(buf)
+    free(buf)
+
+pub def main() -> int32:
+    var a: ptr[char] = alloc(16)
+    free(a)
+    var b: ptr[char] = alloc(16)
+    if b != a:
+        puts("reuse fail\n")
+        return 1
+    free(b)
+    show(0 as int32)
+    return 0

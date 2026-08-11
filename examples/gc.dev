@@ -1,0 +1,41 @@
+package gc_test
+
+from std.io import puts
+from std.alloc import alloc, free
+from std.gc import collect, leak_check, heap_capacity, collections
+from std.fmt import format_i32
+
+# Format `n` as decimal, append a newline, and print it.  Allocates (and frees)
+# a scratch buffer internally so callers can print stats without managing one.
+pub def show(n: int32) -> void:
+    var buf: ptr[char] = alloc(16)
+    var len: uint64 = format_i32(buf, n)
+    unsafe:
+        *(buf + len) = (10 as char)
+        *(buf + (len + 1)) = (0 as char)
+    puts(buf)
+    free(buf)
+
+pub def main() -> int32:
+    # free-list reuse: alloc -> free -> alloc returns the same slot.
+    var a: ptr[char] = alloc(16)
+    free(a)
+    var b: ptr[char] = alloc(16)
+    if b != a:
+        puts("reuse fail\n")
+        return 1
+    free(b)
+
+    # conservative leak detection: a dropped reference is reported (64), then
+    # reclaimed; afterwards the heap is clean.  The pointer is kept in a local
+    # variable in main's frame so the conservative stack scan can find it as a
+    # root while it is still live, then overwritten to make it unreachable.
+    var p: ptr[char] = alloc(64)
+    p = alloc(48)  # overwrite p; the 64-byte block is now unreachable
+    show(leak_check() as int32)      # 64
+    collect()
+    show(leak_check() as int32)      # 0
+    show(heap_capacity() as int32)   # 4194304
+    show(collections() as int32)     # 1
+    puts("reuse ok\n")
+    return 0

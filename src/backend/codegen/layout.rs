@@ -16,23 +16,25 @@ impl<'p> CodeGen<'p> {
         slot
     }
 
-    pub(super) fn store_scalar(&mut self, offset: i32) {
+    pub(super) fn store_scalar(&mut self, offset: i32) -> Result<()> {
         self.asm
-            .mov(Mem::base_disp(Reg::Rbp, offset), Reg::Rax);
+            .mov(Mem::base_disp(Reg::Rbp, offset), Reg::Rax)?;
+        Ok(())
     }
 
-    pub(super) fn store_rdx_64(&mut self) {
-        self.asm.mov(Mem::base(Reg::Rdx), Reg::Rax);
+    pub(super) fn store_rdx_64(&mut self) -> Result<()> {
+        self.asm.mov(Mem::base(Reg::Rdx), Reg::Rax)
     }
 
-    pub(super) fn store_width(&mut self, width: u32, addr: Reg, value: Reg) {
+    pub(super) fn store_width(&mut self, width: u32, addr: Reg, value: Reg) -> Result<()> {
         let mem = Mem::base(addr);
         match width {
-            8 => self.asm.store8(mem, value),
-            16 => self.asm.store16(mem, value),
-            32 => self.asm.store32(mem, value),
-            _ => self.asm.mov(mem, value),
+            8 => self.asm.store8(mem, value)?,
+            16 => self.asm.store16(mem, value)?,
+            32 => self.asm.store32(mem, value)?,
+            _ => self.asm.mov(mem, value)?,
         }
+        Ok(())
     }
 
     pub(super) fn lvalue_store_width(&self, lv: &LValue) -> u32 {
@@ -63,13 +65,13 @@ impl<'p> CodeGen<'p> {
 
     pub(super) fn load_from_addr(&mut self, ty: &Type) -> Result<()> {
         match ty {
-            Type::I8 => self.asm.movsx8(Reg::Rax, Mem::base(Reg::Rax)),
-            Type::U8 | Type::Char | Type::Bool => self.asm.movzx8(Reg::Rax, Mem::base(Reg::Rax)),
-            Type::I16 => self.asm.movsx16(Reg::Rax, Mem::base(Reg::Rax)),
-            Type::U16 => self.asm.movzx16(Reg::Rax, Mem::base(Reg::Rax)),
-            Type::I32 => self.asm.movsxd(Reg::Rax, Mem::base(Reg::Rax)),
-            Type::U32 => self.asm.mov32(Reg::Rax, Mem::base(Reg::Rax)),
-            _ => self.asm.mov(Reg::Rax, Mem::base(Reg::Rax)),
+            Type::I8 => self.asm.movsx8(Reg::Rax, Mem::base(Reg::Rax))?,
+            Type::U8 | Type::Char | Type::Bool => self.asm.movzx8(Reg::Rax, Mem::base(Reg::Rax))?,
+            Type::I16 => self.asm.movsx16(Reg::Rax, Mem::base(Reg::Rax))?,
+            Type::U16 => self.asm.movzx16(Reg::Rax, Mem::base(Reg::Rax))?,
+            Type::I32 => self.asm.movsxd(Reg::Rax, Mem::base(Reg::Rax))?,
+            Type::U32 => self.asm.mov32(Reg::Rax, Mem::base(Reg::Rax))?,
+            _ => self.asm.mov(Reg::Rax, Mem::base(Reg::Rax))?,
         }
         Ok(())
     }

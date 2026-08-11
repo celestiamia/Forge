@@ -3,7 +3,9 @@
 
 #![allow(dead_code)]
 
+use crate::backend::error::{fmt_operand64, EncodeError};
 use crate::backend::x64::{AluOp, Cond, Inst, JmpTarget, Mem, Operand, Reg, Scale, ShiftOp};
+use anyhow::{bail, Result};
 
 pub fn emit_u8(buf: &mut Vec<u8>, v: u8) {
     buf.push(v);
@@ -69,7 +71,7 @@ pub fn sib(scale: u8, index: u8, base: u8) -> u8 {
     ((scale & 3) << 6) | ((index & 7) << 3) | (base & 7)
 }
 
-fn encode_modrm_sib_disp(rex: &mut Rex, reg_op: u8, rm: Operand, out: &mut Vec<u8>, is_byte: bool) {
+fn encode_modrm_sib_disp(rex: &mut Rex, reg_op: u8, rm: Operand, out: &mut Vec<u8>, is_byte: bool) -> Result<()> {
     match rm {
         Operand::Reg(r) => {
             if r.is_high() {
@@ -79,28 +81,31 @@ fn encode_modrm_sib_disp(rex: &mut Rex, reg_op: u8, rm: Operand, out: &mut Vec<u
                 rex.force = true;
             }
             out.push(modrm(0b11, reg_op, r.enc()));
+            Ok(())
         }
         Operand::Mem(mem) => encode_mem(rex, reg_op, mem, out),
-        _ => panic!("invalid r/m operand: {:?}", rm),
+        _ => bail!(EncodeError::InvalidRmOperand {
+            operand: fmt_operand64(&rm),
+        }),
     }
 }
 
 /// Returns the ModR/M+SIB+displacement bytes and updates `rex` with any X/B
 /// bits required by the memory addressing.
-pub fn modrm_suffix(rex: &mut Rex, reg_op: u8, rm: Operand) -> Vec<u8> {
+pub fn modrm_suffix(rex: &mut Rex, reg_op: u8, rm: Operand) -> Result<Vec<u8>> {
     let mut out = Vec::new();
-    encode_modrm_sib_disp(rex, reg_op, rm, &mut out, false);
-    out
+    encode_modrm_sib_disp(rex, reg_op, rm, &mut out, false)?;
+    Ok(out)
 }
 
 /// Same as `modrm_suffix` but for byte-sized r/m operands (SETcc/MOVZX/MOVSX 8-bit).
-pub fn modrm_suffix_byte(rex: &mut Rex, reg_op: u8, rm: Operand) -> Vec<u8> {
+pub fn modrm_suffix_byte(rex: &mut Rex, reg_op: u8, rm: Operand) -> Result<Vec<u8>> {
     let mut out = Vec::new();
-    encode_modrm_sib_disp(rex, reg_op, rm, &mut out, true);
-    out
+    encode_modrm_sib_disp(rex, reg_op, rm, &mut out, true)?;
+    Ok(out)
 }
 
-fn encode_mem(rex: &mut Rex, reg_op: u8, mem: Mem, out: &mut Vec<u8>) {
+fn encode_mem(rex: &mut Rex, reg_op: u8, mem: Mem, out: &mut Vec<u8>) -> Result<()> {
     match mem {
         Mem::Disp32(disp) => {
             // [disp32] requires SIB with base=101, index=100, mod=00.
@@ -108,21 +113,22 @@ fn encode_mem(rex: &mut Rex, reg_op: u8, mem: Mem, out: &mut Vec<u8>) {
             out.push(sib(0b00, 0b100, 0b101));
             emit_i32(out, disp);
         }
-        Mem::Base(base) => encode_base_mem(rex, reg_op, base, None, Scale::One, 0, out),
+        Mem::Base(base) => encode_base_mem(rex, reg_op, base, None, Scale::One, 0, out)?,
         Mem::BaseDisp(base, disp) => {
-            encode_base_mem(rex, reg_op, base, None, Scale::One, disp, out)
+            encode_base_mem(rex, reg_op, base, None, Scale::One, disp, out)?
         }
         Mem::BaseIndexScale(base, index, scale) => {
-            encode_base_mem(rex, reg_op, base, Some(index), scale, 0, out)
+            encode_base_mem(rex, reg_op, base, Some(index), scale, 0, out)?
         }
         Mem::BaseIndexScaleDisp(base, index, scale, disp) => {
-            encode_base_mem(rex, reg_op, base, Some(index), scale, disp, out)
+            encode_base_mem(rex, reg_op, base, Some(index), scale, disp, out)?
         }
         Mem::RipRel(disp) => {
             out.push(modrm(0b00, reg_op, 0b101));
             emit_i32(out, disp);
         }
     }
+    Ok(())
 }
 
 fn encode_base_mem(
@@ -133,7 +139,7 @@ fn encode_base_mem(
     scale: Scale,
     disp: i32,
     out: &mut Vec<u8>,
-) {
+) -> Result<()> {
     if base.is_high() {
         rex.b = true;
     }
@@ -143,7 +149,9 @@ fn encode_base_mem(
         None => 0b100,
         Some(r) => {
             if matches!(r, Reg::Rsp | Reg::R12) {
-                panic!("RSP/R12 cannot be used as an index register");
+                bail!(EncodeError::InvalidIndexRegister {
+                    reg: format!("{:?}", r),
+                });
             }
             if r.is_high() {
                 rex.x = true;
@@ -181,51 +189,56 @@ fn encode_base_mem(
         }
         0b01 => out.push(disp as i8 as u8),
         0b10 => emit_i32(out, disp),
-        _ => unreachable!(),
+        _ => bail!(EncodeError::InvalidModBits { mod_bits }),
     }
+    Ok(())
 }
 
 // ----------------------------------------------------------------------------
 // Per-instruction encoders
 // ----------------------------------------------------------------------------
 
-pub fn mov_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) {
+pub fn mov_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.r = src.is_high();
-    let suffix = modrm_suffix(&mut rex, src.enc(), dst);
+    let suffix = modrm_suffix(&mut rex, src.enc(), dst)?;
     rex.emit(buf);
     buf.push(0x89);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn mov_r64_rm64(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
+pub fn mov_r64_rm64(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.r = dst.is_high();
-    let suffix = modrm_suffix(&mut rex, dst.enc(), src);
+    let suffix = modrm_suffix(&mut rex, dst.enc(), src)?;
     rex.emit(buf);
     buf.push(0x8B);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn mov_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) {
+pub fn mov_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) -> Result<()> {
     let mut rex = Rex::new(true);
-    let suffix = modrm_suffix(&mut rex, 0, dst); // /0
+    let suffix = modrm_suffix(&mut rex, 0, dst)?; // /0
     rex.emit(buf);
     buf.push(0xC7);
     buf.extend(suffix);
     emit_i32(buf, imm);
+    Ok(())
 }
 
-pub fn mov_r64_imm64(buf: &mut Vec<u8>, dst: Reg, imm: i64) {
+pub fn mov_r64_imm64(buf: &mut Vec<u8>, dst: Reg, imm: i64) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.b = dst.is_high();
     rex.emit(buf);
     buf.push(0xB8 + dst.enc());
     emit_i64(buf, imm);
+    Ok(())
 }
 
 /// `mov r8, r/m8` (sign-agnostic 8-bit store: source is the low byte of `src`).
-pub fn mov_rm8_r64(buf: &mut Vec<u8>, dst: Mem, src: Reg) {
+pub fn mov_rm8_r64(buf: &mut Vec<u8>, dst: Mem, src: Reg) -> Result<()> {
     let mut rex = Rex::new(false);
     rex.r = src.is_high();
     if matches!(src, Reg::Rsp | Reg::Rbp | Reg::Rsi | Reg::Rdi) {
@@ -233,65 +246,73 @@ pub fn mov_rm8_r64(buf: &mut Vec<u8>, dst: Mem, src: Reg) {
         // from AH/BH/CH/DH when used as the reg operand.
         rex.force = true;
     }
-    let suffix = modrm_suffix_byte(&mut rex, src.enc(), Operand::Mem(dst));
+    let suffix = modrm_suffix_byte(&mut rex, src.enc(), Operand::Mem(dst))?;
     rex.emit(buf);
     buf.push(0x88);
     buf.extend(suffix);
+    Ok(())
 }
 
 /// `mov r/m16, r16` (16-bit store with operand-size prefix).
-pub fn mov_rm16_r64(buf: &mut Vec<u8>, dst: Mem, src: Reg) {
+pub fn mov_rm16_r64(buf: &mut Vec<u8>, dst: Mem, src: Reg) -> Result<()> {
     let mut rex = Rex::new(false);
     rex.r = src.is_high();
-    let suffix = modrm_suffix(&mut rex, src.enc(), Operand::Mem(dst));
+    let suffix = modrm_suffix(&mut rex, src.enc(), Operand::Mem(dst))?;
     rex.emit(buf);
     buf.push(0x66);
     buf.push(0x89);
     buf.extend(suffix);
+    Ok(())
 }
 
 /// `mov r/m32, r32` (32-bit store that ignores the upper 32 bits).
-pub fn mov_rm32_r64(buf: &mut Vec<u8>, dst: Mem, src: Reg) {
+pub fn mov_rm32_r64(buf: &mut Vec<u8>, dst: Mem, src: Reg) -> Result<()> {
     let mut rex = Rex::new(false);
     rex.r = src.is_high();
-    let suffix = modrm_suffix(&mut rex, src.enc(), Operand::Mem(dst));
+    let suffix = modrm_suffix(&mut rex, src.enc(), Operand::Mem(dst))?;
     rex.emit(buf);
     buf.push(0x89);
     buf.extend(suffix);
+    Ok(())
 }
 
 /// `mov r32, r/m32` (32-bit load that zero-extends to 64 bits).
-pub fn mov_r32_rm32(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
+pub fn mov_r32_rm32(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
     let mut rex = Rex::new(false);
     rex.r = dst.is_high();
-    let suffix = modrm_suffix(&mut rex, dst.enc(), src);
+    let suffix = modrm_suffix(&mut rex, dst.enc(), src)?;
     rex.emit(buf);
     buf.push(0x8B);
     buf.extend(suffix);
+    Ok(())
 }
 
 /// `movzx r64, r/m16` (16-bit zero-extending load).
-pub fn movzx_r64_rm16(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
+pub fn movzx_r64_rm16(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.r = dst.is_high();
-    let suffix = modrm_suffix(&mut rex, dst.enc(), src);
+    let suffix = modrm_suffix(&mut rex, dst.enc(), src)?;
     rex.emit(buf);
     buf.extend_from_slice(&[0x0F, 0xB7]);
     buf.extend(suffix);
+    Ok(())
 }
 
 /// Memory-fence instructions.
-pub fn lfence(buf: &mut Vec<u8>) {
+pub fn lfence(buf: &mut Vec<u8>) -> Result<()> {
     buf.extend_from_slice(&[0x0F, 0xAE, 0xE8]);
+    Ok(())
 }
-pub fn sfence(buf: &mut Vec<u8>) {
+pub fn sfence(buf: &mut Vec<u8>) -> Result<()> {
     buf.extend_from_slice(&[0x0F, 0xAE, 0xF8]);
+    Ok(())
 }
-pub fn mfence(buf: &mut Vec<u8>) {
+pub fn mfence(buf: &mut Vec<u8>) -> Result<()> {
     buf.extend_from_slice(&[0x0F, 0xAE, 0xF0]);
+    Ok(())
 }
 
-pub fn alu_rm64_r64(buf: &mut Vec<u8>, op: AluOp, dst: Operand, src: Reg) {
+pub fn alu_rm64_r64(buf: &mut Vec<u8>, op: AluOp, dst: Operand, src: Reg) -> Result<()> {
     let opcode = match op {
         AluOp::Add => 0x01,
         AluOp::Sub => 0x29,
@@ -301,13 +322,14 @@ pub fn alu_rm64_r64(buf: &mut Vec<u8>, op: AluOp, dst: Operand, src: Reg) {
     };
     let mut rex = Rex::new(true);
     rex.r = src.is_high();
-    let suffix = modrm_suffix(&mut rex, src.enc(), dst);
+    let suffix = modrm_suffix(&mut rex, src.enc(), dst)?;
     rex.emit(buf);
     buf.push(opcode);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn alu_rm64_imm32(buf: &mut Vec<u8>, op: AluOp, dst: Operand, imm: i32) {
+pub fn alu_rm64_imm32(buf: &mut Vec<u8>, op: AluOp, dst: Operand, imm: i32) -> Result<()> {
     let ext = match op {
         AluOp::Add => 0,
         AluOp::Or => 1,
@@ -316,271 +338,296 @@ pub fn alu_rm64_imm32(buf: &mut Vec<u8>, op: AluOp, dst: Operand, imm: i32) {
         AluOp::Xor => 6,
     };
     let mut rex = Rex::new(true);
-    let suffix = modrm_suffix(&mut rex, ext, dst);
+    let suffix = modrm_suffix(&mut rex, ext, dst)?;
     rex.emit(buf);
     buf.push(0x81);
     buf.extend(suffix);
     emit_i32(buf, imm);
+    Ok(())
 }
 
-pub fn add_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) {
-    alu_rm64_r64(buf, AluOp::Add, dst, src);
+pub fn add_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) -> Result<()> {
+    alu_rm64_r64(buf, AluOp::Add, dst, src)
 }
-pub fn add_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) {
-    alu_rm64_imm32(buf, AluOp::Add, dst, imm);
+pub fn add_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) -> Result<()> {
+    alu_rm64_imm32(buf, AluOp::Add, dst, imm)
 }
-pub fn sub_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) {
-    alu_rm64_r64(buf, AluOp::Sub, dst, src);
+pub fn sub_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) -> Result<()> {
+    alu_rm64_r64(buf, AluOp::Sub, dst, src)
 }
-pub fn sub_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) {
-    alu_rm64_imm32(buf, AluOp::Sub, dst, imm);
+pub fn sub_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) -> Result<()> {
+    alu_rm64_imm32(buf, AluOp::Sub, dst, imm)
 }
-pub fn and_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) {
-    alu_rm64_r64(buf, AluOp::And, dst, src);
+pub fn and_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) -> Result<()> {
+    alu_rm64_r64(buf, AluOp::And, dst, src)
 }
-pub fn and_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) {
-    alu_rm64_imm32(buf, AluOp::And, dst, imm);
+pub fn and_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) -> Result<()> {
+    alu_rm64_imm32(buf, AluOp::And, dst, imm)
 }
-pub fn or_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) {
-    alu_rm64_r64(buf, AluOp::Or, dst, src);
+pub fn or_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) -> Result<()> {
+    alu_rm64_r64(buf, AluOp::Or, dst, src)
 }
-pub fn or_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) {
-    alu_rm64_imm32(buf, AluOp::Or, dst, imm);
+pub fn or_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) -> Result<()> {
+    alu_rm64_imm32(buf, AluOp::Or, dst, imm)
 }
-pub fn xor_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) {
-    alu_rm64_r64(buf, AluOp::Xor, dst, src);
+pub fn xor_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) -> Result<()> {
+    alu_rm64_r64(buf, AluOp::Xor, dst, src)
 }
-pub fn xor_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) {
-    alu_rm64_imm32(buf, AluOp::Xor, dst, imm);
+pub fn xor_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) -> Result<()> {
+    alu_rm64_imm32(buf, AluOp::Xor, dst, imm)
 }
 
-pub fn cmp_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) {
+pub fn cmp_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.r = src.is_high();
-    let suffix = modrm_suffix(&mut rex, src.enc(), dst);
+    let suffix = modrm_suffix(&mut rex, src.enc(), dst)?;
     rex.emit(buf);
     buf.push(0x39);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn cmp_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) {
+pub fn cmp_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) -> Result<()> {
     let mut rex = Rex::new(true);
-    let suffix = modrm_suffix(&mut rex, 7, dst); // /7
+    let suffix = modrm_suffix(&mut rex, 7, dst)?; // /7
     rex.emit(buf);
     buf.push(0x81);
     buf.extend(suffix);
     emit_i32(buf, imm);
+    Ok(())
 }
 
-pub fn test_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) {
+pub fn test_rm64_r64(buf: &mut Vec<u8>, dst: Operand, src: Reg) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.r = src.is_high();
-    let suffix = modrm_suffix(&mut rex, src.enc(), dst);
+    let suffix = modrm_suffix(&mut rex, src.enc(), dst)?;
     rex.emit(buf);
     buf.push(0x85);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn test_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) {
+pub fn test_rm64_imm32(buf: &mut Vec<u8>, dst: Operand, imm: i32) -> Result<()> {
     let mut rex = Rex::new(true);
-    let suffix = modrm_suffix(&mut rex, 0, dst); // /0
+    let suffix = modrm_suffix(&mut rex, 0, dst)?; // /0
     rex.emit(buf);
     buf.push(0xF7);
     buf.extend(suffix);
     emit_i32(buf, imm);
+    Ok(())
 }
 
-fn encode_unary(buf: &mut Vec<u8>, ext: u8, rm: Operand, opcode: u8) {
+fn encode_unary(buf: &mut Vec<u8>, ext: u8, rm: Operand, opcode: u8) -> Result<()> {
     let mut rex = Rex::new(true);
-    let suffix = modrm_suffix(&mut rex, ext, rm);
+    let suffix = modrm_suffix(&mut rex, ext, rm)?;
     rex.emit(buf);
     buf.push(opcode);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn neg(buf: &mut Vec<u8>, rm: Operand) {
-    encode_unary(buf, 3, rm, 0xF7);
+pub fn neg(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_unary(buf, 3, rm, 0xF7)
 }
 
-pub fn inc(buf: &mut Vec<u8>, rm: Operand) {
-    encode_unary(buf, 0, rm, 0xFF);
+pub fn inc(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_unary(buf, 0, rm, 0xFF)
 }
 
-pub fn dec(buf: &mut Vec<u8>, rm: Operand) {
-    encode_unary(buf, 1, rm, 0xFF);
+pub fn dec(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_unary(buf, 1, rm, 0xFF)
 }
 
-pub fn push_reg64(buf: &mut Vec<u8>, reg: Reg) {
+pub fn push_reg64(buf: &mut Vec<u8>, reg: Reg) -> Result<()> {
     let mut rex = Rex::new(false);
     rex.b = reg.is_high();
     rex.emit(buf);
     buf.push(0x50 + reg.enc());
+    Ok(())
 }
 
-pub fn pop_reg64(buf: &mut Vec<u8>, reg: Reg) {
+pub fn pop_reg64(buf: &mut Vec<u8>, reg: Reg) -> Result<()> {
     let mut rex = Rex::new(false);
     rex.b = reg.is_high();
     rex.emit(buf);
     buf.push(0x58 + reg.enc());
+    Ok(())
 }
 
-pub fn call_rel32(buf: &mut Vec<u8>, rel: i32) {
+pub fn call_rel32(buf: &mut Vec<u8>, rel: i32) -> Result<()> {
     buf.push(0xE8);
     emit_i32(buf, rel);
+    Ok(())
 }
 
-pub fn ret(buf: &mut Vec<u8>) {
+pub fn ret(buf: &mut Vec<u8>) -> Result<()> {
     buf.push(0xC3);
+    Ok(())
 }
 
-pub fn jmp_rel32(buf: &mut Vec<u8>, rel: i32) {
+pub fn jmp_rel32(buf: &mut Vec<u8>, rel: i32) -> Result<()> {
     buf.push(0xE9);
     emit_i32(buf, rel);
+    Ok(())
 }
 
-pub fn jcc_rel32(buf: &mut Vec<u8>, cond: Cond, rel: i32) {
+pub fn jcc_rel32(buf: &mut Vec<u8>, cond: Cond, rel: i32) -> Result<()> {
     buf.push(0x0F);
     buf.push(0x80 + cond.opcode_offset());
     emit_i32(buf, rel);
+    Ok(())
 }
 
-pub fn setcc(buf: &mut Vec<u8>, cond: Cond, dst: Operand) {
+pub fn setcc(buf: &mut Vec<u8>, cond: Cond, dst: Operand) -> Result<()> {
     let mut rex = Rex::new(false);
-    let suffix = modrm_suffix_byte(&mut rex, 0, dst); // /0
+    let suffix = modrm_suffix_byte(&mut rex, 0, dst)?; // /0
     rex.emit(buf);
     buf.push(0x0F);
     buf.push(0x90 + cond.opcode_offset());
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn syscall(buf: &mut Vec<u8>) {
+pub fn syscall(buf: &mut Vec<u8>) -> Result<()> {
     buf.extend_from_slice(&[0x0F, 0x05]);
+    Ok(())
 }
 
-pub fn lea_r64_mem(buf: &mut Vec<u8>, dst: Reg, src: Mem) {
+pub fn lea_r64_mem(buf: &mut Vec<u8>, dst: Reg, src: Mem) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.r = dst.is_high();
-    let suffix = modrm_mem_suffix(&mut rex, dst.enc(), src);
+    let suffix = modrm_mem_suffix(&mut rex, dst.enc(), src)?;
     rex.emit(buf);
     buf.push(0x8D);
     buf.extend(suffix);
+    Ok(())
 }
 
-fn modrm_mem_suffix(rex: &mut Rex, reg_op: u8, mem: Mem) -> Vec<u8> {
+fn modrm_mem_suffix(rex: &mut Rex, reg_op: u8, mem: Mem) -> Result<Vec<u8>> {
     let mut out = Vec::new();
-    encode_mem(rex, reg_op, mem, &mut out);
-    out
+    encode_mem(rex, reg_op, mem, &mut out)?;
+    Ok(out)
 }
 
-pub fn cwd(buf: &mut Vec<u8>) {
+pub fn cwd(buf: &mut Vec<u8>) -> Result<()> {
     buf.extend_from_slice(&[0x66, 0x99]);
+    Ok(())
 }
 
-pub fn cdq(buf: &mut Vec<u8>) {
+pub fn cdq(buf: &mut Vec<u8>) -> Result<()> {
     buf.push(0x99);
+    Ok(())
 }
 
-pub fn cqo(buf: &mut Vec<u8>) {
+pub fn cqo(buf: &mut Vec<u8>) -> Result<()> {
     buf.extend_from_slice(&[0x48, 0x99]);
+    Ok(())
 }
 
-pub fn imul_r64_rm64(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
+pub fn imul_r64_rm64(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.r = dst.is_high();
-    let suffix = modrm_suffix(&mut rex, dst.enc(), src);
+    let suffix = modrm_suffix(&mut rex, dst.enc(), src)?;
     rex.emit(buf);
     buf.extend_from_slice(&[0x0F, 0xAF]);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn idiv(buf: &mut Vec<u8>, rm: Operand) {
-    encode_unary(buf, 7, rm, 0xF7);
+pub fn idiv(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_unary(buf, 7, rm, 0xF7)
 }
 
-pub fn udiv(buf: &mut Vec<u8>, rm: Operand) {
-    encode_unary(buf, 6, rm, 0xF7);
+pub fn udiv(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_unary(buf, 6, rm, 0xF7)
 }
 
-fn encode_shift_rm64_imm8(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand, imm: i8) {
+fn encode_shift_rm64_imm8(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand, imm: i8) -> Result<()> {
     let ext = match op {
         ShiftOp::Shl => 4,
         ShiftOp::Shr => 5,
         ShiftOp::Sar => 7,
     };
     let mut rex = Rex::new(true);
-    let suffix = modrm_suffix(&mut rex, ext, rm);
+    let suffix = modrm_suffix(&mut rex, ext, rm)?;
     rex.emit(buf);
     buf.push(0xC1);
     buf.extend(suffix);
     emit_i8(buf, imm);
+    Ok(())
 }
 
-pub fn shl_rm64_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) {
-    encode_shift_rm64_imm8(buf, ShiftOp::Shl, rm, imm);
+pub fn shl_rm64_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) -> Result<()> {
+    encode_shift_rm64_imm8(buf, ShiftOp::Shl, rm, imm)
 }
-pub fn shl_rm64_cl(buf: &mut Vec<u8>, rm: Operand) {
-    encode_shift_rm64_cl(buf, ShiftOp::Shl, rm);
+pub fn shl_rm64_cl(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_shift_rm64_cl(buf, ShiftOp::Shl, rm)
 }
-pub fn shr_rm64_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) {
-    encode_shift_rm64_imm8(buf, ShiftOp::Shr, rm, imm);
+pub fn shr_rm64_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) -> Result<()> {
+    encode_shift_rm64_imm8(buf, ShiftOp::Shr, rm, imm)
 }
-pub fn shr_rm64_cl(buf: &mut Vec<u8>, rm: Operand) {
-    encode_shift_rm64_cl(buf, ShiftOp::Shr, rm);
+pub fn shr_rm64_cl(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_shift_rm64_cl(buf, ShiftOp::Shr, rm)
 }
-pub fn sar_rm64_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) {
-    encode_shift_rm64_imm8(buf, ShiftOp::Sar, rm, imm);
+pub fn sar_rm64_imm8(buf: &mut Vec<u8>, rm: Operand, imm: i8) -> Result<()> {
+    encode_shift_rm64_imm8(buf, ShiftOp::Sar, rm, imm)
 }
-pub fn sar_rm64_cl(buf: &mut Vec<u8>, rm: Operand) {
-    encode_shift_rm64_cl(buf, ShiftOp::Sar, rm);
+pub fn sar_rm64_cl(buf: &mut Vec<u8>, rm: Operand) -> Result<()> {
+    encode_shift_rm64_cl(buf, ShiftOp::Sar, rm)
 }
 
-fn encode_shift_rm64_cl(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand) {
+fn encode_shift_rm64_cl(buf: &mut Vec<u8>, op: ShiftOp, rm: Operand) -> Result<()> {
     let ext = match op {
         ShiftOp::Shl => 4,
         ShiftOp::Shr => 5,
         ShiftOp::Sar => 7,
     };
     let mut rex = Rex::new(true);
-    let suffix = modrm_suffix_byte(&mut rex, ext, rm);
+    let suffix = modrm_suffix_byte(&mut rex, ext, rm)?;
     rex.emit(buf);
     buf.push(0xD3);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn movzx_r64_rm8(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
+pub fn movzx_r64_rm8(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.r = dst.is_high();
-    let suffix = modrm_suffix_byte(&mut rex, dst.enc(), src);
+    let suffix = modrm_suffix_byte(&mut rex, dst.enc(), src)?;
     rex.emit(buf);
     buf.extend_from_slice(&[0x0F, 0xB6]);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn movsx_r64_rm8(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
+pub fn movsx_r64_rm8(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.r = dst.is_high();
-    let suffix = modrm_suffix_byte(&mut rex, dst.enc(), src);
+    let suffix = modrm_suffix_byte(&mut rex, dst.enc(), src)?;
     rex.emit(buf);
     buf.extend_from_slice(&[0x0F, 0xBE]);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn movsx_r64_rm16(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
+pub fn movsx_r64_rm16(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.r = dst.is_high();
-    let suffix = modrm_suffix(&mut rex, dst.enc(), src);
+    let suffix = modrm_suffix(&mut rex, dst.enc(), src)?;
     rex.emit(buf);
     buf.extend_from_slice(&[0x0F, 0xBF]);
     buf.extend(suffix);
+    Ok(())
 }
 
-pub fn movsxd_r64_rm32(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
+pub fn movsxd_r64_rm32(buf: &mut Vec<u8>, dst: Reg, src: Operand) -> Result<()> {
     let mut rex = Rex::new(true);
     rex.r = dst.is_high();
-    let suffix = modrm_suffix(&mut rex, dst.enc(), src);
+    let suffix = modrm_suffix(&mut rex, dst.enc(), src)?;
     rex.emit(buf);
     buf.push(0x63);
     buf.extend(suffix);
+    Ok(())
 }
 
 // ----------------------------------------------------------------------------
@@ -588,7 +635,7 @@ pub fn movsxd_r64_rm32(buf: &mut Vec<u8>, dst: Reg, src: Operand) {
 // ----------------------------------------------------------------------------
 
 /// `movsd xmm, xmm` (double-precision move)
-pub fn movsd_xmm_xmm(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+pub fn movsd_xmm_xmm(buf: &mut Vec<u8>, dst: Reg, src: Reg) -> Result<()> {
     buf.push(0xF2);
     let mut rex = Rex::new(false);
     rex.r = dst.is_high();
@@ -597,34 +644,37 @@ pub fn movsd_xmm_xmm(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
     buf.push(0x0F);
     buf.push(0x10);
     buf.push(modrm(0b11, dst.enc(), src.enc()));
+    Ok(())
 }
 
 /// `movsd xmm, m64` (load double from memory)
-pub fn movsd_xmm_mem(buf: &mut Vec<u8>, dst: Reg, src: Mem) {
+pub fn movsd_xmm_mem(buf: &mut Vec<u8>, dst: Reg, src: Mem) -> Result<()> {
     buf.push(0xF2);
     let mut rex = Rex::new(false);
     rex.r = dst.is_high();
-    let suffix = modrm_mem_suffix(&mut rex, dst.enc(), src);
+    let suffix = modrm_mem_suffix(&mut rex, dst.enc(), src)?;
     rex.emit(buf);
     buf.push(0x0F);
     buf.push(0x10);
     buf.extend(suffix);
+    Ok(())
 }
 
 /// `movsd m64, xmm` (store double to memory)
-pub fn movsd_mem_xmm(buf: &mut Vec<u8>, dst: Mem, src: Reg) {
+pub fn movsd_mem_xmm(buf: &mut Vec<u8>, dst: Mem, src: Reg) -> Result<()> {
     buf.push(0xF2);
     let mut rex = Rex::new(false);
     rex.r = src.is_high();
-    let suffix = modrm_mem_suffix(&mut rex, src.enc(), dst);
+    let suffix = modrm_mem_suffix(&mut rex, src.enc(), dst)?;
     rex.emit(buf);
     buf.push(0x0F);
     buf.push(0x11);
     buf.extend(suffix);
+    Ok(())
 }
 
 /// `addsd xmm, xmm` (double-precision add)
-pub fn addsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+pub fn addsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) -> Result<()> {
     buf.push(0xF2);
     let mut rex = Rex::new(false);
     rex.r = dst.is_high();
@@ -633,10 +683,11 @@ pub fn addsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
     buf.push(0x0F);
     buf.push(0x58);
     buf.push(modrm(0b11, dst.enc(), src.enc()));
+    Ok(())
 }
 
 /// `subsd xmm, xmm` (double-precision subtract)
-pub fn subsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+pub fn subsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) -> Result<()> {
     buf.push(0xF2);
     let mut rex = Rex::new(false);
     rex.r = dst.is_high();
@@ -645,10 +696,11 @@ pub fn subsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
     buf.push(0x0F);
     buf.push(0x5C);
     buf.push(modrm(0b11, dst.enc(), src.enc()));
+    Ok(())
 }
 
 /// `mulsd xmm, xmm` (double-precision multiply)
-pub fn mulsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+pub fn mulsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) -> Result<()> {
     buf.push(0xF2);
     let mut rex = Rex::new(false);
     rex.r = dst.is_high();
@@ -657,10 +709,11 @@ pub fn mulsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
     buf.push(0x0F);
     buf.push(0x59);
     buf.push(modrm(0b11, dst.enc(), src.enc()));
+    Ok(())
 }
 
 /// `divsd xmm, xmm` (double-precision divide)
-pub fn divsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+pub fn divsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) -> Result<()> {
     buf.push(0xF2);
     let mut rex = Rex::new(false);
     rex.r = dst.is_high();
@@ -669,10 +722,11 @@ pub fn divsd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
     buf.push(0x0F);
     buf.push(0x5E);
     buf.push(modrm(0b11, dst.enc(), src.enc()));
+    Ok(())
 }
 
 /// `cvtsi2sd xmm, r64` (convert signed int to double)
-pub fn cvtsi2sd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+pub fn cvtsi2sd(buf: &mut Vec<u8>, dst: Reg, src: Reg) -> Result<()> {
     buf.push(0xF2);
     let mut rex = Rex::new(true);
     rex.r = dst.is_high();
@@ -681,10 +735,11 @@ pub fn cvtsi2sd(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
     buf.push(0x0F);
     buf.push(0x2A);
     buf.push(modrm(0b11, dst.enc(), src.enc()));
+    Ok(())
 }
 
 /// `cvttsd2si r64, xmm` (convert double to signed int with truncation)
-pub fn cvttsd2si(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
+pub fn cvttsd2si(buf: &mut Vec<u8>, dst: Reg, src: Reg) -> Result<()> {
     buf.push(0xF2);
     let mut rex = Rex::new(true);
     rex.r = dst.is_high();
@@ -693,10 +748,11 @@ pub fn cvttsd2si(buf: &mut Vec<u8>, dst: Reg, src: Reg) {
     buf.push(0x0F);
     buf.push(0x2C);
     buf.push(modrm(0b11, dst.enc(), src.enc()));
+    Ok(())
 }
 
 /// `ucomisd xmm, xmm` (unordered compare double)
-pub fn ucomisd(buf: &mut Vec<u8>, a: Reg, b: Reg) {
+pub fn ucomisd(buf: &mut Vec<u8>, a: Reg, b: Reg) -> Result<()> {
     buf.push(0x66);
     let mut rex = Rex::new(false);
     rex.r = a.is_high();
@@ -705,10 +761,11 @@ pub fn ucomisd(buf: &mut Vec<u8>, a: Reg, b: Reg) {
     buf.push(0x0F);
     buf.push(0x2E);
     buf.push(modrm(0b11, a.enc(), b.enc()));
+    Ok(())
 }
 
 /// Encode a generic `Inst` to bytes. This is the high-level dispatcher.
-pub fn encode_inst(buf: &mut Vec<u8>, inst: Inst) {
+pub fn encode_inst(buf: &mut Vec<u8>, inst: Inst) -> Result<()> {
     match inst {
         Inst::MovRM64Imm32 { dst, imm } => mov_rm64_imm32(buf, dst, imm),
         Inst::MovRM64R64 { dst, src } => mov_rm64_r64(buf, dst, src),
@@ -730,7 +787,7 @@ pub fn encode_inst(buf: &mut Vec<u8>, inst: Inst) {
         Inst::JmpRel32(rel) => jmp_rel32(buf, rel),
         Inst::Jcc { cond, target } => match target {
             JmpTarget::Rel32(rel) => jcc_rel32(buf, cond, rel),
-            JmpTarget::Label(_) => panic!("Jcc with label must be emitted via Assembler"),
+            JmpTarget::Label(_) => bail!(EncodeError::LabelJumpInEncoder),
         },
         Inst::Setcc { cond, dst } => setcc(buf, cond, dst),
         Inst::Syscall => syscall(buf),

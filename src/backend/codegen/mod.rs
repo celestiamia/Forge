@@ -23,6 +23,35 @@ pub(super) const BASE_VADDR: u64 = 0x400000;
 pub(super) const EHDR_SIZE: u64 = 64;
 pub(super) const PHDR_SIZE: u64 = 56;
 
+// Size of the garbage-collected heap, reserved as zero-initialized `.bss`.  The
+// heap is a single contiguous region managed by a free-list allocator with
+// conservative mark-and-sweep collection.
+pub(super) const HEAP_ARENA_SIZE: u64 = 4 * 1024 * 1024; // 4 MiB
+
+// `gc_state` block (lives in `.data`, right after the rand seed).  All offsets
+// are in bytes from the base of the block; the base is patched into each GC
+// runtime helper via `gc_state_patches`.
+pub(super) const GC_HEAP_BASE: u64 = 0;
+pub(super) const GC_HEAP_LIMIT: u64 = 8;
+pub(super) const GC_FREE_HEAD: u64 = 16;
+pub(super) const GC_STACK_TOP: u64 = 24;
+pub(super) const GC_RD_START: u64 = 32;
+pub(super) const GC_RD_END: u64 = 40;
+pub(super) const GC_ALLOC_COUNT: u64 = 48;
+pub(super) const GC_FREE_COUNT: u64 = 56;
+pub(super) const GC_GC_COUNT: u64 = 64;
+pub(super) const GC_LIVE_BYTES: u64 = 72;
+pub(super) const GC_SINCE_GC: u64 = 80;
+pub(super) const GC_STATE_SIZE: usize = 96; // 12 u64s, 16-byte aligned
+
+// Block header layout (8 bytes immediately before the payload returned to the
+// user).  Bit 0 = USED, bit 1 = MARK; the remaining bits hold the 8-byte-aligned
+// payload size.
+pub(super) const H_USED: u64 = 0x1;
+pub(super) const H_MARK: u64 = 0x2;
+pub(super) const H_SIZE_MASK: u64 = !0x7;
+pub(super) const H_HDR_SIZE: u64 = 8;
+
 #[derive(Clone, Debug)]
 pub(super) struct Slot {
     offset: i32,
@@ -51,10 +80,13 @@ pub struct CodeGen<'p> {
     addr_tmp: i32,
     ret_label: u32,
     rand_seed_patch: Option<usize>,
-    /// Code offset of the `movabs rax, <bump_ptr_vaddr>` immediate in `_dev_alloc`,
-    /// patched once the `.data` segment layout is known.  `None` when the program
-    /// does not use the bump allocator.
-    alloc_ptr_patch: Option<usize>,
+    /// Code offsets of `movabs rax, <gc_state_vaddr>` immediates (64-bit) placed at
+    /// the start of each GC runtime helper, patched once the `.data` segment
+    /// layout is known.  Empty when the program does not use the GC heap.
+    gc_state_patches: Vec<usize>,
+    /// True when the GC runtime (alloc/free/collect/stats) is emitted, i.e. when
+    /// the program imports any of the `_dev_*` memory-management helpers.
+    gc_enabled: bool,
     loop_end_stack: Vec<u32>,
     loop_head_stack: Vec<u32>,
 }
@@ -140,15 +172,36 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         cg.func_labels.insert("_dev_fcntl".to_string(), fc);
         let ss = cg.asm.new_label();
         cg.func_labels.insert("_dev_setsockopt".to_string(), ss);
-        let need_alloc = prog
+        // The garbage-collected heap runtime is needed when the program imports
+        // any of the `_dev_*` memory-management helpers.  All of the GC
+        // helpers are emitted together as a unit whenever any one of them is
+        // referenced, so callers can use alloc/free plus explicit collect/stats.
+        let need_gc = prog
             .externs
             .iter()
-            .any(|e| e.name == "_dev_alloc" || e.name == "_dev_free");
-        if need_alloc {
-            let a = cg.asm.new_label();
-            cg.func_labels.insert("_dev_alloc".to_string(), a);
-            let f = cg.asm.new_label();
-            cg.func_labels.insert("_dev_free".to_string(), f);
+            .any(|e| match e.name.as_str() {
+                "_dev_alloc"
+                | "_dev_free"
+                | "_dev_gc_collect"
+                | "_dev_gc_leak_check"
+                | "_dev_gc_alloc_count"
+                | "_dev_gc_free_count"
+                | "_dev_gc_collections"
+                | "_dev_gc_heap_live"
+                | "_dev_gc_heap_capacity" => true,
+                _ => false,
+            });
+        cg.gc_enabled = need_gc;
+        if need_gc {
+            cg.func_labels.insert("_dev_alloc".to_string(), cg.asm.new_label());
+            cg.func_labels.insert("_dev_free".to_string(), cg.asm.new_label());
+            cg.func_labels.insert("_dev_gc_collect".to_string(), cg.asm.new_label());
+            cg.func_labels.insert("_dev_gc_leak_check".to_string(), cg.asm.new_label());
+            cg.func_labels.insert("_dev_gc_alloc_count".to_string(), cg.asm.new_label());
+            cg.func_labels.insert("_dev_gc_free_count".to_string(), cg.asm.new_label());
+            cg.func_labels.insert("_dev_gc_collections".to_string(), cg.asm.new_label());
+            cg.func_labels.insert("_dev_gc_heap_live".to_string(), cg.asm.new_label());
+            cg.func_labels.insert("_dev_gc_heap_capacity".to_string(), cg.asm.new_label());
         }
         let pow = cg.asm.new_label();
         cg.func_labels.insert("__forge_pow".to_string(), pow);
@@ -216,7 +269,7 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         cg.asm.push_byte(0);
     }
 
-    let bytes = cg.asm.into_bytes();
+    let bytes = cg.asm.into_bytes()?;
     let split = *cg.label_offsets.get(&rodata_start).unwrap_or(&bytes.len());
     let mut code = bytes[..split].to_vec();
     let mut rodata = bytes[split..].to_vec();
@@ -245,16 +298,30 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
     }
 
     let mut bss_size: u64 = 0;
-    if let Some(alloc_patch) = cg.alloc_ptr_patch {
-        const ARENA_SIZE: u64 = 64 * 1024;
-        let bump_data_off = data.len() as u64;
-        data.extend_from_slice(&[0u8; 8]); // placeholder for the bump pointer
-        let bump_ptr_vaddr = data_vaddr + bump_data_off;
-        code[alloc_patch..alloc_patch + 8].copy_from_slice(&bump_ptr_vaddr.to_le_bytes());
+    if cg.gc_enabled {
+        // `gc_state` block (zero-initialized here; `heap_base` is pre-seeded to the
+        // start of the `.bss` heap so the runtime can lazily build the initial free
+        // list on first allocation).  Every `movabs rax, &gc_state` placeholder in
+        // the runtime helpers is patched to `state_vaddr`.
+        let state_off = data.len();
+        data.resize(state_off + GC_STATE_SIZE, 0u8);
+        let state_vaddr = data_vaddr + state_off as u64;
+        for &p in &cg.gc_state_patches {
+            code[p..p + 8].copy_from_slice(&state_vaddr.to_le_bytes());
+        }
+        // The heap lives in `.bss`, immediately after `.data`.
+        bss_size = HEAP_ARENA_SIZE;
         let arena_base = data_vaddr + data.len() as u64;
-        data[bump_data_off as usize..bump_data_off as usize + 8]
+        data[state_off + GC_HEAP_BASE as usize..state_off + (GC_HEAP_BASE as usize) + 8]
             .copy_from_slice(&arena_base.to_le_bytes());
-        bss_size = ARENA_SIZE;
+        // Root-scan window over read-only data (module-level globals + string
+        // literals live in `.rodata`).
+        let rd_start = rodata_vaddr;
+        let rd_end = rodata_vaddr + rodata.len() as u64;
+        data[state_off + GC_RD_START as usize..state_off + (GC_RD_START as usize) + 8]
+            .copy_from_slice(&rd_start.to_le_bytes());
+        data[state_off + GC_RD_END as usize..state_off + (GC_RD_END as usize) + 8]
+            .copy_from_slice(&rd_end.to_le_bytes());
     }
 
     Ok(Box::new(Elf64Writer::new(code, rodata, data, bss_size, entry_vaddr)))
@@ -270,6 +337,7 @@ pub(super) fn align_up_u64(value: u64, align: u64) -> u64 {
 }
 
 mod expr;
+mod gc;
 mod layout;
 mod runtime;
 
@@ -299,7 +367,8 @@ impl<'p> CodeGen<'p> {
             addr_tmp: 0,
             ret_label: 0,
             rand_seed_patch: None,
-            alloc_ptr_patch: None,
+            gc_state_patches: Vec::new(),
+            gc_enabled: false,
             loop_end_stack: Vec::new(),
             loop_head_stack: Vec::new(),
         }
@@ -341,6 +410,19 @@ impl<'p> CodeGen<'p> {
             self.emit_stmt(s)?;
         }
 
+        // Zero the whole frame before leaving it.  The conservative GC scans
+        // the whole stack as a root set, so a pointer left behind in a dead
+        // (already-returned) frame would otherwise keep its block alive and
+        // invisible to `_dev_gc_leak_check`.  Clearing every byte of the frame
+        // (named locals, expression temporaries and the address scratch slot
+        // alike) makes the collector precise about function exit: only slots
+        // in *live* frames can act as roots.
+        let frame = align_up(self.frame_size, 16);
+        for off in (8..=frame).step_by(8) {
+            self.asm
+                .mov(Mem::base_disp(Reg::Rbp, -(off as i32)), 0i32)?;
+        }
+
         self.bind_label(self.ret_label);
         self.asm.leave();
         self.asm.ret();
@@ -377,33 +459,33 @@ pub(super) fn emit_stmt(&mut self, s: &Stmt) -> Result<()> {
         };
         if let Some(e) = init {
             self.eval_expr(e)?;
-            self.store_scalar(slot.offset);
+            self.store_scalar(slot.offset)?;
         }
         let _ = ty;
         Ok(())
     }
 
     fn emit_stack_alloc(&mut self, name: &str, elem_ty: &Type, count: &usize) -> Result<()> {
-        let elem_size = elem_ty.byte_size();
+        let elem_size = elem_ty.byte_size()?;
         let raw_size = elem_size * *count;
         let align = elem_size.max(1);
         let raw_slot = self.alloc_slot(raw_size, align);
         let ptr_slot = self.alloc_named_slot(name, 8, 8);
         self.asm
-            .lea(Reg::Rax, Mem::base_disp(Reg::Rbp, raw_slot.offset));
-        self.store_scalar(ptr_slot.offset);
+            .lea(Reg::Rax, Mem::base_disp(Reg::Rbp, raw_slot.offset))?;
+        self.store_scalar(ptr_slot.offset)?;
         Ok(())
     }
 
     fn emit_assign(&mut self, lhs: &LValue, rhs: &Expr) -> Result<()> {
         self.lvalue_addr(lhs)?;
         self.asm
-            .mov(Mem::base_disp(Reg::Rbp, self.addr_tmp), Reg::Rax);
+            .mov(Mem::base_disp(Reg::Rbp, self.addr_tmp), Reg::Rax)?;
         self.eval_expr(rhs)?;
         self.asm
-            .mov(Reg::Rdx, Mem::base_disp(Reg::Rbp, self.addr_tmp));
+            .mov(Reg::Rdx, Mem::base_disp(Reg::Rbp, self.addr_tmp))?;
         let width = self.lvalue_store_width(lhs);
-        self.store_width(width, Reg::Rdx, Reg::Rax);
+        self.store_width(width, Reg::Rdx, Reg::Rax)?;
         Ok(())
     }
 

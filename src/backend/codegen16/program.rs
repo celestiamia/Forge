@@ -65,7 +65,7 @@ impl<'p> CodeGen16<'p> {
         let frame = align_up_u8(self.frame_size, 2);
 
         if is_start {
-            self.emit_segment_setup();
+            self.emit_segment_setup()?;
         }
 
         self.asm.push(Reg16::Bp);
@@ -78,7 +78,7 @@ impl<'p> CodeGen16<'p> {
             let slot = *self.locals.get(name).ok_or_else(|| anyhow!("missing param slot: {}", name))?;
             let arg_off = (4 + i * 2) as i8;
             self.asm.load16_bp(Reg16::Ax, arg_off);
-            self.store_slot(slot, Reg16::Ax, Reg8::Al);
+            self.store_slot(slot, Reg16::Ax, Reg8::Al)?;
         }
 
         self.ret_label = self.asm.new_label();
@@ -92,12 +92,13 @@ impl<'p> CodeGen16<'p> {
         Ok(())
     }
 
-    pub(super) fn emit_segment_setup(&mut self) {
+    pub(super) fn emit_segment_setup(&mut self) -> Result<()> {
         self.asm.xor_ax_ax();
-        self.asm.mov_seg_ax(SegReg::Ds);
-        self.asm.mov_seg_ax(SegReg::Es);
-        self.asm.mov_seg_ax(SegReg::Ss);
+        self.asm.mov_seg_ax(SegReg::Ds)?;
+        self.asm.mov_seg_ax(SegReg::Es)?;
+        self.asm.mov_seg_ax(SegReg::Ss)?;
         self.asm.mov16_imm(Reg16::Sp, 0x7C00);
+        Ok(())
     }
 
     pub(super) fn emit_builtins(

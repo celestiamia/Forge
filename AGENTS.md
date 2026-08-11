@@ -6,6 +6,8 @@
 cargo build                # debug build
 cargo build --release      # recommended for running compiled Forge programs
 cargo test                 # full suite (unit + integration)
+cargo test --test integration              # integration tests only (fastest end-to-end check)
+cargo test --test integration <name>       # single integration test by name
 ```
 
 No formatter, linter, or typechecker config exists. No pre-commit hooks.
@@ -29,15 +31,23 @@ qemu-system-x86_64 -fda boot.bin -nographic
 
 ## Architecture
 
-Source in `src/`. Single Rust crate (`forgec`), edition 2024.
+Single Rust crate (`forgec`), edition 2024, source in `src/`.
 
-**Pipeline:** `src/lexer/` → `src/parser/` → `src/sema/` (type check) → `src/lower/` (AST→IR) → `src/backend/codegen/` (codegen) → `src/backend/ir.rs` (IR) → `src/obj/` (ELF/flat writer)
+**Pipeline:** `src/lexer/` → `src/parser/` → `src/ast/` → `src/driver/loader.rs` (import merge) → `src/sema/` (type check) → `src/lower/` (AST→IR) → `src/backend/codegen/` (x86_64 codegen) → `src/obj/` (ELF/flat writer)
 
-`src/mir/` directory is empty (not yet wired).
+`src/mir/` does not exist (future scaffolding only).
 
-**Module structure:** Single Rust crate (`forgec`), edition 2024, in `src/`.
+**Backend layout:**
+- `src/backend/ir.rs` — IR definition (`Type`, `BinOp`, `Expr`, `Stmt`, `Program`); shared by lower + all codegen backends
+- `src/backend/codegen/` — x86_64 code generator, split across `mod.rs` (entry/frame), `expr.rs`, `runtime.rs`, `gc.rs`, `layout.rs`
+- `src/backend/codegen32/` — x86_32 codegen (cdecl ABI)
+- `src/backend/codegen16/` — x86_16 real-mode codegen
+- `src/backend/x64/` — x86_64 encoder (REX, ModR/M, SIB)
+- `src/backend/x86/` — x86_32 encoder (no REX)
+- `src/backend/x16/` — x86_16 encoder
+- `src/obj/` — `elf.rs` (ELF64), `elf32.rs` (ELF32), `flat.rs` (boot sector)
 
-**Type system:** `src/ty/mod.rs` defines the `Type` enum (not `ty/prims.rs`). `src/backend/ir.rs` defines a parallel IR `Type` enum and `BinOp` enum with methods like `is_integer()`, `is_float()`, `is_signed()`.
+**Type system:** `src/ty/mod.rs` defines the `Type` enum (no `ty/prims.rs` exists). Sema (`src/sema/check/typing.rs`) maps dual-spelled names to it. `src/backend/ir.rs` defines a parallel IR `Type` enum with `is_integer()`, `is_float()`, `is_signed()`.
 
 **Target classification** in `src/driver/mod.rs:79`:
 - `x86_64-unknown-linux-gnu` / `native` → hosted, x86_64, ELF64
@@ -50,7 +60,7 @@ Source in `src/`. Single Rust crate (`forgec`), edition 2024.
 - Type names are dual-spelled: `i32`/`int32`/`int`, `u32`/`uint32`/`uint`, `byte`/`u8`, `f64`/`float64`/`float`. Single table in `ty/mod.rs` governs both sema and lowerer.
 - `let` = immutable, `var` = mutable
 - `pub def main()` → mangled to `_forge_main` in hosted targets (runtime `_start` calls it)
-- Hosted runtime helpers (`_dev_puts`, `_dev_exit`, etc.) declared `extern` in `core/*.dev`; the compiler emits them in `src/backend/codegen/runtime.rs`
+- Hosted runtime helpers (`_dev_puts`, `_dev_exit`, etc.) declared `extern` in `core/*.dev`; the compiler emits them in `src/backend/codegen/runtime.rs`. The GC heap helpers (`_dev_alloc`, `_dev_free`, `_dev_gc_*`) live in `src/backend/codegen/gc.rs`
 - `@freestanding` attribute bypasses hosted runtime requirements
 - Power operator (`**`) requires integer operands; desugars to `__forge_pow` runtime call (loop-based, integer-only)
 - Floor division (`//`) is floor-toward-negative-infinity; floor division by zero panics at runtime
@@ -61,7 +71,7 @@ Source in `src/`. Single Rust crate (`forgec`), edition 2024.
 
 `from std.<name> import ...` resolves to `core/<name>.dev` by walking up from source directory. Only `std.*` modules are supported. See `src/driver/loader.rs`.
 
-Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `fmt`.
+Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `gc`, `fmt`. (All except `gc` are cross-target; `gc` is x86_64-only.)
 
 ## Testing quirks
 
@@ -84,6 +94,22 @@ Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `
 - Integer-to-float and float-to-integer casts use **XMM7** (scratch), not XMM0 — XMM0 is used by `eval_float_bin` for binary operations and will be clobbered
 - Parser `parse_type` and `parse_type_atom` call `skip_newlines()` internally; use `parse_type_noskip()` from the `as` handler in `parse_postfix` to avoid consuming newlines that the postfix loop needs to see
 
+## GC heap (x86_64 hosted target only)
+
+- `std.alloc`/`std.gc` map to `_dev_alloc`/`_dev_free`/`_dev_gc_*`, emitted in
+  `src/backend/codegen/gc.rs` whenever the program references any of them
+  (`gc_enabled`).  The 4 MiB heap is `.bss`; `gc_state` (96 B) is in `.data`.
+- Allocator: first-fit free list with splitting, 8-byte header before each
+  payload (bit 0 = USED, bit 1 = MARK, rest = size).  `free` prepends.
+- Collector: conservative mark-and-sweep.  Roots = stack `[rbp, stack_top]`
+  (stack_top captured at `_start`) + `.rodata`.  Automatic collection runs when
+  the free list is exhausted (`_dev_alloc` retries once after collecting).
+- **Every function frame is zeroed on return** (`emit_func` emits the clearing
+  before `leave`) so dead frames cannot act as GC roots — this is what makes
+  `leak_check()` detect dropped references across calls.
+- x86_32 keeps the old bump allocator (no GC); importing `std.alloc` on x86_32
+  is fine, but `std.gc` types/helpers are x86_64-only.
+
 ## Inline assembly
 
 `asm!()` template accepted by the parser; x86_16 backend assembles verbatim template text. Other targets error at codegen.
@@ -92,8 +118,12 @@ Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `
 
 - `src/mir/` is scaffolding for future work; not wired into the pipeline
 - `src/ty/mod.rs` `Type` enum is the source of truth for type names — sema and lowerer both route through it
-- Type names `i128`/`uint128` are intentionally unmapped (no backend supports them)
+- Type names `i128`/`uint128` are mapped in sema (`typing.rs`) but unsupported by any backend — they will compile but fail at codegen
 - `.gitignore` comments warn: do NOT gitignore bare `core` (would exclude the `core/` stdlib dir)
+
+## Cross-target parity
+
+When adding a feature to the x86_64 backend, mirror it in `codegen32/` + `x86/` so the `x86_32-unknown-linux-gnu` target stays in parity. The 32-bit target does not support floats — stdlib modules using `f64` will break x86_32 tests.
 
 ## Parser gotchas
 

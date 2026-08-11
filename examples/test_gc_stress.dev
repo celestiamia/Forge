@@ -1,0 +1,44 @@
+package stress
+
+from std.io import puts
+from std.alloc import alloc, free
+from std.gc import collect, leak_check
+
+pub def main() -> int32:
+    var n: uint64 = 200
+    var raw: ptr[char] = alloc(n * 8)
+    if raw == (0 as ptr[char]):
+        puts("alloc fail\n")
+        return 1
+    var ptrs: ptr[ptr[char]] = (raw as ptr[ptr[char]])
+    var i: uint64 = 0
+    while i < n:
+        unsafe:
+            *(ptrs + i) = alloc(32 + i * 4)
+        i = i + 1
+    i = 0
+    while i < n:
+        unsafe:
+            if (i % 2) == 0:
+                free(*(ptrs + i))
+        i = i + 1
+    i = 0
+    while i < n:
+        unsafe:
+            *(ptrs + i) = (0 as ptr[char])
+        i = i + 1
+    var leaked: uint64 = leak_check()
+    collect()
+    var after: uint64 = leak_check()
+    if leaked == 0:
+        puts("no leak before collect\n")
+        return 2
+    if after != 0:
+        puts("leak after collect\n")
+        return 3
+    free(raw)
+    if leak_check() != 0:
+        puts("array leak\n")
+        return 4
+    puts("stress ok\n")
+    return 0

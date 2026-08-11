@@ -1,0 +1,34 @@
+package test_gc4
+
+from std.io import puts
+from std.alloc import alloc, free
+from std.gc import collect, leak_check, heap_capacity, collections, alloc_count
+from std.fmt import format_i32
+
+pub def show(n: int32) -> void:
+    var buf: ptr[char] = alloc(16)
+    var len: uint64 = format_i32(buf, n)
+    unsafe:
+        *(buf + len) = (10 as char)
+        *(buf + (len + 1)) = (0 as char)
+    puts(buf)
+    free(buf)
+
+pub def make_leak() -> ptr[char]:
+    var p: ptr[char] = alloc(64)
+    return p
+
+pub def leak_test() -> void:
+    var leaked: ptr[char] = make_leak()
+    show(leaked as int32)
+    show(alloc_count() as int32)
+    # leaked goes out of scope here
+
+pub def main() -> int32:
+    leak_test()
+    show(leak_check() as int32)  # Should be 64
+    collect()
+    show(leak_check() as int32)  # Should be 0
+    show(heap_capacity() as int32)
+    show(collections() as int32)
+    return 0

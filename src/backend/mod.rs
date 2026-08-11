@@ -14,6 +14,7 @@
 pub mod codegen;
 pub mod codegen32;
 pub mod codegen16;
+pub mod error;
 pub mod ir;
 pub mod x64;
 pub mod x86;

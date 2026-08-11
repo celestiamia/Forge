@@ -135,6 +135,85 @@ fn float_fmt_dev_compiles_and_runs() {
 }
 
 #[test]
+fn gc_dev_compiles_and_runs() {
+    let bin = compile_example("gc");
+    let output = Command::new(&bin).output().expect("failed to run gc binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout,
+        "64\n0\n4194304\n1\nreuse ok\n",
+        "gc produced unexpected output"
+    );
+    assert!(output.status.success(), "gc binary exited with non-zero status");
+}
+
+#[test]
+fn gc_dev_detects_leak_from_dead_frame() {
+    // test_gc2: a pointer dropped when `make_leak` returns must be reported by
+    // leak_check (dead frames are zeroed at function exit), then reclaimed by
+    // collect().
+    let bin = compile_example("test_gc2");
+    let output = Command::new(&bin).output().expect("failed to run test_gc2 binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout,
+        "64\n0\n4194304\n1\n",
+        "test_gc2 produced unexpected output"
+    );
+    assert!(output.status.success(), "test_gc2 binary exited with non-zero status");
+}
+
+#[test]
+fn gc_dev_reuses_freed_blocks() {
+    let bin = compile_example("test_reuse");
+    let output = Command::new(&bin).output().expect("failed to run test_reuse binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "0\n", "test_reuse produced unexpected output");
+    assert!(output.status.success(), "test_reuse binary exited with non-zero status");
+}
+
+#[test]
+fn gc_dev_reuse_then_collect() {
+    // test_reuse_leak: free-list reuse followed by leak detection + collection.
+    // Regression test for the stale free-list `next` pointer bug that crashed
+    // the allocator on the second request after a reuse.
+    let bin = compile_example("test_reuse_leak");
+    let output =
+        Command::new(&bin).output().expect("failed to run test_reuse_leak binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout,
+        "64\n0\n4194304\n1\n",
+        "test_reuse_leak produced unexpected output"
+    );
+    assert!(output.status.success(), "test_reuse_leak binary exited with non-zero status");
+}
+
+#[test]
+fn gc_dev_stress_many_blocks() {
+    // test_gc_stress: 200 blocks, interleaved frees, dropped references, then
+    // collection must reclaim everything.
+    let bin = compile_example("test_gc_stress");
+    let output =
+        Command::new(&bin).output().expect("failed to run test_gc_stress binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "stress ok\n", "test_gc_stress produced unexpected output");
+    assert!(output.status.success(), "test_gc_stress binary exited with non-zero status");
+}
+
+#[test]
+fn gc_dev_auto_collects_on_exhaustion() {
+    // test_gc_stress2: churn 16 MiB of allocations through the 4 MiB arena so
+    // the free list exhausts; the allocator must auto-collect and reuse.
+    let bin = compile_example("test_gc_stress2");
+    let output =
+        Command::new(&bin).output().expect("failed to run test_gc_stress2 binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "stress2 ok\n", "test_gc_stress2 produced unexpected output");
+    assert!(output.status.success(), "test_gc_stress2 binary exited with non-zero status");
+}
+
+#[test]
 fn bump_dev_compiles_and_runs() {
     let bin = compile_example("bump");
     let output = Command::new(&bin).output().expect("failed to run bump binary");

@@ -4,6 +4,8 @@
 //! expression carries its type, variables live in stack slots, and statements
 //! are structured for direct x86-64 emission.
 
+use crate::backend::error::IRTypeError;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     I8,
@@ -51,18 +53,18 @@ impl Type {
         matches!(self, Type::Slice(_))
     }
 
-    pub fn width_bits(&self) -> u32 {
+    pub fn width_bits(&self) -> Result<u32, IRTypeError> {
         match self {
-            Type::I8 | Type::U8 | Type::Char | Type::Bool => 8,
-            Type::I16 | Type::U16 => 16,
-            Type::I32 | Type::U32 | Type::F32 => 32,
-            Type::I64 | Type::U64 | Type::F64 => 64,
-            _ => panic!("width_bits on non-scalar type"),
+            Type::I8 | Type::U8 | Type::Char | Type::Bool => Ok(8),
+            Type::I16 | Type::U16 => Ok(16),
+            Type::I32 | Type::U32 | Type::F32 => Ok(32),
+            Type::I64 | Type::U64 | Type::F64 => Ok(64),
+            _ => Err(IRTypeError::NonScalarWidthBits { ty: self.clone() }),
         }
     }
 
-    pub fn byte_size(&self) -> usize {
-        (self.width_bits() / 8) as usize
+    pub fn byte_size(&self) -> Result<usize, IRTypeError> {
+        Ok((self.width_bits()? / 8) as usize)
     }
 }
 

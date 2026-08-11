@@ -1,21 +1,24 @@
 package std.alloc
 
-# Bump allocator backed by a compiler-emitted arena.
+# Heap memory management backed by the compiler's garbage-collected arena.
 #
-# The hosted runtime provides `_dev_alloc`, which advances a static bump
-# pointer over a 64 KiB `.bss` arena and returns the previous value, and
-# `_dev_free`, which is a no-op (the bump arena never reclaims memory).  They
-# are declared `extern` because they are emitted by the compiler's tiny
-# runtime rather than defined in Forge.
+# The hosted runtime provides `_dev_alloc` (a first-fit free-list allocator with
+# splitting over a 4 MiB `.bss` arena) and `_dev_free` (which prepends the block
+# to the free list so the slot is reusable).  Automatic reclamation is performed
+# by a conservative mark-and-sweep collector (`std.gc`) that runs when the heap
+# is exhausted; `std.gc.collect()` may also be called explicitly.  Both
+# primitives are declared `extern` because they are emitted by the compiler's
+# tiny runtime rather than defined in Forge.
 extern def _dev_alloc(size: uint64) -> ptr[char]
 extern def _dev_free(p: ptr[char]) -> void
 
-# Allocate `size` bytes from the bump arena.  Returns a pointer to the new
-# block, or a null pointer if the arena is exhausted.
+# Allocate `size` bytes from the heap arena.  Returns a pointer to the new
+# block, or a null pointer if the arena is exhausted (after a collection).
 pub def alloc(size: uint64) -> ptr[char]:
     return _dev_alloc(size)
 
-# Release a previously allocated block.  The bump arena does not reclaim
-# memory, so this is currently a no-op; it exists for API compatibility.
+# Release a previously allocated block.  The block's memory is returned to the
+# free list and may be handed back by a subsequent `alloc`.  Passing null or a
+# block not returned by `alloc` is undefined.
 pub def free(p: ptr[char]) -> void:
     _dev_free(p)
