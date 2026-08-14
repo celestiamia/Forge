@@ -17,6 +17,7 @@ impl<'p> CodeGen16<'p> {
                     self.asm.mov16_imm_label(Reg16::Ax, lab);
                 }
                 Literal::Float(_) => bail!("floating point is not supported by the 16-bit backend"),
+                Literal::Bytes(_) => bail!("embedded data is not supported by the 16-bit backend"),
                 Literal::Null => self.asm.mov16_imm(Reg16::Ax, 0),
             },
             ExprKind::Var(name) => {

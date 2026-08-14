@@ -6,6 +6,7 @@ pub mod ast;
 pub mod backend;
 pub mod driver;
 pub mod lexer;
+pub mod linker;
 pub mod lower;
 pub mod obj;
 pub mod parser;

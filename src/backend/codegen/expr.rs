@@ -11,6 +11,11 @@ impl<'p> CodeGen<'p> {
                     let lab = self.string_label(s);
                     self.asm.lea_rip(Reg::Rax, lab)?;
                 }
+                Literal::Bytes(b) => {
+                    let s = unsafe { String::from_utf8_unchecked(b.clone()) };
+                    let lab = self.string_label(&s);
+                    self.asm.lea_rip(Reg::Rax, lab)?;
+                }
                 Literal::Float(v) => {
                     let bits = v.to_bits();
                     self.asm.movabs(Reg::Rax, bits)?;

@@ -13,6 +13,13 @@ impl<'p> CodeGen<'p> {
                     self.asm.mov(Reg::Eax, 0i32)?;
                     self.string_patches.push((patch_off, lab));
                 }
+                Literal::Bytes(b) => {
+                    let s = unsafe { String::from_utf8_unchecked(b.clone()) };
+                    let lab = self.string_label(&s);
+                    let patch_off = self.asm.len() + 2;
+                    self.asm.mov(Reg::Eax, 0i32)?;
+                    self.string_patches.push((patch_off, lab));
+                }
                 Literal::Float(_) => bail!("floating point is not implemented in the x86_32 backend"),
                 Literal::Null => self.asm.mov(Reg::Eax, 0i32)?,
             },

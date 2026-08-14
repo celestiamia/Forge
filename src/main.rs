@@ -6,6 +6,7 @@ mod ast;
 mod backend;
 mod driver;
 mod lexer;
+mod linker;
 mod lower;
 mod obj;
 mod parser;
@@ -24,6 +25,9 @@ struct Args {
     #[arg(long)]
     freestanding: bool,
 
+    #[arg(long, value_name = "PATH")]
+    linker: Option<PathBuf>,
+
     source: PathBuf,
 }
 
@@ -40,6 +44,7 @@ fn main() -> Result<()> {
         output,
         target: args.target,
         freestanding: args.freestanding,
+        linker: args.linker,
     })?;
     Ok(())
 }

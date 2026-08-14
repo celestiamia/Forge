@@ -29,9 +29,19 @@ impl From<LexError> for ParseError {
 }
 
 /// Tokenize `src` and parse it into a [`Module`].
+///
+/// Embedded-file paths (`embed NAME = "path"`) resolve relative to the current
+/// working directory.
 pub fn parse_module(src: &str) -> Result<Module, ParseError> {
+    parse_module_in_dir(src, std::path::Path::new("."))
+}
+
+/// Tokenize `src` and parse it into a [`Module]`, resolving `embed` file paths
+/// relative to `base_dir` (the directory containing the source file).
+pub fn parse_module_in_dir(src: &str, base_dir: &std::path::Path) -> Result<Module, ParseError> {
     let tokens = tokenize_with_pos(src)?;
     let mut parser = Parser::new(tokens);
+    parser.base_dir = base_dir.to_path_buf();
     parser.parse_module()
 }
 
@@ -39,11 +49,16 @@ pub fn parse_module(src: &str) -> Result<Module, ParseError> {
 pub struct Parser {
     tokens: Vec<TokenPos>,
     pos: usize,
+    pub(super) base_dir: std::path::PathBuf,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<TokenPos>) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            base_dir: std::path::PathBuf::from("."),
+        }
     }
 
     pub(super) fn peek(&self) -> &Token {
