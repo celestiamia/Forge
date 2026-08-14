@@ -183,7 +183,9 @@ impl Context {
                         return true;
                     }
                 }
-                TypedStmt::Match { cases, .. } if cases.iter().any(|c| Self::block_contains_return(&c.body)) => {
+                TypedStmt::Match { cases, .. }
+                    if cases.iter().any(|c| Self::block_contains_return(&c.body)) =>
+                {
                     return true;
                 }
                 _ => {}

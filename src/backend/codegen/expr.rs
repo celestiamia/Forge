@@ -164,7 +164,8 @@ impl<'p> CodeGen<'p> {
                 BinOp::Sub => {
                     self.asm.mov(Reg::Rdx, Reg::Rax)?; // right
                     if let (Some(elem), true) = (ptr_elem_size(&left.ty), right.ty.is_integer())
-                        && elem > 1 {
+                        && elem > 1
+                    {
                         self.asm.shl(Reg::Rdx, elem.trailing_zeros() as i8)?;
                     }
                     self.asm.mov(Reg::Rax, Reg::R10)?; // left

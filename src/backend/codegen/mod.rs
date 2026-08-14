@@ -183,18 +183,20 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         // any of the `_dev_*` memory-management helpers.  All of the GC
         // helpers are emitted together as a unit whenever any one of them is
         // referenced, so callers can use alloc/free plus explicit collect/stats.
-        let need_gc = prog.externs.iter().any(|e| matches!(
-            e.name.as_str(),
-            "_dev_alloc"
-                | "_dev_free"
-                | "_dev_gc_collect"
-                | "_dev_gc_leak_check"
-                | "_dev_gc_alloc_count"
-                | "_dev_gc_free_count"
-                | "_dev_gc_collections"
-                | "_dev_gc_heap_live"
-                | "_dev_gc_heap_capacity"
-        ));
+        let need_gc = prog.externs.iter().any(|e| {
+            matches!(
+                e.name.as_str(),
+                "_dev_alloc"
+                    | "_dev_free"
+                    | "_dev_gc_collect"
+                    | "_dev_gc_leak_check"
+                    | "_dev_gc_alloc_count"
+                    | "_dev_gc_free_count"
+                    | "_dev_gc_collections"
+                    | "_dev_gc_heap_live"
+                    | "_dev_gc_heap_capacity"
+            )
+        });
         cg.gc_enabled = need_gc;
         if need_gc {
             cg.func_labels

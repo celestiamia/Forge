@@ -569,13 +569,7 @@ impl Context {
             && let Some(methods) = self.methods.get(&target_name).cloned()
             && let Some(sig) = methods.iter().find(|m| m.name == field.field).cloned()
         {
-            return self.resolve_call(
-                callee,
-                &args_in,
-                &sig,
-                expected,
-                Some(target_name),
-            );
+            return self.resolve_call(callee, &args_in, &sig, expected, Some(target_name));
         }
 
         // Direct function call

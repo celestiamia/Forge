@@ -124,7 +124,7 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
-fn emit_dev_getchar(&mut self) -> Result<()> {
+    fn emit_dev_getchar(&mut self) -> Result<()> {
         let c = *self.func_labels.get("_dev_getchar").unwrap();
         self.bind_label(c);
         self.asm.push(Reg::Rbp)?;
@@ -150,7 +150,7 @@ fn emit_dev_getchar(&mut self) -> Result<()> {
         Ok(())
     }
 
-fn emit_dev_rand(&mut self) -> Result<()> {
+    fn emit_dev_rand(&mut self) -> Result<()> {
         let r = *self.func_labels.get("_dev_rand").unwrap();
         self.bind_label(r);
         let seed_addr_offset = self.asm.len() + 2;

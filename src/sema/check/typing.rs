@@ -224,7 +224,8 @@ pub(super) fn compatible(expected: &Type, got: &Type) -> bool {
 }
 
 pub(super) fn is_layout_compatible_8bit(a: &Type, b: &Type) -> bool {
-    let is_8bit_integer = |t: &Type| matches!(t, Type::Int { width: 8, .. } | Type::Char | Type::Bool);
+    let is_8bit_integer =
+        |t: &Type| matches!(t, Type::Int { width: 8, .. } | Type::Char | Type::Bool);
     is_8bit_integer(a) && is_8bit_integer(b)
 }
 
