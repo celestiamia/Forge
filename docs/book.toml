@@ -1,0 +1,44 @@
+[book]
+title = "Forge Documentation"
+description = "Documentation for the Forge programming language and forgec compiler"
+authors = ["Forge Contributors"]
+language = "en"
+src = "."
+
+[build]
+build-dir = "../target/doc"
+create-missing = false
+use-default-preprocessors = true
+
+[output.html]
+theme = "gitbook"
+smart-punctuation = true
+mathjax-support = false
+additional-css = ["custom.css"]
+no-section-label = false
+default-theme = "light"
+preferred-dark-theme = "coal"
+git-repository-icon = "fa-github"
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+limit-results = 30
+teaser-word-count = 30
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 5
+boost-paragraph = 1
+
+[preprocessor.links]
+ignore-glob = []
+
+[preprocessor.index]
+enabled = true
+
+[preprocessor.plantuml]
+enabled = true
+optional = true

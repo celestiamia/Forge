@@ -1,0 +1,304 @@
+/* Custom CSS for Forge Documentation */
+
+/* Color palette */
+:root {
+  --forge-primary: #2c3e50;
+  --forge-secondary: #34495e;
+  --forge-accent: #e74c3c;
+  --forge-light: #ecf0f1;
+  --forge-dark: #2c3e50;
+  --forge-code-bg: #1e1e1e;
+  --forge-code-text: #d4d4d4;
+}
+
+/* Header styling */
+.book-header {
+  background-color: var(--forge-primary);
+  border-bottom: 3px solid var(--forge-accent);
+}
+
+.book-header .menu-icon {
+  color: var(--forge-light);
+}
+
+.book-header .title {
+  color: var(--forge-light);
+  font-weight: 600;
+}
+
+/* Sidebar */
+.book-summary {
+  background-color: var(--forge-secondary);
+  border-right: 1px solid var(--forge-primary);
+}
+
+.book-summary ul.summary li a {
+  color: var(--forge-light);
+  transition: color 0.2s;
+}
+
+.book-summary ul.summary li a:hover {
+  color: var(--forge-accent);
+}
+
+.book-summary ul.summary li.active > a {
+  color: var(--forge-accent);
+  font-weight: 600;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+/* Chapter headers */
+.chapter h1, .chapter h2, .chapter h3 {
+  color: var(--forge-primary);
+  border-bottom: 1px solid var(--forge-light);
+  padding-bottom: 0.3em;
+}
+
+.chapter h1 {
+  border-bottom: 2px solid var(--forge-accent);
+}
+
+.chapter h2 {
+  margin-top: 2em;
+}
+
+.chapter h3 {
+  color: var(--forge-secondary);
+}
+
+/* Links */
+.chapter a {
+  color: var(--forge-accent);
+  text-decoration: none;
+  border-bottom: 1px dotted transparent;
+  transition: border-color 0.2s;
+}
+
+.chapter a:hover {
+  border-bottom-color: var(--forge-accent);
+}
+
+/* Code blocks */
+.chapter pre {
+  background-color: var(--forge-code-bg);
+  border-radius: 6px;
+  padding: 1em;
+  overflow-x: auto;
+  border: 1px solid #333;
+}
+
+.chapter code {
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 0.15em 0.3em;
+  border-radius: 3px;
+  font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
+  font-size: 0.9em;
+}
+
+.chapter pre code {
+  background-color: transparent;
+  padding: 0;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+
+/* Syntax highlighting (basic) */
+.chapter .keyword { color: #c678dd; }
+.chapter .type { color: #e5c07b; }
+.chapter .function { color: #61afef; }
+.chapter .string { color: #98c379; }
+.chapter .number { color: #d19a66; }
+.chapter .comment { color: #5c6370; font-style: italic; }
+.chapter .operator { color: #56b6c2; }
+.chapter .punctuation { color: #abb2bf; }
+
+/* Tables */
+.chapter table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1em 0;
+  font-size: 0.9em;
+}
+
+.chapter th, .chapter td {
+  border: 1px solid var(--forge-light);
+  padding: 0.5em 0.75em;
+  text-align: left;
+}
+
+.chapter th {
+  background-color: var(--forge-primary);
+  color: var(--forge-light);
+  font-weight: 600;
+}
+
+.chapter tr:nth-child(even) {
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+.chapter tr:hover {
+  background-color: rgba(231, 76, 60, 0.05);
+}
+
+/* Blockquotes */
+.chapter blockquote {
+  border-left: 4px solid var(--forge-accent);
+  background-color: rgba(231, 76, 60, 0.05);
+  padding: 0.5em 1em;
+  margin: 1em 0;
+  border-radius: 0 4px 4px 0;
+}
+
+.chapter blockquote p {
+  margin: 0;
+  color: var(--forge-secondary);
+}
+
+/* Admonitions (notes, warnings) */
+.admonition {
+  border-left: 4px solid;
+  padding: 0.75em 1em;
+  margin: 1em 0;
+  border-radius: 0 4px 4px 0;
+}
+
+.admonition.note {
+  border-color: #3498db;
+  background-color: rgba(52, 152, 219, 0.1);
+}
+
+.admonition.warning {
+  border-color: #f39c12;
+  background-color: rgba(243, 156, 18, 0.1);
+}
+
+.admonition.danger {
+  border-color: var(--forge-accent);
+  background-color: rgba(231, 76, 60, 0.1);
+}
+
+.admonition.tip {
+  border-color: #27ae60;
+  background-color: rgba(39, 174, 96, 0.1);
+}
+
+.admonition-title {
+  font-weight: 600;
+  margin-bottom: 0.5em;
+}
+
+/* Navigation */
+.chapter .nav-chapters {
+  border-top: 1px solid var(--forge-light);
+  padding-top: 1em;
+  margin-top: 2em;
+}
+
+.chapter .nav-chapters a {
+  color: var(--forge-accent);
+  font-weight: 500;
+}
+
+/* Search */
+.search-input {
+  background-color: var(--forge-secondary);
+  border: 1px solid var(--forge-primary);
+  color: var(--forge-light);
+  border-radius: 4px;
+  padding: 0.5em;
+  width: 100%;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--forge-accent);
+}
+
+.search-results li a {
+  color: var(--forge-light);
+}
+
+.search-results li a:hover {
+  color: var(--forge-accent);
+}
+
+/* Footer */
+.book-footer {
+  background-color: var(--forge-secondary);
+  border-top: 1px solid var(--forge-primary);
+  color: var(--forge-light);
+}
+
+/* Print styles */
+@media print {
+  .book-header, .book-summary, .book-footer, .nav-chapters {
+    display: none;
+  }
+  
+  .chapter {
+    max-width: none;
+  }
+  
+  .chapter pre {
+    background-color: #f5f5f5;
+    color: #333;
+  }
+  
+  .chapter code {
+    background-color: #eee;
+  }
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .book-summary {
+    width: 280px;
+  }
+  
+  .chapter {
+    padding: 1em;
+  }
+  
+  .chapter pre {
+    padding: 0.75em;
+    font-size: 0.8em;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--forge-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--forge-primary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--forge-accent);
+}
+
+/* Focus styles for accessibility */
+.chapter a:focus,
+.search-input:focus,
+button:focus {
+  outline: 2px solid var(--forge-accent);
+  outline-offset: 2px;
+}
+
+/* Syntax highlighting for Forge code */
+.chapter .dev-keyword { color: #c678dd; }
+.chapter .dev-type { color: #e5c07b; }
+.chapter .dev-function { color: #61afef; }
+.chapter .dev-string { color: #98c379; }
+.chapter .dev-number { color: #d19a66; }
+.chapter .dev-comment { color: #5c6370; font-style: italic; }
+.chapter .dev-operator { color: #56b6c2; }
+.chapter .dev-punctuation { color: #abb2bf; }
+.chapter .dev-attribute { color: #e06c75; }
