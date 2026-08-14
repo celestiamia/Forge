@@ -68,8 +68,13 @@ extern def _dev_open(path: ptr[char], flags: int32, mode: int32) -> int32
 extern def _dev_lseek(fd: int32, offset: int64, whence: int32) -> int64
 extern def _dev_unlink(path: ptr[char]) -> int32
 extern def _dev_fork() -> int32
+extern def _dev_waitpid(pid: int32, status: ptr[int32], options: int32) -> int32
 extern def _dev_fcntl(fd: int32, cmd: int32, arg: int64) -> int64
 extern def _dev_setsockopt(fd: int32, level: int32, optname: int32, optval: ptr[char], optlen: int32) -> int32
+extern def _dev_gettimeofday(tv: ptr[char], tz: ptr[char]) -> int32
+
+# waitpid(2) options.
+const WNOHANG: int32 = 1
 
 # Write a null-terminated string to standard output.  Returns the number of
 # bytes written, or a negative value on error.
@@ -90,6 +95,12 @@ pub def getchar() -> int32:
 # a simple linear congruential generator seeded from the CPU timestamp counter.
 pub def rand() -> int32:
     return _dev_rand()
+
+# Fill a 16-byte `struct timeval` at `tv` (i64 tv_sec, i64 tv_usec) with the
+# current wall-clock time since the Unix epoch.  `tz` must be null.  Returns 0
+# on success, or a negative errno on failure.
+pub def gettimeofday(tv: ptr[char], tz: ptr[char]) -> int32:
+    return _dev_gettimeofday(tv, tz)
 
 # Terminate the current process with the given exit code.
 pub def exit(code: int32) -> void:
@@ -138,6 +149,12 @@ pub def unlink(path: ptr[char]) -> int32:
 # the child 0 is returned; on failure -1 is returned.
 pub def fork() -> int32:
     return _dev_fork()
+
+# Wait for a child process state change.  Reaps terminated children; pass
+# -1 as pid to wait on any child.  Returns the child pid, 0 with WNOHANG
+# if nothing has exited yet, or -1 on error.
+pub def waitpid(pid: int32, status: ptr[int32], options: int32) -> int32:
+    return _dev_waitpid(pid, status, options)
 
 # fcntl(2) file descriptor control.  `cmd` selects the operation: F_DUPFD,
 # F_GETFD, F_SETFD, F_GETFL, F_SETFL, etc.  Returns a value whose meaning
