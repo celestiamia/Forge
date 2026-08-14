@@ -1,0 +1,107 @@
+name: Nightly Release
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Daily at 12:00 AM UTC
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: write
+
+jobs:
+  nightly:
+    name: Build Nightly Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for version
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install 32-bit libraries (for x86_32)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib g++-multilib libc6-dev-i386
+
+      - name: Install QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86
+
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-nightly-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-nightly-
+
+      - name: Build release compiler (x86_64)
+        run: cargo build --release
+
+      - name: Build x86_32 target
+        run: |
+          rustup target add i686-unknown-linux-gnu
+          cargo build --release --target i686-unknown-linux-gnu
+
+      - name: Build bootloader (x86_16)
+        run: |
+          cargo build --release --target x86_16-boot --example bootloader
+
+      - name: Get version from Cargo.toml
+        id: version
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          DATE=$(date -u +'%Y%m%d')
+          echo "version=${VERSION}-nightly-${DATE}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist
+          # x86_64
+          cp target/release/forgec dist/forgec-x86_64-linux
+          # x86_32
+          cp target/i686-unknown-linux-gnu/release/forgec dist/forgec-i686-linux
+          # x86_16 boot sector
+          cp target/x86_16-boot/release/examples/bootloader dist/forgec-x86_16-boot.bin
+          # Create checksums
+          cd dist && sha256sum * > SHA256SUMS
+
+      - name: Create Nightly Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly-${{ steps.version.outputs.version }}
+          name: Nightly ${{ steps.version.outputs.version }}
+          body: |
+            Nightly build from commit ${{ github.sha }}
+            
+            **Binaries:**
+            - `forgec-x86_64-linux` - x86_64 Linux (ELF64)
+            - `forgec-i686-linux` - x86_32 Linux (ELF32)  
+            - `forgec-x86_16-boot.bin` - x86_16 boot sector (512 bytes)
+            
+            **Installation:**
+            ```bash
+            # x86_64
+            wget https://github.com/${{ github.repository }}/releases/download/nightly-${{ steps.version.outputs.version }}/forgec-x86_64-linux
+            chmod +x forgec-x86_64-linux
+            sudo mv forgec-x86_64-linux /usr/local/bin/forgec
+            ```
+          draft: false
+          prerelease: true
+          files: |
+            dist/forgec-x86_64-linux
+            dist/forgec-i686-linux
+            dist/forgec-x86_16-boot.bin
+            dist/SHA256SUMS
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
