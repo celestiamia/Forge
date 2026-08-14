@@ -54,7 +54,8 @@ jobs:
 
       - name: Build bootloader (x86_16)
         run: |
-          cargo build --release --target x86_16-boot --example bootloader
+          # Build bootloader using the x86_64 forgec compiler
+          ./target/release/forgec examples/bootloader.dev -o target/forgec-x86_16-boot.bin --target x86_16-boot
 
       - name: Get version from Cargo.toml
         id: version
@@ -72,7 +73,7 @@ jobs:
           # x86_32
           cp target/i686-unknown-linux-gnu/release/forgec dist/forgec-i686-linux
           # x86_16 boot sector
-          cp target/x86_16-boot/release/examples/bootloader dist/forgec-x86_16-boot.bin
+          cp target/forgec-x86_16-boot.bin dist/forgec-x86_16-boot.bin
           # Create checksums
           cd dist && sha256sum * > SHA256SUMS
 
