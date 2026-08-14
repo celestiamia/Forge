@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            name: "x86_64 (native)"
+            rust_target: ""
+            needs_qemu: false
+          - target: x86_32-unknown-linux-gnu
+            name: "x86_32 (i686)"
+            rust_target: "i686-unknown-linux-gnu"
+            needs_qemu: false
+          - target: x86_16-boot
+            name: "x86_16 (boot sector)"
+            rust_target: ""
+            needs_qemu: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Install QEMU (for x86_16-boot)
+        if: matrix.needs_qemu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86
+
+      - name: Cache Cargo artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release compiler
+        run: cargo build --release
+
+      - name: Run unit tests
+        run: cargo test --lib
+
+      - name: Run integration tests (${{ matrix.name }})
+        run: |
+          if [ -n "${{ matrix.rust_target }}" ]; then
+            cargo test --test integration -- --target ${{ matrix.target }}
+          else
+            cargo test --test integration -- --target ${{ matrix.target }}
+          fi
+        env:
+          RUST_BACKTRACE: 1
+
+  check-formatting:
+    name: Check Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  check-clippy:
+    name: Check Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Run clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+  check-docs:
+    name: Check Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build docs
+        run: cargo doc --no-deps --document-private-items
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true

@@ -1,3 +1,24 @@
+<p align="center">
+  <img src=".github/assets/ForgeBanner.png" alt="Forge Banner" width="800"/>
+</p>
+
+<p align="center">
+  <a href="https://github.com/miacelestia/Forge/actions/workflows/ci.yml">
+    <img src="https://github.com/miacelestia/Forge/actions/workflows/ci.yml/badge.svg" alt="Build Status"/>
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"/>
+  </a>
+  <a href="https://crates.io/crates/forgec">
+    <img src="https://img.shields.io/crates/v/forgec.svg" alt="Crates.io Version"/>
+  </a>
+  <a href="https://github.com/miacelestia/Forge/issues">
+    <img src="https://img.shields.io/github/issues/miacelestia/Forge.svg" alt="GitHub Issues"/>
+  </a>
+</p>
+
+---
+
 # Forge
 
 Forge is a systems programming language compiled by `forgec` from `.dev` source files.
@@ -5,6 +26,16 @@ Forge is a systems programming language compiled by `forgec` from `.dev` source 
 `forgec` is **self-contained**: it parses `.dev` source and writes native
 executables directly, without calling LLVM, clang, NASM, ld, or any other
 external toolchain.
+
+> **Mascot** — Say hello to Spark! The forge's flame — small but intense, turning raw code into native metal. You'll find Spark throughout the docs and examples, reminding you that Forge compiles *directly* to machine code, no intermediate layers.
+>
+> <img src=".github/assets/forgemascot.svg" alt="Forge Mascot" width="120" align="right"/>
+>
+> Spark represents the forge's flame — small but intense, turning raw code into
+> native metal. You'll find Spark throughout the docs and examples, reminding
+> you that Forge compiles *directly* to machine code, no intermediate layers.
+
+---
 
 ## First milestone
 
@@ -234,10 +265,29 @@ main: main.dev utils.dev helpers.dev
 | `x86_64-pc-windows-gnu`           | 64-bit Windows (COFF)             | Planned       |
 | `riscv64-unknown-elf`             | 64-bit RISC-V bare metal (ELF)    | Planned       |
 
-## Roadmap
+## Roadmap & Ideas
 
-1. x86_64 Linux ELF64 static executables (current).
-2. x86_64 Windows PE/COFF.
-3. AArch64 macOS Mach-O and Linux ELF64.
-4. RISC-V bare metal / Linux.
-5. Self-hosting: rewrite `forgec` in `.dev` and bootstrap.
+The roadmap has moved to **GitHub Issues** for better tracking and collaboration:
+
+🔗 **[Roadmap & Ideas Tracking Issue](https://github.com/miacelestia/Forge/issues/1)**
+
+This issue contains checklists for:
+- Compiler improvements (optimizer, diagnostics, memory management, language features)
+- Standard library expansion
+- Backend targets (ARM64, RISC-V, WASM, Windows, macOS, bare-metal ARM)
+- Developer tooling (LSP, formatter, package manager, build system, debugger)
+- Project ideas buildable with Forge (OS kernels, system utilities, web services, games, dev tools, data processing, security, education, creative)
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
+- Development workflow
+- Code style and testing requirements
+- Pull request process
+- Commit message format
+
+## License
+
+Forge is licensed under the **MIT License** — see [LICENSE](LICENSE) for details.

@@ -1,0 +1,118 @@
+name: Feature Request
+description: Propose a new language feature, stdlib addition, target, or tooling
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Please describe the problem and your proposed solution.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? What's the use case?
+      placeholder: |
+        Currently, Forge doesn't support X, which makes it difficult to Y.
+        This is needed for Z use case.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature you'd like to see implemented
+      placeholder: |
+        Add support for X with syntax `...`. This would allow users to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Other approaches you've considered or seen in other languages
+      placeholder: |
+        - Alternative 1: ...
+        - Alternative 2: ...
+      validations:
+        required: false
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Category
+      description: Which area does this feature belong to?
+      options:
+        - Language Feature (syntax, types, semantics)
+        - Standard Library (new module, function, type)
+        - Backend Target (new architecture, OS, format)
+        - Developer Tooling (LSP, formatter, debugger, package manager)
+        - Optimization (codegen improvements, IR passes)
+        - Documentation / Examples
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this to you?
+      options:
+        - Critical (blocking my project)
+        - High (would significantly improve workflow)
+        - Medium (nice to have)
+        - Low (future consideration)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope Checklist
+      description: Check all that apply (helps estimate effort)
+      options:
+        - label: Requires parser changes
+          required: false
+        - label: Requires type checker changes
+          required: false
+        - label: Requires IR/codegen changes (x86_64)
+          required: false
+        - label: Requires x86_32 parity
+          required: false
+        - label: Requires x86_16-boot parity
+          required: false
+        - label: Requires stdlib additions
+          required: false
+        - label: Requires new runtime helpers
+          required: false
+        - label: Breaking change (syntax or semantics)
+          required: false
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example Usage
+      description: Show how the feature would be used in Forge code
+      placeholder: |
+        package example
+
+        pub def main() -> int32:
+            # example of the new feature
+            return 0
+      render: dev
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues/PRs for duplicates
+          required: true
+        - label: This feature aligns with Forge's goals (systems language, self-contained compiler)
+          required: true

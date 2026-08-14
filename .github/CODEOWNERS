@@ -1,0 +1,34 @@
+# CODEOWNERS
+# These users will be automatically requested for review when files they own are modified
+
+# Core compiler
+/src/ @miacelestia
+/src/backend/ @miacelestia
+/src/obj/ @miacelestia
+/src/driver/ @miacelestia
+
+# Frontend
+/src/lexer/ @miacelestia
+/src/parser/ @miacelestia
+/src/ast/ @miacelestia
+
+# Semantic analysis & types
+/src/sema/ @miacelestia
+/src/ty/ @miacelestia
+/src/lower/ @miacelestia
+
+# Standard library
+/core/ @miacelestia
+
+# Examples & tests
+/examples/ @miacelestia
+/tests/ @miacelestia
+
+# CI/CD & GitHub config
+/.github/ @miacelestia
+
+# Documentation
+/README.md @miacelestia
+/CLAUDE.md @miacelestia
+/AGENTS.md @miacelestia
+/CONTRIBUTING.md @miacelestia
