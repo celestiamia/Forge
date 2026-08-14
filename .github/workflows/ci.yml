@@ -39,8 +39,7 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
-      - name: Install QEMU (for x86_16-boot)
-        if: matrix.needs_qemu
+      - name: Install QEMU (for bootloader tests)
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86
