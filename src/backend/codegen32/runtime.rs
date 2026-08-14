@@ -152,6 +152,19 @@ impl<'p> CodeGen<'p> {
         self.asm.int(0x80)?;
         self.asm.ret()?;
 
+        let wp = *self.func_labels.get("_dev_waitpid").unwrap();
+        self.bind_label(wp);
+        self.asm.push(Reg::Ebp)?;
+        self.asm.mov(Reg::Ebp, Reg::Esp)?;
+        self.asm.mov(Reg::Eax, 114i32)?; // sys_wait4 (waitpid semantics)
+        self.asm.mov(Reg::Ebx, Mem::base_disp(Reg::Ebp, 8))?; // pid
+        self.asm.mov(Reg::Ecx, Mem::base_disp(Reg::Ebp, 12))?; // status
+        self.asm.mov(Reg::Edx, Mem::base_disp(Reg::Ebp, 16))?; // options
+        self.asm.mov(Reg::Esi, 0i32)?; // rusage = NULL
+        self.asm.int(0x80)?;
+        self.asm.leave();
+        self.asm.ret()?;
+
         let fc = *self.func_labels.get("_dev_fcntl").unwrap();
         self.bind_label(fc);
         self.asm.push(Reg::Ebp)?;
@@ -254,6 +267,17 @@ impl<'p> CodeGen<'p> {
         let r = *self.func_labels.get("_dev_rand").unwrap();
         self.bind_label(r);
         self.asm.rdtsc()?; // edx:eax
+        self.asm.ret()?;
+
+        let t = *self.func_labels.get("_dev_gettimeofday").unwrap();
+        self.bind_label(t);
+        self.asm.push(Reg::Ebp)?;
+        self.asm.mov(Reg::Ebp, Reg::Esp)?;
+        self.asm.mov(Reg::Ebx, Mem::base_disp(Reg::Ebp, 8))?; // tv
+        self.asm.mov(Reg::Ecx, Mem::base_disp(Reg::Ebp, 12))?; // tz
+        self.asm.mov(Reg::Eax, 78i32)?; // sys_gettimeofday (i386)
+        self.asm.int(0x80)?;
+        self.asm.leave();
         self.asm.ret()?;
 
         let lb = *self.func_labels.get("_dev_lfence").unwrap();

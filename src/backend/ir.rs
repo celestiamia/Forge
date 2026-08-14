@@ -5,6 +5,7 @@
 //! are structured for direct x86-64 emission.
 
 use crate::backend::error::IRTypeError;
+use crate::linker::{LinkerConfig, RuntimeConfig};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
@@ -79,6 +80,31 @@ pub struct Program {
     pub target: Option<String>,
     pub arch: Option<String>,
     pub obj_format: Option<String>,
+    /// Full target configuration.  Replaces the above scalar fields for any
+    /// target described by a linker script; the scalar fields are derived
+    /// from this for backward compatibility.
+    pub config: Option<LinkerConfig>,
+}
+
+impl Program {
+    /// Runtime helper selection from the linker config, falling back to
+    /// sensible defaults when no config is present.
+    pub fn runtime(&self) -> RuntimeConfig {
+        match &self.config {
+            Some(cfg) => cfg.runtime.clone(),
+            None => RuntimeConfig::default(),
+        }
+    }
+
+    /// Whether the GC heap runtime should be emitted.
+    pub fn needs_gc(&self) -> bool {
+        self.config.as_ref().map(|c| c.runtime.gc).unwrap_or(false)
+    }
+
+    /// Whether the allocator (`_dev_alloc`/`_dev_free`) should be emitted.
+    pub fn needs_alloc(&self) -> bool {
+        self.config.as_ref().map(|c| c.runtime.alloc).unwrap_or(false)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -183,6 +209,9 @@ pub enum Literal {
     Bool(bool),
     Char(u8),
     String(String),
+    /// Raw byte blob from an `embed` declaration, emitted verbatim as global
+    /// data (referenced through a patched pointer slot, like a string literal).
+    Bytes(Vec<u8>),
     Null,
 }
 

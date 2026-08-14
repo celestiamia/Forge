@@ -172,6 +172,10 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         cg.func_labels.insert("_dev_fcntl".to_string(), fc);
         let ss = cg.asm.new_label();
         cg.func_labels.insert("_dev_setsockopt".to_string(), ss);
+        let gt = cg.asm.new_label();
+        cg.func_labels.insert("_dev_gettimeofday".to_string(), gt);
+        let wp = cg.asm.new_label();
+        cg.func_labels.insert("_dev_waitpid".to_string(), wp);
         // The garbage-collected heap runtime is needed when the program imports
         // any of the `_dev_*` memory-management helpers.  All of the GC
         // helpers are emitted together as a unit whenever any one of them is
@@ -250,6 +254,14 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
             }
             Literal::Char(v) => (v as u8).to_le_bytes().to_vec(),
             Literal::String(s) => {
+                let s_lab = cg.string_label(&s);
+                string_patches.push((lab, s_lab));
+                vec![0; 8]
+            }
+            Literal::Bytes(b) => {
+                // Emitted verbatim in .rodata; the global slot is patched to
+                // point at the blob (mirrors the string-literal path).
+                let s = unsafe { String::from_utf8_unchecked(b.clone()) };
                 let s_lab = cg.string_label(&s);
                 string_patches.push((lab, s_lab));
                 vec![0; 8]

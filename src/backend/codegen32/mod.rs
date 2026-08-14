@@ -81,6 +81,8 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         cg.func_labels.insert("_dev_getchar".to_string(), c);
         let r = cg.asm.new_label();
         cg.func_labels.insert("_dev_rand".to_string(), r);
+        let gt = cg.asm.new_label();
+        cg.func_labels.insert("_dev_gettimeofday".to_string(), gt);
         let e = cg.asm.new_label();
         cg.func_labels.insert("_dev_exit".to_string(), e);
         let s = cg.asm.new_label();
@@ -109,6 +111,8 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         cg.func_labels.insert("_dev_fcntl".to_string(), fc);
         let ss = cg.asm.new_label();
         cg.func_labels.insert("_dev_setsockopt".to_string(), ss);
+        let wp = cg.asm.new_label();
+        cg.func_labels.insert("_dev_waitpid".to_string(), wp);
         let lb = cg.asm.new_label();
         cg.func_labels.insert("_dev_lfence".to_string(), lb);
         let sb = cg.asm.new_label();
@@ -174,6 +178,12 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
             }
             Literal::Char(v) => (v as u8).to_le_bytes().to_vec(),
             Literal::String(s) => {
+                let s_lab = cg.string_label(&s);
+                cg.global_string_patches.push((lab, s_lab));
+                vec![0; 4]
+            }
+            Literal::Bytes(b) => {
+                let s = unsafe { String::from_utf8_unchecked(b.clone()) };
                 let s_lab = cg.string_label(&s);
                 cg.global_string_patches.push((lab, s_lab));
                 vec![0; 4]

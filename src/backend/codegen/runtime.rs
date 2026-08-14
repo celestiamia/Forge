@@ -3,10 +3,12 @@ use super::*;
 impl<'p> CodeGen<'p> {
     pub(super) fn emit_runtime(&mut self, start_label: u32) -> Result<()> {
         self.emit_dev_write()?;
+        self.emit_signal_ignore_sigpipe()?;
         self.emit_dev_puts()?;
         self.emit_dev_putchar()?;
         self.emit_dev_getchar()?;
         self.emit_dev_rand()?;
+        self.emit_dev_gettimeofday()?;
         self.emit_dev_exit()?;
         self.emit_dev_lfence()?;
         self.emit_dev_sfence()?;
@@ -21,6 +23,7 @@ impl<'p> CodeGen<'p> {
         self.emit_dev_lseek()?;
         self.emit_dev_unlink()?;
         self.emit_dev_fork()?;
+        self.emit_dev_waitpid()?;
         self.emit_dev_fcntl()?;
         self.emit_dev_setsockopt()?;
         self.emit_gc_runtime()?;
@@ -34,6 +37,46 @@ impl<'p> CodeGen<'p> {
         self.bind_label(w);
         self.asm.mov(Reg::Rax, 1i32);
         self.asm.syscall();
+        self.asm.ret();
+        Ok(())
+    }
+
+    /// Install SIG_IGN for SIGPIPE (signal 13).  By default a write to a socket
+    /// whose peer has disconnected raises SIGPIPE and kills the process, which
+    /// truncates the outgoing stream and manifests to clients as "not enough
+    /// bytes in buffer" / partial-packet errors.  Ignoring the signal makes the
+    /// write return -EPIPE instead, letting the server close the connection
+    /// cleanly.
+    ///
+    /// On x86_64 Linux there is no `signal(2)` syscall; the libc wrapper is
+    /// built on `rt_sigaction` (syscall 13), which takes a `struct sigaction`
+    /// by pointer rather than a handler value.  We build that struct on the
+    /// stack: sa_handler = SIG_IGN (1), sa_flags = 0, sa_mask = 0.
+    fn emit_signal_ignore_sigpipe(&mut self) -> Result<()> {
+        let lab = self.asm.new_label();
+        self.func_labels.insert("_dev_ignore_sigpipe".to_string(), lab);
+        self.bind_label(lab);
+        // Build struct sigaction on the stack (32 bytes, zeroed).
+        self.asm.push(Reg::Rbp);
+        self.asm.mov(Reg::Rbp, Reg::Rsp);
+        self.asm.sub(Reg::Rsp, 32i32);
+        // Zero the whole struct with two qword stores (16 bytes each).
+        self.asm.xor(Reg::Rax, Reg::Rax);
+        self.asm
+            .mov(Mem::base_disp(Reg::Rbp, -32), Reg::Rax)?; // [rbp-32 .. rbp-24]
+        self.asm
+            .mov(Mem::base_disp(Reg::Rbp, -16), Reg::Rax)?; // [rbp-16 .. rbp-8]
+        // sa_handler = SIG_IGN (1)
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -32), 1i32)?;
+
+        // rt_sigaction(signum=13, act=rbp-32, oldact=NULL, sigsetsize=8)
+        self.asm.mov(Reg::Rax, 13i32); // __NR_rt_sigaction
+        self.asm.mov(Reg::Rdi, 13i32); // SIGPIPE
+        self.asm.lea(Reg::Rsi, Mem::base_disp(Reg::Rbp, -32));
+        self.asm.xor(Reg::Rdx, Reg::Rdx); // oldact = NULL
+        self.asm.mov(Reg::R10, 8i32); // sigsetsize
+        self.asm.syscall();
+        self.asm.leave();
         self.asm.ret();
         Ok(())
     }
@@ -125,6 +168,15 @@ impl<'p> CodeGen<'p> {
         self.asm.mov(Reg::Rax, 0x7fffffffi32);
         self.asm.and(Reg::Rax, Reg::R11);
         self.asm.leave();
+        self.asm.ret();
+        Ok(())
+    }
+
+    fn emit_dev_gettimeofday(&mut self) -> Result<()> {
+        let t = *self.func_labels.get("_dev_gettimeofday").unwrap();
+        self.bind_label(t);
+        self.asm.mov(Reg::Rax, 96i32);
+        self.asm.syscall();
         self.asm.ret();
         Ok(())
     }
@@ -251,6 +303,19 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
+    fn emit_dev_waitpid(&mut self) -> Result<()> {
+        // wait4(pid, status, options, rusage=NULL) — syscall 61.  Wraps the
+        // waitpid(2) semantics the stdlib exposes.  rusage arg lives in R10
+        // and must be zeroed; leave the other args as the caller set them.
+        let wp = *self.func_labels.get("_dev_waitpid").unwrap();
+        self.bind_label(wp);
+        self.asm.mov(Reg::Rax, 61i32);
+        self.asm.mov(Reg::R10, 0i32);
+        self.asm.syscall();
+        self.asm.ret();
+        Ok(())
+    }
+
     fn emit_dev_fcntl(&mut self) -> Result<()> {
         let fc = *self.func_labels.get("_dev_fcntl").unwrap();
         self.bind_label(fc);
@@ -296,6 +361,14 @@ impl<'p> CodeGen<'p> {
         // Capture the stack high-water mark before the runtime touches the stack
         // so the conservative GC knows the top of its root range.
         self.emit_gc_stack_top_capture()?;
+        // Ignore SIGPIPE so writes to a disconnected socket return -EPIPE
+        // instead of killing the process (which would truncate the stream and
+        // look like a partial/corrupt packet to the client).
+        let ignore_sigpipe = *self
+            .func_labels
+            .get("_dev_ignore_sigpipe")
+            .ok_or_else(|| anyhow::anyhow!("missing _dev_ignore_sigpipe"))?;
+        self.asm.call(ignore_sigpipe);
         let main_lab = *self
             .func_labels
             .get("_forge_main")
