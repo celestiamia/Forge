@@ -444,6 +444,16 @@ fn match_bc_dev_compiles_and_runs() {
 
 #[test]
 fn bootloader_dev_compiles_and_runs() {
+    // Only run this test if qemu-system-x86_64 is available
+    if std::process::Command::new("qemu-system-x86_64")
+        .arg("-version")
+        .output()
+        .is_err()
+    {
+        eprintln!("Skipping bootloader test: qemu-system-x86_64 not found");
+        return;
+    }
+
     let out_dir =
         std::env::temp_dir().join(format!("forge_bootloader_test_{}", std::process::id()));
     let _ = fs::create_dir_all(&out_dir);
