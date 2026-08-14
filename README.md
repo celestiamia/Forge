@@ -3,8 +3,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/miacelestia/Forge/actions/workflows/ci.yml">
-    <img src="https://github.com/miacelestia/Forge/actions/workflows/ci.yml/badge.svg" alt="Build Status"/>
+  <a href="https://github.com/celestiamia/Forge/actions/workflows/ci.yml">
+    <img src="https://github.com/celestiamia/Forge/actions/workflows/ci.yml/badge.svg" alt="Build Status"/>
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"/>
@@ -12,8 +12,8 @@
   <a href="https://crates.io/crates/forgec">
     <img src="https://img.shields.io/crates/v/forgec.svg" alt="Crates.io Version"/>
   </a>
-  <a href="https://github.com/miacelestia/Forge/issues">
-    <img src="https://img.shields.io/github/issues/miacelestia/Forge.svg" alt="GitHub Issues"/>
+  <a href="https://github.com/celestiamia/Forge/issues">
+    <img src="https://img.shields.io/github/issues/celestiamia/Forge.svg" alt="GitHub Issues"/>
   </a>
 </p>
 
@@ -269,7 +269,7 @@ main: main.dev utils.dev helpers.dev
 
 The roadmap has moved to **GitHub Issues** for better tracking and collaboration:
 
-🔗 **[Roadmap & Ideas Tracking Issue](https://github.com/miacelestia/Forge/issues/1)**
+🔗 **[Roadmap & Ideas Tracking Issue](https://github.com/celestiamia/Forge/issues/1)**
 
 This issue contains checklists for:
 - Compiler improvements (optimizer, diagnostics, memory management, language features)

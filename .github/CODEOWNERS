@@ -2,33 +2,33 @@
 # These users will be automatically requested for review when files they own are modified
 
 # Core compiler
-/src/ @miacelestia
-/src/backend/ @miacelestia
-/src/obj/ @miacelestia
-/src/driver/ @miacelestia
+/src/ @celestiamia
+/src/backend/ @celestiamia
+/src/obj/ @celestiamia
+/src/driver/ @celestiamia
 
 # Frontend
-/src/lexer/ @miacelestia
-/src/parser/ @miacelestia
-/src/ast/ @miacelestia
+/src/lexer/ @celestiamia
+/src/parser/ @celestiamia
+/src/ast/ @celestiamia
 
 # Semantic analysis & types
-/src/sema/ @miacelestia
-/src/ty/ @miacelestia
-/src/lower/ @miacelestia
+/src/sema/ @celestiamia
+/src/ty/ @celestiamia
+/src/lower/ @celestiamia
 
 # Standard library
-/core/ @miacelestia
+/core/ @celestiamia
 
 # Examples & tests
-/examples/ @miacelestia
-/tests/ @miacelestia
+/examples/ @celestiamia
+/tests/ @celestiamia
 
 # CI/CD & GitHub config
-/.github/ @miacelestia
+/.github/ @celestiamia
 
 # Documentation
-/README.md @miacelestia
-/CLAUDE.md @miacelestia
-/AGENTS.md @miacelestia
-/CONTRIBUTING.md @miacelestia
+/README.md @celestiamia
+/CLAUDE.md @celestiamia
+/AGENTS.md @celestiamia
+/CONTRIBUTING.md @celestiamia
