@@ -51,7 +51,7 @@ $ cargo test --test integration
 - [ ] 32-bit tests pass (if target affected)
 - [ ] Boot sector tests pass (if target affected)
 - [ ] New functionality has test coverage
-- [ ] Documentation updated (README, code comments, CLAUDE.md if architecture changed)
+- [ ] Documentation updated (README, code comments)
 - [ ] Commit messages follow conventional format
 - [ ] No unrelated changes (whitespace, formatting in untouched files)
 - [ ] `Cargo.lock` updated if dependencies changed
