@@ -88,6 +88,7 @@ pub enum IRTypeError {
 /// Errors that can occur during object file writing.
 #[derive(Debug, Error)]
 #[allow(dead_code)]
+#[allow(clippy::enum_variant_names)]
 pub enum ObjectWriteError {
     #[error("missing label offset for start label {label}")]
     MissingStartLabel { label: u32 },

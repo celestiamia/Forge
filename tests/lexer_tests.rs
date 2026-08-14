@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::assertions_on_constants)]
 mod lexer_tests {
     // Once the lexer is implemented, these tests should exercise tokenizing
     // keywords, identifiers, literals, and punctuation used by the examples.

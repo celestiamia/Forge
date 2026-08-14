@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::assertions_on_constants)]
 mod parser_tests {
     // Once the parser is implemented, these tests should verify that the
     // example programs parse into the expected AST structures.

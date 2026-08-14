@@ -1,6 +1,5 @@
 use assert_cmd::Command;
 use std::fs;
-use std::process::id;
 
 fn compile_example(name: &str) -> std::path::PathBuf {
     compile_example_with_target(name, "x86_64-unknown-linux-gnu")
@@ -115,7 +114,7 @@ fn bump_fmt_dev_compiles_and_runs_x86_32() {
         panic!("Compilation failed unexpectedly:\n{}", stderr);
     }
     let bin = "/tmp/forge_bump_fmt_x86_32-unknown-linux-gnu_test/bump_fmt";
-    let output = Command::new(&bin)
+    let output = Command::new(bin)
         .output()
         .expect("failed to run bump_fmt (x86_32) binary");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -639,7 +638,7 @@ fn randfile_dev_compiles_and_runs_x86_32() {
         panic!("Compilation failed unexpectedly:\n{}", stderr);
     }
     let bin = "/tmp/forge_randfile_x86_32-unknown-linux-gnu_test/randfile";
-    let output = Command::new(&bin)
+    let output = Command::new(bin)
         .output()
         .expect("failed to run randfile (x86_32) binary");
     let stdout = String::from_utf8_lossy(&output.stdout);

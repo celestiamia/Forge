@@ -20,7 +20,7 @@ impl Parser {
         let mut format: Option<OutputFormat> = None;
         let mut hosted: Option<bool> = None;
         let mut entry: Option<String> = None;
-        let base_address: Option<u64> = None;
+        // base_address is always None here; the default is determined by format below
         let mut heap_size: u64 = 0;
         let mut regions: Vec<MemoryRegion> = Vec::new();
         let mut sections: Vec<SectionMapping> = Vec::new();
@@ -70,11 +70,11 @@ impl Parser {
                 "_start".to_string()
             }
         });
-        let base_address = base_address.unwrap_or(match &format {
+        let base_address = match &format {
             OutputFormat::Elf => 0x400000,
             OutputFormat::Elf32 => 0x08048000,
             OutputFormat::Flat | OutputFormat::Raw => 0x0,
-        });
+        };
 
         let config = LinkerConfig {
             arch,
