@@ -1,0 +1,348 @@
+package net.server
+
+from std.io import puts, putchar, setsockopt
+import std.mem
+import std.volatile
+import net.socket
+import net.players
+
+# Per-connection player state shared between the play loop (net.server),
+# commands (play.chat) and movement handling. Positions/rotations are stored
+# as raw IEEE754 bit patterns (the protocol carries f64/f32 bit patterns).
+struct PlayerState:
+    px: int64
+    py: int64
+    pz: int64
+    yaw: int32
+    pitch: int32
+    time_of_day: int64
+    gamemode: int32
+    keep_id: int64
+
+def handle_client(fd: int32) -> void:
+    # Set receive timeout (10s) so a stalled client can't pin this child forever.
+    var tv: [byte; 16]
+    zero_bytes(tv as ptr[uint8], 16 as uint64)
+    tv[0] = (10 as byte)  # tv_sec = 10
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, tv as ptr[char], 16)
+
+    # Read the packet length (VarInt)
+    var packet_len: int32 = read_varint_from_socket(fd)
+    if packet_len <= 0:
+        puts("Failed to read packet length\n")
+        return
+    if packet_len > 8192:
+        puts("Handshake packet too large, closing connection\n")
+        return
+
+    puts("Handshake received\n")
+
+    # Read exactly packet_len bytes
+    var buf: [byte; 8192]
+    zero_bytes(buf as ptr[uint8], 8192 as uint64)
+    var nread: int32 = read_bytes_from_socket(fd, buf as ptr[uint8], packet_len)
+    if nread != packet_len:
+        puts("Failed to read full packet\n")
+        return
+
+    # Parse handshake to extract next state
+    # Packet layout: [packet_id][protocol_version][server_address][port][next_state]
+    unsafe:
+        var idx: uint64 = 0
+        # Skip packet ID (0x00 = handshake)
+        idx = skip_varint(buf as ptr[uint8], idx)
+        # Skip protocol version
+        idx = skip_varint(buf as ptr[uint8], idx)
+        # Skip server address (string)
+        idx = skip_string(buf as ptr[uint8], idx)
+        # Skip server port (unsigned short, 2 bytes - NOT a varint)
+        idx = idx + 2
+        # Read next state
+        let state: int32 = read_varint(buf as ptr[uint8], idx)
+
+        # Minecraft protocol: 1 = Status, 2 = Login
+        if state == 1:
+            puts("Status state\n")
+            handle_status(fd)
+        elif state == 2:
+            puts("Login state\n")
+            handle_login(fd)
+        else:
+            puts("Unknown state\n")
+
+
+def handle_status(fd: int32) -> void:
+    # Read the status request packet
+    var req_len: int32 = read_varint_from_socket(fd)
+    if req_len <= 0:
+        return
+    if req_len > 256:
+        puts("Status request too large, closing connection\n")
+        return
+
+    var buf: [byte; 256]
+    var nread: int32 = read_bytes_from_socket(fd, buf as ptr[uint8], req_len)
+    if nread != req_len:
+        return
+
+    puts("Status request received\n")
+
+    # Send status response
+    puts("Sending status response...\n")
+    send_status_response(fd)
+    puts("Status response sent\n")
+
+    # Wait for ping packet
+    var ping_len: int32 = read_varint_from_socket(fd)
+    if ping_len <= 0:
+        return
+    if ping_len > 16:
+        puts("Ping packet too large, closing connection\n")
+        return
+
+    var ping_buf: [byte; 16]
+    var ping_read: int32 = read_bytes_from_socket(fd, ping_buf as ptr[uint8], ping_len)
+    if ping_read != ping_len:
+        puts("Failed to read ping\n")
+        return
+
+    puts("Ping received\n")
+    # Echo the client's ping payload (the last 8 bytes) back as required
+    # by the protocol; the client matches it against what it sent.
+    let ping_payload: int64 = read_long(ping_buf as ptr[uint8], (ping_len - 8) as uint64)
+    send_pong_response(fd, ping_payload)
+    puts("Pong sent\n")
+
+
+def handle_login(fd: int32) -> void:
+    # Read login start packet
+    var login_len: int32 = read_varint_from_socket(fd)
+    if login_len <= 0:
+        return
+    if login_len > 4096:
+        puts("Login packet too large, closing connection\n")
+        return
+
+    var buf: [byte; 4096]
+    var nread: int32 = read_bytes_from_socket(fd, buf as ptr[uint8], login_len)
+    if nread != login_len:
+        return
+
+    puts("Login start received\n")
+
+    # Parse login start packet (packet ID 0x00 + username string + sig data).
+    # The username is threaded through login/join/player-info so the client
+    # actually shows the right name, and an offline UUID is derived from it.
+    var name_buf: [byte; 32]
+    zero_bytes(name_buf as ptr[uint8], 32 as uint64)
+    unsafe:
+        var idx: uint64 = 0
+        let packet_id: int32 = read_varint(buf as ptr[uint8], idx)
+        idx = skip_varint(buf as ptr[uint8], idx)
+
+        if packet_id == 0:
+            # Login Start packet - read the player name
+            idx = read_string_into(buf as ptr[uint8], idx, name_buf as ptr[char], 16)
+            # In 1.20+, there may be additional fields after the name
+            # Just ignore the remaining bytes in the packet
+
+    var uuid_msb: int64 = 0
+    var uuid_lsb: int64 = 0
+    offline_uuid(name_buf as ptr[char], &uuid_msb, &uuid_lsb)
+
+    # Compression: none. Vanilla servers with compression disabled do NOT
+    # send Set Compression at all - clients (including minecraft-protocol)
+    # stay in plain framing. Sending it with threshold -1 would make
+    # minecraft-protocol expect compressed framing on every packet.
+    # NOTE: if we wanted compression we'd send it BEFORE Login Success,
+    # while still in the login state (packet 0x03 in login state means
+    # set_compression; after Login Success the client switches to the
+    # configuration state where 0x03 means keep_alive).
+
+    # Send Login Success
+    puts("Sending login success...\n")
+    send_login_success(fd, name_buf as ptr[char], uuid_msb, uuid_lsb)
+    puts("Login success sent\n")
+
+    # Read login acknowledged (client acknowledges login)
+    var ack_len: int32 = read_varint_from_socket(fd)
+    if ack_len > 64:
+        puts("Invalid login acknowledgment, closing connection\n")
+        return
+    if ack_len > 0:
+        var ack_buf: [byte; 64]
+        read_bytes_from_socket(fd, ack_buf as ptr[uint8], ack_len)
+        puts("Login acknowledged received\n")
+
+    # 1.20.2 requires the dimension/biome/chat registry codec in the
+    # configuration phase. Send it via registry_data (config state 0x05)
+    # so the client can resolve "minecraft:overworld" in Join Game.
+    puts("Sending registry data...\n")
+    send_registry(fd)
+    puts("Registry data sent\n")
+
+    # In Minecraft 1.20.2, after Login Acknowledged the server must
+    # enter the configuration state. Send finish_configuration to signal
+    # the client to also finish configuration, then switch to play state.
+    puts("Sending finish configuration...\n")
+    send_finish_configuration(fd)
+    puts("Finish configuration sent\n")
+
+    # Wait for client's finish_configuration
+    var fin_len: int32 = read_varint_from_socket(fd)
+    if fin_len > 64:
+        puts("Invalid finish configuration, closing connection\n")
+        return
+    if fin_len > 0:
+        var fin_buf: [byte; 64]
+        read_bytes_from_socket(fd, fin_buf as ptr[uint8], fin_len)
+        puts("Client finish configuration received\n")
+
+    # Now in play state - send Join Game and other play packets
+    puts("Sending join game...\n")
+    send_join_game(fd, uuid_msb, uuid_lsb)
+    puts("Join game sent\n")
+
+    # Send superflat world setup (minecraft-protocol handles keepalive automatically)
+    puts("Sending world data...\n")
+    send_player_info(fd, name_buf as ptr[char], uuid_msb, uuid_lsb)
+    send_world_data(fd)
+    puts("World data sent\n")
+
+    puts("Player joined the superflat world!\n")
+
+    # Increment online player count
+    incr_online()
+
+    # Serve the player: answer keep-alives and stay connected
+    serve_play(fd, name_buf as ptr[char], uuid_msb, uuid_lsb)
+
+
+def print_player_name(name_ptr: ptr[char]) -> void:
+    unsafe:
+        var i: int32 = 0
+        while i < 16:
+            let c: uint8 = load_u8(name_ptr + i)
+            if c == 0:
+                break
+            putchar(c as int32)
+            i = i + 1
+
+
+def serve_play(fd: int32, name: ptr[char], uuid_msb: int64, uuid_lsb: int64) -> void:
+    # Keep the player in the game: parse what they send (movement, chat,
+    # block interactions), answer keep-alives and stay connected.
+    # Use SO_RCVTIMEO so read() returns -1 after 1s of silence instead of
+    # blocking forever, letting us send keep-alives on a schedule.
+    var tv: [byte; 16]
+    zero_bytes(tv as ptr[uint8], 16 as uint64)
+    tv[0] = (1 as byte)  # tv_sec = 1, tv_usec = 0
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, tv as ptr[char], 16)
+
+    var ps: PlayerState
+    ps.px = 4611686018427387904   # 8.5
+    ps.py = -4612069219558858752  # -60.0
+    ps.pz = 4611686018427387904   # 8.5
+    ps.yaw = 0
+    ps.pitch = 0
+    ps.time_of_day = 1000
+    ps.gamemode = 1
+    ps.keep_id = 1
+
+    var last_keep_ms: int64 = 0
+    while true:
+        # Keep-alives are SCHEDULED by wall clock (every 10s), not just sent
+        # on read timeouts. The vanilla client kicks with "Timed out" after
+        # ~30s without ANY packet, and a moving client keeps reads busy so the
+        # old timeout-driven logic never fired.
+        let now: int64 = now_ms()
+        if now - last_keep_ms >= 10000:
+            send_keep_alive(fd, ps.keep_id)
+            last_keep_ms = now
+
+        var pkt_len: int32 = read_varint_from_socket_eof(fd)
+        if pkt_len == -2:
+            break  # client disconnected (read returned 0)
+        if pkt_len < 0:
+            continue  # read timed out; loop back to the keep-alive schedule
+        if pkt_len == 0:
+            break
+        if pkt_len > 4096:
+            break  # oversized packet: drop the connection
+
+        # Read the client packet payload
+        var buf: [byte; 4096]
+        var got: int32 = read_bytes_from_socket(fd, buf as ptr[uint8], pkt_len)
+        if got != pkt_len:
+            break
+
+        dispatch_play_packet(fd, name, uuid_msb, uuid_lsb, &ps, buf as ptr[uint8])
+
+    # Decrement online player count on disconnect
+    decr_online()
+
+
+def dispatch_play_packet(fd: int32, name: ptr[char], uuid_msb: int64, uuid_lsb: int64, ps: ptr[PlayerState], buf: ptr[uint8]) -> void:
+    # Play-state serverbound packet dispatch (1.20.2 ids). Anything we do not
+    # care about (held item, settings, client commands, ...) is ignored; the
+    # payload was already drained by the caller.
+    var pid: int32 = 0
+    var idx: uint64 = 0
+    unsafe:
+        pid = read_varint(buf, 0)
+    idx = skip_varint(buf, idx)
+    match pid:
+        case 0x14:  # keep_alive response
+            ps.keep_id = ps.keep_id + 1
+        case 0x04:  # chat_command
+            var cmd_buf: [byte; 256]
+            zero_bytes(cmd_buf as ptr[uint8], 256 as uint64)
+            read_string_into(buf, idx, cmd_buf as ptr[char], 256)
+            handle_command(fd, name, ps, uuid_msb, uuid_lsb, cmd_buf as ptr[char])
+        case 0x05:  # chat_message
+            var msg_buf: [byte; 256]
+            zero_bytes(msg_buf as ptr[uint8], 256 as uint64)
+            read_string_into(buf, idx, msg_buf as ptr[char], 256)
+            handle_message(fd, name, msg_buf as ptr[char])
+        case 0x16:  # position: x y z f64 + onGround bool
+            ps.px = read_long(buf, idx)
+            ps.py = read_long(buf, idx + 8)
+            ps.pz = read_long(buf, idx + 16)
+        case 0x17:  # position_look: x y z f64 + yaw pitch f32 + onGround
+            ps.px = read_long(buf, idx)
+            ps.py = read_long(buf, idx + 8)
+            ps.pz = read_long(buf, idx + 16)
+            ps.yaw = read_int32(buf, idx + 24)
+            ps.pitch = read_int32(buf, idx + 28)
+        case 0x18:  # look: yaw pitch f32 + onGround
+            ps.yaw = read_int32(buf, idx)
+            ps.pitch = read_int32(buf, idx + 4)
+        case 0x20:  # block_dig: status varint, position long, face i8, sequence varint
+            let status: int32 = read_varint(buf, idx)
+            let pos_bits: int64 = read_long(buf, idx + 1)
+            if status == 0 || status == 2:
+                # start/finish digging: break the block to air
+                send_block_change(fd, read_position_x(pos_bits), read_position_y(pos_bits), read_position_z(pos_bits), 0)
+        case 0x34:  # block_place: hand, position, direction, cursors, inside, sequence
+            let pos_bits: int64 = read_long(buf, idx + 1)
+            let dir: int32 = read_varint(buf, idx + 9)
+            var bx: int32 = read_position_x(pos_bits)
+            var by: int32 = read_position_y(pos_bits)
+            var bz: int32 = read_position_z(pos_bits)
+            if dir == 0:
+                by = by - 1
+            elif dir == 1:
+                by = by + 1
+            elif dir == 2:
+                bz = bz - 1
+            elif dir == 3:
+                bz = bz + 1
+            elif dir == 4:
+                bx = bx - 1
+            else:
+                bx = bx + 1
+            # Place stone (block state 1). A real server would track the held
+            # item and convert item id -> block state.
+            send_block_change(fd, bx, by, bz, 1)
+        case _:
+            var _noop: int32 = 0

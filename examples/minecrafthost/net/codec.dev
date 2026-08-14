@@ -1,0 +1,174 @@
+package net.codec
+
+# VarInt / integer / string wire-format encoders and decoders for the
+# Minecraft protocol. All multi-byte integers are big-endian.
+
+import std.volatile
+
+def write_int16(buf: ptr[uint8], offset: uint64, value: int32) -> uint64:
+    # Minecraft protocol is big-endian.
+    unsafe:
+        *(buf + offset) = ((value >> 8) & 0xFF) as byte
+        *(buf + offset + 1) = (value & 0xFF) as byte
+    return offset + 2
+
+
+def write_f32bits(buf: ptr[uint8], offset: uint64, exp: int32, mant: int32) -> uint64:
+    # Write an IEEE754 f32 bit pattern (sign = 0) as big-endian int32.
+    # Value = (1.mantissa) * 2^(exp - 127).
+    var bits: int32 = (exp << 23) | mant
+    return write_int32(buf, offset, bits)
+
+
+def write_f64bits(buf: ptr[uint8], offset: uint64, sign: int32, exp: int32, mant: int64) -> uint64:
+    # Write an IEEE754 f64 bit pattern as big-endian int64.
+    # Value = (-1)^sign * (1.mantissa) * 2^(exp - 1023).
+    var bits: int64 = ((sign as int64) << 63) | ((exp as int64) << 52) | mant
+    return write_long(buf, offset, bits)
+
+
+def write_varint(buf: ptr[uint8], offset: uint64, value: int32) -> uint64:
+    var remaining: uint32 = value as uint32
+    var pos: uint64 = offset
+    var count: int32 = 0
+    unsafe:
+        while true:
+            let byte: uint8 = (remaining & 0x7F) as uint8
+            remaining = remaining >> 7
+            if remaining > 0:
+                *(buf + pos) = (byte | 0x80) as byte
+            else:
+                *(buf + pos) = byte
+            pos = pos + 1
+            if remaining == 0:
+                break
+            count = count + 1
+            if count > 5:
+                break
+    return pos
+
+
+def read_varint(buf: ptr[uint8], offset: uint64) -> int32:
+    var result: int32 = 0
+    var shift: int32 = 0
+    var pos: uint64 = offset
+    var count: int32 = 0
+    unsafe:
+        while count < 6:
+            let byte: uint8 = load_u8(buf + pos)
+            pos = pos + 1
+            result = result | ((byte & 0x7F) as int32) << shift
+            shift = shift + 7
+            if (byte & 0x80) == 0:
+                break
+            count = count + 1
+    return result
+
+
+def skip_varint(buf: ptr[uint8], offset: uint64) -> uint64:
+    var pos: uint64 = offset
+    var count: int32 = 0
+    unsafe:
+        while count < 6:
+            let byte: uint8 = load_u8(buf + pos)
+            pos = pos + 1
+            count = count + 1
+            if (byte & 0x80) == 0:
+                break
+    return pos
+
+
+def write_long(buf: ptr[uint8], offset: uint64, value: int64) -> uint64:
+    # Minecraft protocol is big-endian: most significant byte first.
+    var pos: uint64 = offset
+    unsafe:
+        var i: uint64 = 0
+        while i < 8:
+            let shift: uint64 = 7 - i
+            let b: uint8 = ((value >> (shift * 8)) & 0xFF) as uint8
+            *(buf + pos) = b
+            pos = pos + 1
+            i = i + 1
+    return pos
+
+
+def write_int32(buf: ptr[uint8], offset: uint64, value: int32) -> uint64:
+    # Minecraft protocol is big-endian: most significant byte first.
+    var pos: uint64 = offset
+    unsafe:
+        var i: uint64 = 0
+        while i < 4:
+            let shift: uint64 = 3 - i
+            let b: uint8 = ((value >> (shift * 8)) & 0xFF) as uint8
+            *(buf + pos) = b
+            pos = pos + 1
+            i = i + 1
+    return pos
+
+
+def skip_string(buf: ptr[uint8], offset: uint64) -> uint64:
+    var pos: uint64 = offset
+    unsafe:
+        var str_len: int32 = read_varint(buf, pos)
+        pos = skip_varint(buf, pos)
+        pos = pos + (str_len as uint64)
+    return pos
+
+
+def read_string_into(buf: ptr[uint8], offset: uint64, out: ptr[char], max_len: uint64) -> uint64:
+    # Copy a length-prefixed string into out (NUL-terminated, capped at
+    # max_len - 1 chars). Returns the offset just past the string bytes.
+    var pos: uint64 = offset
+    var len: int32 = 0
+    unsafe:
+        len = read_varint(buf, pos)
+        pos = skip_varint(buf, pos)
+        var i: uint64 = 0
+        while i < (len as uint64) && i < max_len - 1:
+            *(out as ptr[uint8] + i) = load_u8(buf + pos)
+            pos = pos + 1
+            i = i + 1
+        *(out as ptr[uint8] + (max_len - 1)) = 0
+        if (len as uint64) >= max_len:
+            pos = pos + ((len as uint64) - max_len + 1)
+    return pos
+
+
+def write_position(buf: ptr[uint8], offset: uint64, x: int32, y: int32, z: int32) -> uint64:
+    # 1.20.2 block position = x<<38 | z<<12 | (y+64)&0xFFF, x/z as 26-bit.
+    var packed: int64 = (((x & 0x3FFFFFF) as int64) << 38) | (((z & 0x3FFFFFF) as int64) << 12) | ((((y as int64) + 64) & 0xFFF))
+    return write_long(buf, offset, packed)
+
+
+def read_position_x(val: int64) -> int32:
+    return (val >> 38) as int32
+
+
+def read_position_y(val: int64) -> int32:
+    return ((((val & 0xFFF) << 52) >> 52) as int32) - 64
+
+
+def read_position_z(val: int64) -> int32:
+    return ((val << 26) >> 38) as int32
+
+
+def read_long(buf: ptr[uint8], offset: uint64) -> int64:
+    # Big-endian i64 read; also used to read f64 bit patterns.
+    var val: int64 = 0
+    unsafe:
+        var i: uint64 = 0
+        while i < 8:
+            val = (val << 8) | (load_u8(buf + offset + i) as int64)
+            i = i + 1
+    return val
+
+
+def read_int32(buf: ptr[uint8], offset: uint64) -> int32:
+    # Big-endian i32 read; also used to read f32 bit patterns.
+    var val: int32 = 0
+    unsafe:
+        var i: uint64 = 0
+        while i < 4:
+            val = (val << 8) | (load_u8(buf + offset + i) as int32)
+            i = i + 1
+    return val

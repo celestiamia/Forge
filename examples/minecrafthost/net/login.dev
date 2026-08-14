@@ -1,0 +1,66 @@
+package net.login
+
+from std.io import puts
+import std.mem
+import std.volatile
+import std.string
+
+def send_set_compression(fd: int32) -> void:
+    # Build Set Compression packet (packet ID 0x03 in login state)
+    # Required for Minecraft 1.20.2+ before configuration phase
+    var packet: [byte; 32]
+    zero_bytes(packet as ptr[uint8], 32 as uint64)
+    var pidx: uint64 = 0
+
+    # Packet ID 0x03 (Set Compression) - threshold = -1 means no compression
+    pidx = write_varint(packet as ptr[uint8], pidx, 3)
+
+    # Threshold as varint: -1 = no compression (varint encoding of -1)
+    pidx = write_varint(packet as ptr[uint8], pidx, -1)
+
+    # Send with length prefix
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_finish_configuration(fd: int32) -> void:
+    # Build Finish Configuration packet (packet ID 0x02 in configuration state)
+    var packet: [byte; 16]
+    zero_bytes(packet as ptr[uint8], 16 as uint64)
+    var pidx: uint64 = 0
+
+    # Packet ID 0x02 (Finish Configuration)
+    pidx = write_varint(packet as ptr[uint8], pidx, 2)
+
+    # Send with length prefix
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_login_success(fd: int32, name: ptr[char], uuid_msb: int64, uuid_lsb: int64) -> void:
+    # Build Login Success packet (packet ID 0x02 in login state)
+    var packet: [byte; 256]
+    zero_bytes(packet as ptr[uint8], 256 as uint64)
+    var pidx: uint64 = 0
+
+    # Packet ID 0x02 (Login Success)
+    pidx = write_varint(packet as ptr[uint8], pidx, 2)
+
+    # UUID as 16 bytes (two longs: MSB + LSB)
+    # In Minecraft 1.20.2, UUID is sent as raw 16 bytes, NOT as a string
+    pidx = write_long(packet as ptr[uint8], pidx, uuid_msb)
+    pidx = write_long(packet as ptr[uint8], pidx, uuid_lsb)
+
+    # Player name
+    var name_len: uint64 = strlen(name)
+    pidx = write_varint(packet as ptr[uint8], pidx, name_len as int32)
+    unsafe:
+        var i: uint64 = 0
+        while i < name_len:
+            *(packet as ptr[uint8] + pidx) = load_u8(name as ptr[uint8] + i)
+            pidx = pidx + 1
+            i = i + 1
+
+    # Profile properties count (0)
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)
+
+    # Send with length prefix
+    send_packet(fd, packet as ptr[uint8], pidx)

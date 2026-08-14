@@ -1,0 +1,71 @@
+package net.status
+
+from std.io import puts
+import std.string
+import std.mem
+import std.volatile
+import std.fmt
+import net.players
+
+def send_status_response(fd: int32) -> void:
+    # Build dynamic JSON response with current online count
+    var online: int32 = load_count()
+
+    var packet: [byte; 512]
+    zero_bytes(packet as ptr[uint8], 512 as uint64)
+    var pidx: uint64 = 0
+
+    # Packet ID 0x00 (Status Response)
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)
+
+    # Build JSON in two parts: prefix + online count + suffix
+    # Prefix: {"version":{"name":"1.20.2","protocol":764},"players":{"max":20,"online":
+    var prefix: ptr[char] = "{\"version\":{\"name\":\"1.20.2\",\"protocol\":764},\"players\":{\"max\":20,\"online\":"
+    var pre_len: uint64 = strlen(prefix)
+    unsafe:
+        var i: uint64 = 0
+        while i < pre_len:
+            *(packet as ptr[uint8] + pidx) = load_u8(prefix as ptr[uint8] + i)
+            pidx = pidx + 1
+            i = i + 1
+
+    # Online count (formatted integer)
+    var num_buf: [byte; 16]
+    zero_bytes(num_buf as ptr[uint8], 16 as uint64)
+    var num_len: uint64 = format_i32(num_buf as ptr[char], online) as uint64
+    unsafe:
+        var i: uint64 = 0
+        while i < num_len:
+            *(packet as ptr[uint8] + pidx) = load_u8(num_buf as ptr[uint8] + i)
+            pidx = pidx + 1
+            i = i + 1
+
+    # Suffix: },"description":{"text":"Forge Minecraft Server"}}
+    var suffix: ptr[char] = "},\"description\":{\"text\":\"Forge Minecraft Server\"}}"
+    var suf_len: uint64 = strlen(suffix)
+    unsafe:
+        var i: uint64 = 0
+        while i < suf_len:
+            *(packet as ptr[uint8] + pidx) = load_u8(suffix as ptr[uint8] + i)
+            pidx = pidx + 1
+            i = i + 1
+
+    # Send with length prefix
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_pong_response(fd: int32, ping_payload: int64) -> void:
+    # Build pong packet: packet ID (0x01) + the ping payload long, echoed
+    # back verbatim as the protocol requires.
+    var packet: [byte; 16]
+    zero_bytes(packet as ptr[uint8], 16 as uint64)
+    var pidx: uint64 = 0
+
+    # Packet ID 0x01 (Pong)
+    pidx = write_varint(packet as ptr[uint8], pidx, 1)
+
+    # Echo the payload from the client's ping
+    pidx = write_long(packet as ptr[uint8], pidx, ping_payload)
+
+    # Send with length prefix
+    send_packet(fd, packet as ptr[uint8], pidx)

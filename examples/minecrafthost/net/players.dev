@@ -1,0 +1,52 @@
+package net.players
+
+from std.io import open, close, read, write, lseek, unlink
+import std.mem
+import std.volatile
+
+# File-based online player counter. A single byte at /tmp/minecrafthost.count
+# stores the current online count (0-255). Race-tolerant: lost increments are
+# cosmetic since the count is informational only.
+
+def count_path() -> ptr[char]:
+    return "/tmp/minecrafthost.count"
+
+
+def load_count() -> int32:
+    var path: ptr[char] = count_path()
+    var fd: int32 = open(path, 0, 0)
+    if fd < 0:
+        return 0
+    var buf: [byte; 1]
+    var nread: int32 = read(fd, buf as ptr[char], 1)
+    close(fd)
+    if nread <= 0:
+        return 0
+    return load_u8(buf as ptr[uint8]) as int32
+
+
+def store_count(val: int32) -> void:
+    var path: ptr[char] = count_path()
+    var fd: int32 = open(path, 577, 420)
+    if fd < 0:
+        return
+    var buf: [byte; 1]
+    unsafe:
+        *(buf as ptr[uint8]) = (val as uint8)
+    write(fd, buf as ptr[char], 1)
+    close(fd)
+
+
+pub def incr_online() -> void:
+    var cnt: int32 = load_count()
+    cnt = cnt + 1
+    if cnt > 255:
+        cnt = 255
+    store_count(cnt)
+
+
+pub def decr_online() -> void:
+    var cnt: int32 = load_count()
+    if cnt > 0:
+        cnt = cnt - 1
+    store_count(cnt)

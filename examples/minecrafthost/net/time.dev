@@ -1,0 +1,18 @@
+package net.time
+
+from std.io import gettimeofday
+import std.mem
+import std.volatile
+
+pub def now_ms() -> int64:
+    # Wall-clock time in milliseconds since the Unix epoch, via gettimeofday
+    # (core/io.dev, syscall 96 on x86_64). Used to schedule keep-alives so the
+    # client never trips its 30s read timeout.
+    var tv: [byte; 16]
+    zero_bytes(tv as ptr[uint8], 16 as uint64)
+    if gettimeofday(tv as ptr[char], null as ptr[char]) != 0:
+        return 0
+    unsafe:
+        let secs: int64 = load_i64((tv as ptr[uint8]) as ptr[int64])
+        let usecs: int64 = load_i64((tv as ptr[uint8] + 8 as uint64) as ptr[int64])
+        return secs * 1000 + usecs // 1000

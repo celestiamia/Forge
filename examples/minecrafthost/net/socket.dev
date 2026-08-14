@@ -1,0 +1,96 @@
+package net.socket
+
+from std.io import read, write
+import std.mem
+import std.volatile
+
+pub def read_varint_from_socket(fd: int32) -> int32:
+    # Read a single VarInt from a socket, one byte at a time
+    var result: int32 = 0
+    var shift: int32 = 0
+    var buf: [byte; 1]
+    var count: int32 = 0
+    unsafe:
+        while count < 6:
+            var nread: int32 = read(fd, buf as ptr[char], 1)
+            if nread <= 0:
+                return -1
+            let byte: uint8 = load_u8(buf as ptr[uint8])
+            result = result | ((byte & 0x7F) as int32) << shift
+            shift = shift + 7
+            count = count + 1
+            if (byte & 0x80) == 0:
+                break
+    return result
+
+
+pub def read_varint_from_socket_eof(fd: int32) -> int32:
+    # Like read_varint_from_socket, but distinguishes:
+    #   -2 = peer closed the connection (read returned 0)
+    #   -1 = read timed out or other read error
+    var result: int32 = 0
+    var shift: int32 = 0
+    var buf: [byte; 1]
+    var count: int32 = 0
+    unsafe:
+        while count < 6:
+            var nread: int32 = read(fd, buf as ptr[char], 1)
+            if nread == 0:
+                return -2
+            if nread < 0:
+                return -1
+            let byte: uint8 = load_u8(buf as ptr[uint8])
+            result = result | ((byte & 0x7F) as int32) << shift
+            shift = shift + 7
+            count = count + 1
+            if (byte & 0x80) == 0:
+                break
+    return result
+
+
+pub def read_bytes_from_socket(fd: int32, buf: ptr[uint8], len: int32) -> int32:
+    # Read exactly len bytes from socket, handling partial reads
+    var total: int32 = 0
+    unsafe:
+        while total < len:
+            var nread: int32 = read(fd, (buf + total as uint64) as ptr[char], len - total)
+            if nread <= 0:
+                return total
+            total = total + nread
+    return total
+
+
+pub def write_bytes_to_socket(fd: int32, buf: ptr[uint8], len: int32) -> int32:
+    # Write exactly len bytes to the socket, handling partial writes.
+    # Returns total bytes written, or -1 on error (callers typically just
+    # give up on the connection then).
+    var total: int32 = 0
+    unsafe:
+        while total < len:
+            var nwritten: int32 = write(fd, (buf + total as uint64) as ptr[char], len - total)
+            if nwritten <= 0:
+                return -1
+            total = total + nwritten
+    return total
+
+
+pub def send_packet(fd: int32, data: ptr[uint8], len: uint64) -> void:
+    # Build packet with varint length prefix
+    # 65536 is big enough for the registry_data payload (~39KB)
+    var packet: [byte; 65536]
+    zero_bytes(packet as ptr[uint8], 65536 as uint64)
+    var pidx: uint64 = 0
+
+    # Write packet length
+    pidx = write_varint(packet as ptr[uint8], pidx, len as int32)
+
+    # Copy packet data
+    unsafe:
+        var i: uint64 = 0
+        while i < len:
+            *(packet as ptr[uint8] + pidx) = load_u8(data + i)
+            pidx = pidx + 1
+            i = i + 1
+
+    # Send it, looping until every byte is written
+    write_bytes_to_socket(fd, packet as ptr[uint8], pidx as int32)

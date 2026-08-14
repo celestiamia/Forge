@@ -1,0 +1,319 @@
+package play.chat
+
+import std.string
+import std.mem
+import std.fmt
+import std.volatile
+import net.players
+
+# System Chat (0x67) + a tiny command system. Replies go through system chat
+# (no player_chat signature plumbing needed in 1.20.2+).
+
+const SPAWN_X_BITS: int64 = 4611686018427387904   # 8.5
+const SPAWN_Y_BITS: int64 = -4612069219558858752  # -60.0
+const SPAWN_Z_BITS: int64 = 4611686018427387904   # 8.5
+
+def send_system_chat(fd: int32, text: ptr[char]) -> void:
+    # Packet 0x67: JSON content + isActionBar bool.
+    var packet: [byte; 512]
+    zero_bytes(packet as ptr[uint8], 512 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x67)
+
+    # content = {"text":"..."} wrapped in one length-prefixed JSON string.
+    var tlen: uint64 = strlen(text)
+    pidx = write_varint(packet as ptr[uint8], pidx, (tlen + 11) as int32)
+    var open_json: ptr[char] = "{\"text\":\""
+    unsafe:
+        var i: uint64 = 0
+        while i < 9:
+            *(packet as ptr[uint8] + pidx) = load_u8(open_json as ptr[uint8] + i)
+            pidx = pidx + 1
+            i = i + 1
+        i = 0
+        while i < tlen:
+            *(packet as ptr[uint8] + pidx) = load_u8(text as ptr[uint8] + i)
+            pidx = pidx + 1
+            i = i + 1
+        *(packet as ptr[uint8] + pidx) = 0x5C  # '\'
+        *(packet as ptr[uint8] + pidx + 1) = 0x22  # '"'
+        pidx = pidx + 2
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0x00  # isActionBar = false
+    pidx = pidx + 1
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def reply(fd: int32, msg: ptr[char]) -> void:
+    send_system_chat(fd, msg)
+
+
+def skip_ws(s: ptr[char]) -> ptr[char]:
+    var pos: uint64 = 0
+    var res: ptr[char] = null
+    unsafe:
+        while true:
+            let c: uint8 = load_u8((s as ptr[uint8]) + pos)
+            if (c as int32) != 32:
+                break
+            pos = pos + 1
+        res = (s as ptr[uint8] + pos) as ptr[char]
+    return res
+
+
+def token_len(s: ptr[char]) -> uint64:
+    var i: uint64 = 0
+    unsafe:
+        while true:
+            let c: uint8 = load_u8((s as ptr[uint8]) + i)
+            if c == 0 || (c as int32) == 32:
+                break
+            i = i + 1
+    return i
+
+
+def parse_int_at(s: ptr[char], out: ptr[int32]) -> ptr[char]:
+    # Parse a decimal int (with optional '-'). Returns the pointer just past
+    # the digits, or null if no digits were found.
+    var neg: bool = false
+    var pos: uint64 = 0
+    var acc: int64 = 0
+    var started: bool = false
+    unsafe:
+        let c0: uint8 = load_u8((s as ptr[uint8]) + pos)
+        if (c0 as int32) == 45:  # '-'
+            neg = true
+            pos = 1
+        while true:
+            let c: uint8 = load_u8((s as ptr[uint8]) + pos)
+            if (c as int32) >= 48 && (c as int32) <= 57:
+                acc = acc * 10 + ((c as int64) - 48)
+                started = true
+                pos = pos + 1
+            else:
+                break
+    if !started:
+        return null as ptr[char]
+    var v: int64 = acc
+    if neg:
+        v = -v
+    store_i32(out, v as int32)
+    var res: ptr[char] = null
+    unsafe:
+        res = (s as ptr[uint8] + pos) as ptr[char]
+    return res
+
+
+def int_to_f64bits(v: int32) -> int64:
+    # Exact IEEE754 bit pattern for an integer-valued double. Covers the
+    # int32 range, which fits in the 52-bit mantissa.
+    if v == 0:
+        return 0
+    var neg: bool = false
+    var n: uint32 = v as uint32
+    if v < 0:
+        neg = true
+        n = (0 - (v as uint32))
+    var bitpos: int32 = 0
+    var t: uint32 = n
+    while t > 1:
+        t = t >> 1
+        bitpos = bitpos + 1
+    var exp: int64 = (1023 + bitpos) as int64
+    var mant: int64 = (((n as int64) - ((1 as int64) << bitpos)) << ((52 as int64) - (bitpos as int64)))
+    var bits: int64 = (exp << 52) | mant
+    if neg:
+        bits = bits | ((1 as int64) << 63)
+    return bits
+
+
+def send_help(fd: int32) -> void:
+    reply(fd, "Commands: /help /seed /spawn /time <0-24000> /gamemode <0-3> /tp <x> <y> <z> /list")
+
+
+def cmd_list(fd: int32, player: ptr[char]) -> void:
+    var cnt: int32 = load_count()
+    var msg: [byte; 64]
+    zero_bytes(msg as ptr[uint8], 64 as uint64)
+    var pfx: ptr[char] = "Players online: "
+    var n: uint64 = 0
+    unsafe:
+        while n < 16:
+            *(msg as ptr[uint8] + n) = load_u8(pfx as ptr[uint8] + n)
+            n = n + 1
+        n = n + format_i32((msg as ptr[uint8] + n) as ptr[char], cnt)
+        *(msg as ptr[uint8] + n) = 32 as byte
+        n = n + 1
+        *(msg as ptr[uint8] + n) = 40 as byte  # '('
+        n = n + 1
+        var pname_len: uint64 = strlen(player)
+        var i: uint64 = 0
+        while i < pname_len && n < 62:
+            *(msg as ptr[uint8] + n) = load_u8(player as ptr[uint8] + i)
+            n = n + 1
+            i = i + 1
+        *(msg as ptr[uint8] + n) = 41 as byte  # ')'
+        n = n + 1
+    reply(fd, msg as ptr[char])
+
+
+def cmd_time(fd: int32, ps: ptr[PlayerState], arg: ptr[char]) -> void:
+    var p: ptr[char] = skip_ws(arg)
+    # Optional "set" prefix, then the tick value.
+    var first: uint64 = token_len(p)
+    if first == 3 && strncmp(p, "set", 3) == 0:
+        unsafe:
+            p = skip_ws((p as ptr[uint8] + 3 as uint64) as ptr[char])
+    var val: int32 = 0
+    var after: ptr[char] = parse_int_at(p, &val)
+    if after == null:
+        reply(fd, "Usage: /time <0-24000>")
+        return
+    if val < 0:
+        val = 0
+    if val > 24000:
+        val = 24000
+    ps.time_of_day = val as int64
+    send_update_time(fd, ps.time_of_day)
+    var msg: [byte; 64]
+    zero_bytes(msg as ptr[uint8], 64 as uint64)
+    var pfx: ptr[char] = "Time set to "
+    var n: uint64 = 0
+    unsafe:
+        while n < 12:
+            *(msg as ptr[uint8] + n) = load_u8(pfx as ptr[uint8] + n)
+            n = n + 1
+        n = n + format_i32((msg as ptr[uint8] + n) as ptr[char], val)
+    reply(fd, msg as ptr[char])
+
+
+def cmd_gamemode(fd: int32, ps: ptr[PlayerState], uuid_msb: int64, uuid_lsb: int64, arg: ptr[char]) -> void:
+    var p: ptr[char] = skip_ws(arg)
+    var mode: int32 = -1
+    var c: uint8 = 0
+    unsafe:
+        c = load_u8(p as ptr[uint8])
+    if (c as int32) >= 48 && (c as int32) <= 57:
+        var m: int32 = 0
+        var after: ptr[char] = parse_int_at(p, &m)
+        if after != null:
+            mode = m
+    elif (c as int32) == 115:  # 's'
+        mode = 0
+    elif (c as int32) == 99:  # 'c'
+        mode = 1
+    elif (c as int32) == 97:  # 'a'
+        mode = 2
+    elif (c as int32) == 118:  # 'v' -> spectator
+        mode = 3
+    if mode < 0 || mode > 3:
+        reply(fd, "Usage: /gamemode <0|1|2|3> (survival|creative|adventure|spectator)")
+        return
+    ps.gamemode = mode
+    send_player_info_gamemode(fd, uuid_msb, uuid_lsb, mode)
+    var msg: [byte; 64]
+    zero_bytes(msg as ptr[uint8], 64 as uint64)
+    var pfx: ptr[char] = "Gamemode set to "
+    var n: uint64 = 0
+    unsafe:
+        while n < 16:
+            *(msg as ptr[uint8] + n) = load_u8(pfx as ptr[uint8] + n)
+            n = n + 1
+    var gname: ptr[char] = "Survival"
+    if mode == 1:
+        gname = "Creative"
+    elif mode == 2:
+        gname = "Adventure"
+    elif mode == 3:
+        gname = "Spectator"
+    var glen: uint64 = strlen(gname)
+    unsafe:
+        var i: uint64 = 0
+        while i < glen:
+            *(msg as ptr[uint8] + n) = load_u8(gname as ptr[uint8] + i)
+            n = n + 1
+            i = i + 1
+    reply(fd, msg as ptr[char])
+
+
+def cmd_tp(fd: int32, ps: ptr[PlayerState], arg: ptr[char]) -> void:
+    var p: ptr[char] = skip_ws(arg)
+    var tx: int32 = 0
+    var ty: int32 = 0
+    var tz: int32 = 0
+    p = parse_int_at(p, &tx)
+    if p == null:
+        reply(fd, "Usage: /tp <x> <y> <z>")
+        return
+    p = skip_ws(p)
+    p = parse_int_at(p, &ty)
+    if p == null:
+        reply(fd, "Usage: /tp <x> <y> <z>")
+        return
+    p = skip_ws(p)
+    p = parse_int_at(p, &tz)
+    if p == null:
+        reply(fd, "Usage: /tp <x> <y> <z>")
+        return
+    if ty < -64 || ty > 320:
+        reply(fd, "y must be between -64 and 320")
+        return
+    ps.px = int_to_f64bits(tx)
+    ps.py = int_to_f64bits(ty)
+    ps.pz = int_to_f64bits(tz)
+    send_teleport(fd, ps.px, ps.py, ps.pz, ps.yaw, ps.pitch)
+    var msg: [byte; 64]
+    zero_bytes(msg as ptr[uint8], 64 as uint64)
+    var pfx: ptr[char] = "Teleported to "
+    var n: uint64 = 0
+    unsafe:
+        while n < 14:
+            *(msg as ptr[uint8] + n) = load_u8(pfx as ptr[uint8] + n)
+            n = n + 1
+        n = n + format_i32((msg as ptr[uint8] + n) as ptr[char], tx)
+        *(msg as ptr[uint8] + n) = 32 as byte  # ' '
+        n = n + 1
+        n = n + format_i32((msg as ptr[uint8] + n) as ptr[char], ty)
+        *(msg as ptr[uint8] + n) = 32 as byte
+        n = n + 1
+        n = n + format_i32((msg as ptr[uint8] + n) as ptr[char], tz)
+    reply(fd, msg as ptr[char])
+
+
+pub def handle_command(fd: int32, player: ptr[char], ps: ptr[PlayerState], uuid_msb: int64, uuid_lsb: int64, cmd: ptr[char]) -> void:
+    # Commands arrive without the leading '/', from chat_command (0x04).
+    var len: uint64 = token_len(cmd)
+    if len == 4 && strncmp(cmd, "help", 4) == 0:
+        send_help(fd)
+    elif len == 4 && strncmp(cmd, "seed", 4) == 0:
+        reply(fd, "Seed: 0")
+    elif len == 5 && strncmp(cmd, "spawn", 5) == 0:
+        ps.px = SPAWN_X_BITS
+        ps.py = SPAWN_Y_BITS
+        ps.pz = SPAWN_Z_BITS
+        ps.yaw = 0
+        ps.pitch = 0
+        send_teleport(fd, ps.px, ps.py, ps.pz, 0, 0)
+    elif len == 4 && strncmp(cmd, "time", 4) == 0:
+        unsafe:
+            cmd_time(fd, ps, (cmd as ptr[uint8] + 4 as uint64) as ptr[char])
+    elif len == 8 && strncmp(cmd, "gamemode", 8) == 0:
+        unsafe:
+            cmd_gamemode(fd, ps, uuid_msb, uuid_lsb, (cmd as ptr[uint8] + 8 as uint64) as ptr[char])
+    elif len == 2 && strncmp(cmd, "tp", 2) == 0:
+        unsafe:
+            cmd_tp(fd, ps, (cmd as ptr[uint8] + 2 as uint64) as ptr[char])
+    elif len == 4 && strncmp(cmd, "list", 4) == 0:
+        cmd_list(fd, player)
+    else:
+        reply(fd, "Unknown command. Type /help")
+
+
+pub def handle_message(fd: int32, player: ptr[char], msg: ptr[char]) -> void:
+    # Echo plain chat back as a system message, showcasing strcat formatting.
+    var buf: [byte; 300]
+    zero_bytes(buf as ptr[uint8], 300 as uint64)
+    strcat(buf as ptr[char], player)
+    strcat(buf as ptr[char], ": ")
+    strcat(buf as ptr[char], msg)
+    send_system_chat(fd, buf as ptr[char])

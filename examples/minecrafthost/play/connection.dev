@@ -1,0 +1,18 @@
+package play.connection
+
+import std.mem
+
+def send_keep_alive(fd: int32, keep_id: int64) -> void:
+    # Build Keep Alive packet (packet ID 0x24 = 36 in play state)
+    var packet: [byte; 16]
+    zero_bytes(packet as ptr[uint8], 16 as uint64)
+    var pidx: uint64 = 0
+
+    # Packet ID 0x24 (Keep Alive) in 1.20.2
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x24)
+
+    # Keep alive ID
+    pidx = write_long(packet as ptr[uint8], pidx, keep_id)
+
+    # Send with length prefix
+    send_packet(fd, packet as ptr[uint8], pidx)

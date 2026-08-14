@@ -1,0 +1,174 @@
+package world.chunk
+
+import std.string
+import std.mem
+import std.volatile
+
+# ---------------------------------------------------------------------------
+# 1.20.2 superflat world: chunks + light + position so the client actually
+# finishes loading the world instead of hanging on "Joining world".
+# Chunk section (1.20.2): i16 blockCount + block states paletted container +
+# biomes paletted container; 24 sections bottom-up, no length prefix.
+# Paletted container: u8 bitsPerEntry; 0 = single value (varint + 0 data
+# bytes), 1-8 = indirect (varint palette len + varints + varint data longs),
+# 15 = direct (global ids). Light is inline in the chunk packet.
+# ---------------------------------------------------------------------------
+
+def put_heightmap_long(buf: ptr[uint8], offset: uint64) -> uint64:
+    # One packed heightmap long: 7 entries of 9 bits, all value 4
+    # (highest block at y=-61, min_y=-64 -> 4 = -61 + 64 + 1).
+    # Bit pattern = 4 * (1 + 2^9 + 2^18 + 2^27 + 2^36 + 2^45 + 2^54),
+    # big-endian bytes: 01 00 80 40 20 10 08 04.
+    unsafe:
+        *(buf + offset) = 0x01
+        *(buf + offset + 1) = 0x00
+        *(buf + offset + 2) = 0x80
+        *(buf + offset + 3) = 0x40
+        *(buf + offset + 4) = 0x20
+        *(buf + offset + 5) = 0x10
+        *(buf + offset + 6) = 0x08
+        *(buf + offset + 7) = 0x04
+    return offset + 8
+
+
+def write_heightmap_long_array(buf: ptr[uint8], offset: uint64, name: ptr[char]) -> uint64:
+    # NBT TAG_Long_Array (0x0C) with an ASCII name and 37 packed longs.
+    var pos: uint64 = offset
+    unsafe:
+        *(buf + pos) = 0x0C
+        pos = pos + 1
+    var nlen: int32 = strlen(name) as int32
+    pos = write_int16(buf, pos, nlen)
+    unsafe:
+        var i: uint64 = 0
+        while i < (nlen as uint64):
+            *(buf + pos) = load_u8(name as ptr[uint8] + i)
+            pos = pos + 1
+            i = i + 1
+    pos = write_int32(buf, pos, 37)
+    var j: int32 = 0
+    while j < 37:
+        pos = put_heightmap_long(buf, pos)
+        j = j + 1
+    return pos
+
+
+def write_heightmaps(buf: ptr[uint8], offset: uint64) -> uint64:
+    # Anonymous NBT root: TAG_Compound with NO root name (no u16 name len).
+    # Child tags keep their names. minecraft-protocol's anonymousNbt type
+    # expects exactly this; writing a root name misaligns the whole packet.
+    var pos: uint64 = offset
+    unsafe:
+        *(buf + pos) = 0x0A  # TAG_Compound, anonymous root
+        pos = pos + 1
+    pos = write_heightmap_long_array(buf, pos, "MOTION_BLOCKING")
+    pos = write_heightmap_long_array(buf, pos, "WORLD_SURFACE")
+    unsafe:
+        *(buf + pos) = 0x00  # end of compound
+        pos = pos + 1
+    return pos
+
+
+def write_single_container(buf: ptr[uint8], offset: uint64, value: int32) -> uint64:
+    # Paletted container with bitsPerEntry = 0: varint value + 0 data longs.
+    var pos: uint64 = offset
+    unsafe:
+        *(buf + pos) = 0x00
+        pos = pos + 1
+    pos = write_varint(buf, pos, value)
+    unsafe:
+        *(buf + pos) = 0x00
+        pos = pos + 1
+    return pos
+
+
+def write_grass_section(buf: ptr[uint8], offset: uint64) -> uint64:
+    # The world floor section (y=-64..-49): bedrock + 2 dirt + grass, air above.
+    # blockCount = 1024 (256 bedrock + 512 dirt + 256 grass).
+    var pos: uint64 = write_int16(buf, offset, 1024)
+    # Block states: indirect palette [79, 10, 9, 0], 4 bits per entry.
+    unsafe:
+        *(buf + pos) = 0x04
+        pos = pos + 1
+    pos = write_varint(buf, pos, 4)
+    pos = write_varint(buf, pos, 79)   # bedrock
+    pos = write_varint(buf, pos, 10)   # dirt
+    pos = write_varint(buf, pos, 9)    # grass_block
+    pos = write_varint(buf, pos, 0)    # air
+    # Data array: 256 longs (4096 blocks * 4 bits / 64).
+    # 16 nibbles of palette index 0 (bedrock), 32 of 1 (dirt), 16 of 2
+    # (grass), 192 of 3 (air) -> uniform byte fills.
+    pos = write_varint(buf, pos, 256)
+    unsafe:
+        set_bytes(buf + pos, 0x00, 128 as uint64)
+    pos = pos + 128
+    unsafe:
+        set_bytes(buf + pos, 0x11, 256 as uint64)
+    pos = pos + 256
+    unsafe:
+        set_bytes(buf + pos, 0x22, 128 as uint64)
+    pos = pos + 128
+    unsafe:
+        set_bytes(buf + pos, 0x33, 1536 as uint64)
+    pos = pos + 1536
+    # Biomes: plains (39) everywhere in this section.
+    return write_single_container(buf, pos, 39)
+
+
+def write_chunk_data(buf: ptr[uint8]) -> uint64:
+    # Full chunk column: 24 sections bottom-up, no length prefix.
+    var pos: uint64 = write_grass_section(buf, 0)
+    var s: int32 = 0
+    while s < 23:
+        pos = write_int16(buf, pos, 0)  # solid block count = 0
+        pos = write_single_container(buf, pos, 0)   # all air
+        pos = write_single_container(buf, pos, 39)  # plains biomes
+        s = s + 1
+    return pos
+
+
+def send_map_chunk(fd: int32, cx: int32, cz: int32) -> void:
+    # Chunk Data and Update Light (0x25), light inline. The chunk column is
+    # the superflat world section + air; sky light set to 15 everywhere
+    # (explicit 0xFF nibble arrays), no block light.
+    var data: [byte; 65536]
+    zero_bytes(data as ptr[uint8], 65536 as uint64)
+    var dlen: uint64 = write_chunk_data(data as ptr[uint8])
+
+    var packet: [byte; 65536]
+    zero_bytes(packet as ptr[uint8], 65536 as uint64)
+    var pidx: uint64 = 0
+
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x25)
+    pidx = write_int32(packet as ptr[uint8], pidx, cx)
+    pidx = write_int32(packet as ptr[uint8], pidx, cz)
+    pidx = write_heightmaps(packet as ptr[uint8], pidx)
+    pidx = write_varint(packet as ptr[uint8], pidx, dlen as int32)
+    unsafe:
+        var i: uint64 = 0
+        while i < dlen:
+            *(packet as ptr[uint8] + pidx) = load_u8(data as ptr[uint8] + i)
+            pidx = pidx + 1
+            i = i + 1
+    # No block entities.
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)
+    # Sky light mask: bits 0..23 (all 24 sections) = 0xFFFFFF.
+    pidx = write_varint(packet as ptr[uint8], pidx, 1)
+    pidx = write_long(packet as ptr[uint8], pidx, 16777215)
+    # Block light mask / empty masks: none.
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)
+    # Sky light: one full 2048-byte nibble array per section, all 0xFF (15).
+    pidx = write_varint(packet as ptr[uint8], pidx, 24)
+    var l: int32 = 0
+    while l < 24:
+        pidx = write_varint(packet as ptr[uint8], pidx, 2048)
+        unsafe:
+            set_bytes(packet as ptr[uint8] + pidx, 0xFF, 2048 as uint64)
+        pidx = pidx + 2048
+        l = l + 1
+    # Block light arrays: none.
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)
+
+    send_packet(fd, packet as ptr[uint8], pidx)

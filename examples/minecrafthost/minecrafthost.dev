@@ -1,0 +1,119 @@
+package minecrafthost
+
+# A minimal Minecraft Java Edition server in Forge.
+# Handles the Minecraft protocol to let players join a superflat world.
+# Protocol version: 764 (1.20.2)
+#
+# Layout:
+#   net.codec       VarInt / integer / string wire encoders (big-endian)
+#   net.registry    embedded dimension/biome/chat codec (registry_data 0x05)
+#   net.server      connection state machine + buffered socket reader
+#   net.status      status-state packets (response, pong)
+#   net.login       login/configuration-state packets (login success)
+#   net.time        wall-clock time for keep-alive scheduling
+#   net.uuid        offline UUID generation
+#   net.players     online player count (file-based IPC)
+#   play.join       play-state join packets (join game, player info)
+#   play.connection keep-alive
+#   play.world      play-state world/environment packets (chunks grid, position)
+#   play.chat       commands + system chat
+#   world.chunk     chunk column + light encoding (superflat)
+
+from std.io import puts, socket, bind, listen, accept, read, write, close, exit, open, lseek, fork, waitpid, setsockopt
+import std.string
+import std.fmt
+import std.mem
+import std.volatile
+
+import net.codec
+import net.socket
+import net.registry
+import net.server
+import net.status
+import net.login
+import net.time
+import net.uuid
+import net.players
+import play.join
+import play.connection
+import play.world
+import play.chat
+import world.chunk
+
+const PORT: int32 = 25565
+const BACKLOG: int32 = 10
+const SO_RCVTIMEO: int32 = 20
+
+pub def main() -> int32:
+    puts("Starting minimal Minecraft server...\n")
+
+    # Create listening socket
+    var sockfd: int32 = socket(AF_INET, SOCK_STREAM, 0)
+    if sockfd < 0:
+        puts("Failed to create socket\n")
+        return 1
+
+    # SO_REUSEADDR
+    var optval: [byte; 4]
+    zero_bytes(optval as ptr[uint8], 4 as uint64)
+    optval[0] = (1 as byte)
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, optval as ptr[char], 4)
+
+    # Build sockaddr_in
+    var addr: [byte; 16]
+    zero_bytes(addr as ptr[uint8], 16 as uint64)
+    addr[0] = (AF_INET & 0xFF) as byte
+    addr[1] = ((AF_INET >> 8) & 0xFF) as byte
+    addr[2] = ((PORT >> 8) & 0xFF) as byte
+    addr[3] = (PORT & 0xFF) as byte
+
+    if bind(sockfd, addr as ptr[char], 16) < 0:
+        puts("Failed to bind to port 25565\n")
+        close(sockfd)
+        return 1
+
+    if listen(sockfd, BACKLOG) < 0:
+        puts("Failed to listen\n")
+        close(sockfd)
+        return 1
+
+    # Receive timeout on the listening socket so accept() returns -1 about
+    # once per second even with no clients, giving the parent a chance to
+    # reap finished children instead of letting them pile up as zombies.
+    var tv: [byte; 16]
+    zero_bytes(tv as ptr[uint8], 16 as uint64)
+    tv[0] = (1 as byte)  # tv_sec = 1, tv_usec = 0
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, tv as ptr[char], 16)
+
+    puts("Minecraft server listening on port 25565...\n")
+
+    # Accept loop - fork a child per connection (README: fork-based concurrency)
+    while true:
+        var clientfd: int32 = accept(sockfd, null as ptr[char], null as ptr[int32])
+        if clientfd < 0:
+            # No client right now (timeout): reap any finished children
+            var status: int32 = 0
+            var reaped: int32 = waitpid(-1, status as ptr[int32], 1)
+            while reaped > 0:
+                reaped = waitpid(-1, status as ptr[int32], 1)
+            continue
+
+        puts("Client connected!\n")
+        var pid: int32 = fork()
+        if pid == 0:
+            # Child: handle this connection, then exit
+            handle_client(clientfd)
+            close(clientfd)
+            exit(0)
+        else:
+            # Parent: close our copy and keep accepting
+            close(clientfd)
+            # Reap any children that have finished, so they don't linger as
+            # zombies after clients disconnect.
+            var status: int32 = 0
+            var reaped: int32 = waitpid(-1, status as ptr[int32], 1)
+            while reaped > 0:
+                reaped = waitpid(-1, status as ptr[int32], 1)
+
+    close(sockfd)
+    return 0

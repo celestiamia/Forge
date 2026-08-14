@@ -1,0 +1,13 @@
+package net.registry
+
+import net.socket
+
+# Configuration-state registry_data codec blob, baked into the binary at
+# compile time from registry.nbt (39307 bytes, already including the leading
+# 0x05 packet id). `REGISTRY` is a read-only byte pointer into .rodata and
+# `REGISTRY_LEN` its length; no file I/O at runtime.
+embed REGISTRY = "../registry.nbt"
+
+def send_registry(fd: int32) -> void:
+    # Send the codec blob verbatim; send_packet adds the varint length prefix.
+    send_packet(fd, REGISTRY, REGISTRY_LEN as uint64)

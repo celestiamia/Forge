@@ -1,0 +1,179 @@
+package play.join
+
+import std.string
+import std.mem
+import std.volatile
+
+def send_join_game(fd: int32, uuid_msb: int64, uuid_lsb: int64) -> void:
+    # Build Join Game packet (packet ID 0x29 = 41 in 1.20.2 play state)
+    var packet: [byte; 512]
+    zero_bytes(packet as ptr[uint8], 512 as uint64)
+    var pidx: uint64 = 0
+
+    # Packet ID 0x29 (Join Game) in 1.20.2
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x29)
+
+    # Entity ID (i32, 4 bytes) - derived from the player's offline UUID so it
+    # is stable across reconnects
+    var eid: int32 = (uuid_lsb as int32) & 0x7FFFFFFF
+    pidx = write_int32(packet as ptr[uint8], pidx, eid)
+
+    # Is hardcore (bool)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0
+    pidx = pidx + 1
+
+    # World names array (array of strings)
+    pidx = write_varint(packet as ptr[uint8], pidx, 1)  # 1 dimension
+    var dim_name: ptr[char] = "minecraft:overworld"
+    var dim_len: uint64 = strlen(dim_name)
+    pidx = write_varint(packet as ptr[uint8], pidx, dim_len as int32)
+    unsafe:
+        var i: uint64 = 0
+        while i < dim_len:
+            *(packet as ptr[uint8] + pidx) = load_u8(dim_name as ptr[uint8] + i)
+            pidx = pidx + 1
+            i = i + 1
+
+    # Max players (varint)
+    pidx = write_varint(packet as ptr[uint8], pidx, 20)
+
+    # View distance (varint, chunks)
+    pidx = write_varint(packet as ptr[uint8], pidx, 10)
+
+    # Simulation distance (varint, chunks)
+    pidx = write_varint(packet as ptr[uint8], pidx, 10)
+
+    # Reduced debug info (bool)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0
+    pidx = pidx + 1
+
+    # Enable respawn screen (bool)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0
+    pidx = pidx + 1
+
+    # Do limited crafting (bool)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0
+    pidx = pidx + 1
+
+    # World type (dimension type registry key). NOT "minecraft:flat":
+    # that key does not exist in the dimension_type registry, and the
+    # vanilla client throws "Missing key ... minecraft:flat". Flatness
+    # is conveyed by the isFlat bool below.
+    var wtype: ptr[char] = "minecraft:overworld"
+    var wtype_len: uint64 = strlen(wtype)
+    pidx = write_varint(packet as ptr[uint8], pidx, wtype_len as int32)
+    unsafe:
+        var i2: uint64 = 0
+        while i2 < wtype_len:
+            *(packet as ptr[uint8] + pidx) = load_u8(wtype as ptr[uint8] + i2)
+            pidx = pidx + 1
+            i2 = i2 + 1
+
+    # World name (string, same as dimension name)
+    pidx = write_varint(packet as ptr[uint8], pidx, dim_len as int32)
+    unsafe:
+        var i2: uint64 = 0
+        while i2 < dim_len:
+            *(packet as ptr[uint8] + pidx) = load_u8(dim_name as ptr[uint8] + i2)
+            pidx = pidx + 1
+            i2 = i2 + 1
+
+    # Hashed seed (i64)
+    pidx = write_long(packet as ptr[uint8], pidx, 0)
+
+    # Game mode (u8) - 1 = Creative
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 1
+    pidx = pidx + 1
+
+    # Previous game mode (i8) - -1 = None (0xFF as unsigned)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0xFF
+    pidx = pidx + 1
+
+    # Is debug (bool)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0
+    pidx = pidx + 1
+
+    # Is flat (bool)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 1
+    pidx = pidx + 1
+
+    # Death (optional, bool=false means no death data)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0
+    pidx = pidx + 1
+
+    # Portal cooldown (varint)
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)
+
+    # Send with length prefix
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_player_info(fd: int32, name: ptr[char], uuid_msb: int64, uuid_lsb: int64) -> void:
+    # Build Player Info packet (packet ID 0x3C = 60 in 1.20.2 play state).
+    # 1.20.2 format: action is a BITFLAGS u8 (add_player = 0x01), followed by a
+    # `data` array of entries. Each entry carries `uuid` plus `player`
+    # (game_profile) when the add_player bit is set; the other switch fields
+    # (chatSession / gamemode / listed / latency / displayName) are void unless
+    # their respective bits are set, so with only add_player we send just uuid
+    # + game_profile.
+    var packet: [byte; 512]
+    zero_bytes(packet as ptr[uint8], 512 as uint64)
+    var pidx: uint64 = 0
+
+    # Packet ID 0x3C (Player Info) in 1.20.2
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x3C)
+
+    # Action bitflags: add_player = 0x01
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0x01
+    pidx = pidx + 1
+
+    # Data array: 1 entry
+    pidx = write_varint(packet as ptr[uint8], pidx, 1)
+
+    # Entry 0: uuid (16 bytes: two longs)
+    pidx = write_long(packet as ptr[uint8], pidx, uuid_msb)
+    pidx = write_long(packet as ptr[uint8], pidx, uuid_lsb)
+
+    # game_profile: name (string) + properties (array)
+    var name_len: uint64 = strlen(name)
+    pidx = write_varint(packet as ptr[uint8], pidx, name_len as int32)
+    unsafe:
+        var i: uint64 = 0
+        while i < name_len:
+            *(packet as ptr[uint8] + pidx) = load_u8(name as ptr[uint8] + i)
+            pidx = pidx + 1
+            i = i + 1
+
+    # Profile properties count (0)
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)
+
+    # Send with length prefix
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_player_info_gamemode(fd: int32, uuid_msb: int64, uuid_lsb: int64, mode: int32) -> void:
+    # Player Info update (0x3C) with action bit 0x04 (update gamemode):
+    # one entry per player: uuid + gamemode varint.
+    var packet: [byte; 64]
+    zero_bytes(packet as ptr[uint8], 64 as uint64)
+    var pidx: uint64 = 0
+
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x3C)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0x04  # update_gamemode
+    pidx = pidx + 1
+    pidx = write_varint(packet as ptr[uint8], pidx, 1)
+    pidx = write_long(packet as ptr[uint8], pidx, uuid_msb)
+    pidx = write_long(packet as ptr[uint8], pidx, uuid_lsb)
+    pidx = write_varint(packet as ptr[uint8], pidx, mode)
+    send_packet(fd, packet as ptr[uint8], pidx)

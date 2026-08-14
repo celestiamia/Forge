@@ -1,0 +1,43 @@
+package net.uuid
+
+import std.string
+import std.mem
+import std.volatile
+
+# Deterministic offline UUIDs. Vanilla servers use MD5("OfflinePlayer:"+name);
+# here we use FNV-1a 64-bit hashes so any name maps to a stable UUID without
+# pulling in a full hash implementation.
+
+def fnv1a64(s: ptr[char]) -> int64:
+    var h: uint64 = 1469598103934665603
+    var i: uint64 = 0
+    unsafe:
+        while true:
+            let c: uint8 = load_u8((s as ptr[uint8]) + i)
+            if c == 0:
+                break
+            h = h ^ (c as uint64)
+            h = h * 1099511628211
+            i = i + 1
+    return h as int64
+
+
+pub def offline_uuid(name: ptr[char], msb: ptr[int64], lsb: ptr[int64]) -> void:
+    # MSB hashes "OfflinePlayer:<name>" (matching vanilla's input domain),
+    # LSB hashes just the name so two ids are never identical.
+    var buf: [byte; 48]
+    zero_bytes(buf as ptr[uint8], 48 as uint64)
+    var prefix: ptr[char] = "OfflinePlayer:"
+    var plen: uint64 = strlen(prefix)
+    unsafe:
+        var i: uint64 = 0
+        while i < plen:
+            *(buf as ptr[uint8] + i) = load_u8(prefix as ptr[uint8] + i)
+            i = i + 1
+    var rest: ptr[char] = null
+    unsafe:
+        rest = (buf as ptr[uint8] + plen) as ptr[char]
+    strcat(rest, name)
+    unsafe:
+        store_i64(msb, fnv1a64(buf as ptr[char]))
+        store_i64(lsb, fnv1a64(name))

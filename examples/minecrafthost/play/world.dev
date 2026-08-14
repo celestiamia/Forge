@@ -1,0 +1,198 @@
+package play.world
+
+import std.mem
+import std.string
+import std.volatile
+
+def send_difficulty(fd: int32) -> void:
+    var packet: [byte; 32]
+    zero_bytes(packet as ptr[uint8], 32 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x0B)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0x01  # easy
+        *(packet as ptr[uint8] + pidx + 1) = 0x00  # not locked
+    pidx = pidx + 2
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_abilities(fd: int32) -> void:
+    var packet: [byte; 32]
+    zero_bytes(packet as ptr[uint8], 32 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x36)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0x00  # no flags
+    pidx = pidx + 1
+    pidx = write_f32bits(packet as ptr[uint8], pidx, 122, 5033165)  # 0.05
+    pidx = write_f32bits(packet as ptr[uint8], pidx, 123, 5033165)  # 0.1
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_update_time(fd: int32, time_of_day: int64) -> void:
+    var packet: [byte; 32]
+    zero_bytes(packet as ptr[uint8], 32 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x60)
+    pidx = write_long(packet as ptr[uint8], pidx, 0)      # world age
+    pidx = write_long(packet as ptr[uint8], pidx, time_of_day)
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_block_change(fd: int32, x: int32, y: int32, z: int32, block_state: int32) -> void:
+    # Block Change (0x09): location + block state id. Sent when the player
+    # places or breaks a block in the world.
+    var packet: [byte; 32]
+    zero_bytes(packet as ptr[uint8], 32 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x09)
+    pidx = write_position(packet as ptr[uint8], pidx, x, y, z)
+    pidx = write_varint(packet as ptr[uint8], pidx, block_state)
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_teleport(fd: int32, x: int64, y: int64, z: int64, yaw: int32, pitch: int32) -> void:
+    # Player Position and Look (0x3E) as a teleport: absolute coordinates.
+    # x/y/z are f64 bit patterns, yaw/pitch are f32 bit patterns.
+    var packet: [byte; 64]
+    zero_bytes(packet as ptr[uint8], 64 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x3E)
+    pidx = write_long(packet as ptr[uint8], pidx, x)
+    pidx = write_long(packet as ptr[uint8], pidx, y)
+    pidx = write_long(packet as ptr[uint8], pidx, z)
+    pidx = write_int32(packet as ptr[uint8], pidx, yaw)
+    pidx = write_int32(packet as ptr[uint8], pidx, pitch)
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0x00  # flags: absolute, no effects
+    pidx = pidx + 1
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_spawn_position(fd: int32) -> void:
+    var packet: [byte; 32]
+    zero_bytes(packet as ptr[uint8], 32 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x52)
+    # Spawn (8, -60, 8): x in top 26 bits, z in middle 26, y in low 12.
+    # 26-bit x=8 << 38 = 2199023255552; 26-bit z=8 << 12 = 32768;
+    # 12-bit y=-60 = 4036. Total = 2199023292356.
+    pidx = write_long(packet as ptr[uint8], pidx, 2199023292356)
+    pidx = write_f32bits(packet as ptr[uint8], pidx, 0, 0)  # angle 0
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_world_border(fd: int32) -> void:
+    var packet: [byte; 64]
+    zero_bytes(packet as ptr[uint8], 64 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x23)
+    pidx = write_f64bits(packet as ptr[uint8], pidx, 0, 1026, 0)  # 8.0
+    pidx = write_f64bits(packet as ptr[uint8], pidx, 0, 1026, 0)  # 8.0
+    pidx = write_f64bits(packet as ptr[uint8], pidx, 0, 1048, 3549464052629504)  # 60000000.0
+    pidx = write_f64bits(packet as ptr[uint8], pidx, 0, 1048, 3549464052629504)  # 60000000.0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)  # speed
+    pidx = write_varint(packet as ptr[uint8], pidx, 29999984)  # portal boundary
+    pidx = write_varint(packet as ptr[uint8], pidx, 5)  # warning blocks
+    pidx = write_varint(packet as ptr[uint8], pidx, 15)  # warning time
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_view_position(fd: int32) -> void:
+    var packet: [byte; 16]
+    zero_bytes(packet as ptr[uint8], 16 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x50)
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)  # chunk x
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)  # chunk z
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_view_distance(fd: int32) -> void:
+    var packet: [byte; 16]
+    zero_bytes(packet as ptr[uint8], 16 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x51)
+    pidx = write_varint(packet as ptr[uint8], pidx, 4)
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_simulation_distance(fd: int32) -> void:
+    var packet: [byte; 16]
+    zero_bytes(packet as ptr[uint8], 16 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x5E)
+    pidx = write_varint(packet as ptr[uint8], pidx, 4)
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_update_health(fd: int32) -> void:
+    var packet: [byte; 32]
+    zero_bytes(packet as ptr[uint8], 32 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x59)
+    pidx = write_f32bits(packet as ptr[uint8], pidx, 131, 2097152)  # 20.0 HP
+    pidx = write_varint(packet as ptr[uint8], pidx, 20)  # food
+    pidx = write_f32bits(packet as ptr[uint8], pidx, 129, 2097152)  # 5.0
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_chunk_batch_start(fd: int32) -> void:
+    var packet: [byte; 8]
+    zero_bytes(packet as ptr[uint8], 8 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x0D)
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_chunk_batch_finished(fd: int32, batch_size: int32) -> void:
+    var packet: [byte; 16]
+    zero_bytes(packet as ptr[uint8], 16 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x0C)
+    pidx = write_varint(packet as ptr[uint8], pidx, batch_size)
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_position(fd: int32) -> void:
+    # Player Position and Look: spawn feet on top of the grass at
+    # (8.5, -60.0, 8.5), looking straight ahead, no teleport effects.
+    var packet: [byte; 64]
+    zero_bytes(packet as ptr[uint8], 64 as uint64)
+    var pidx: uint64 = 0
+    pidx = write_varint(packet as ptr[uint8], pidx, 0x3E)
+    pidx = write_f64bits(packet as ptr[uint8], pidx, 0, 1026, 281474976710656)  # x = 8.5
+    pidx = write_f64bits(packet as ptr[uint8], pidx, 1, 1028, 3940649673949184)  # y = -60.0
+    pidx = write_f64bits(packet as ptr[uint8], pidx, 0, 1026, 281474976710656)  # z = 8.5
+    pidx = write_f32bits(packet as ptr[uint8], pidx, 0, 0)  # yaw 0
+    pidx = write_f32bits(packet as ptr[uint8], pidx, 0, 0)  # pitch 0
+    unsafe:
+        *(packet as ptr[uint8] + pidx) = 0x00  # flags: no teleport effects
+    pidx = pidx + 1
+    pidx = write_varint(packet as ptr[uint8], pidx, 0)  # teleport id
+    send_packet(fd, packet as ptr[uint8], pidx)
+
+
+def send_world_data(fd: int32) -> void:
+    # Send the world around spawn: view settings, a 9x9 chunk grid, then the
+    # player position so the client leaves the "Joining world" screen.
+    send_difficulty(fd)
+    send_abilities(fd)
+    send_update_time(fd, 1000)
+    send_spawn_position(fd)
+    send_world_border(fd)
+    send_view_position(fd)
+    send_view_distance(fd)
+    send_simulation_distance(fd)
+    send_update_health(fd)
+    send_chunk_batch_start(fd)
+    var cx: int32 = -4
+    while cx <= 4:
+        var cz: int32 = -4
+        while cz <= 4:
+            send_map_chunk(fd, cx, cz)
+            cz = cz + 1
+        cx = cx + 1
+    send_chunk_batch_finished(fd, 81)
+    send_position(fd)
