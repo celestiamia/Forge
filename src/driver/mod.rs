@@ -14,6 +14,7 @@ use anyhow::{Context, Result};
 use crate::backend::codegen::compile_program;
 use crate::backend::codegen32;
 use crate::driver::loader::{load_modules, merge_modules};
+use crate::linker::resolve_config;
 use crate::lower::lower;
 use crate::obj::ObjectWriter;
 
@@ -23,6 +24,7 @@ pub struct CompileOptions {
     pub output: PathBuf,
     pub target: Option<String>,
     pub freestanding: bool,
+    pub linker: Option<PathBuf>,
 }
 
 /// Compile a Forge source file to a native executable or flat binary.
@@ -48,15 +50,17 @@ pub fn compile(options: CompileOptions) -> Result<PathBuf> {
         anyhow::bail!(msg.trim_end().to_string());
     }
 
-    let target = options.target.as_deref().unwrap_or("x86_64-unknown-linux-gnu");
-    let (hosted, arch, obj_format) = classify_target(target)?;
+    let target_name = options.target.as_deref().unwrap_or("x86_64-unknown-linux-gnu");
+    let config = resolve_config(options.target.as_deref(), options.linker.as_deref())?;
+    let hosted = config.hosted && !options.freestanding;
 
     let mut program = lower(&module, hosted)?;
-    program.target = Some(target.to_string());
-    program.arch = Some(arch.to_string());
-    program.obj_format = Some(obj_format.to_string());
+    program.target = Some(target_name.to_string());
+    program.arch = Some(config.arch.clone());
+    program.obj_format = Some(config.obj_format_str().to_string());
+    program.config = Some(config.clone());
 
-    let writer: Box<dyn ObjectWriter> = match arch {
+    let writer: Box<dyn ObjectWriter> = match config.arch.as_str() {
         "x86_32" => codegen32::compile_program(&program)?,
         _ => compile_program(&program)?,
     };
@@ -76,25 +80,19 @@ pub fn compile(options: CompileOptions) -> Result<PathBuf> {
     Ok(options.output.clone())
 }
 
-fn classify_target(target: &str) -> Result<(bool, &str, &str)> {
-    match target {
-        "x86_64-unknown-linux-gnu" | "native" => Ok((true, "x86_64", "elf")),
-        "x86_32-unknown-linux-gnu" => Ok((true, "x86_32", "elf")),
-        "x86_16-boot" => Ok((false, "x86_16", "flat")),
-        _ => anyhow::bail!(
-            "target {} is not supported yet; supported targets are x86_64-unknown-linux-gnu, x86_32-unknown-linux-gnu and x86_16-boot",
-            target
-        ),
-    }
-}
-
 /// Convenience helper for tests.
-pub fn compile_to_out(source: &Path, output: &Path, target: Option<&str>, freestanding: bool) -> Result<PathBuf> {
+pub fn compile_to_out(
+    source: &Path,
+    output: &Path,
+    target: Option<&str>,
+    freestanding: bool,
+) -> Result<PathBuf> {
     compile(CompileOptions {
         source: source.to_path_buf(),
         output: output.to_path_buf(),
         target: target.map(|s| s.to_string()),
         freestanding,
+        linker: None,
     })
 }
 
@@ -126,6 +124,7 @@ pub def main() -> int32:
             output,
             target: Some("x86_32-unknown-linux-gnu".to_string()),
             freestanding: false,
+            linker: None,
         }).unwrap();
         let status = Command::new(&out).status().unwrap();
         assert!(status.success(), "minimal x86_32 program should exit 0");
@@ -147,6 +146,7 @@ pub def main() -> int32:
             output,
             target: Some("x86_64-unknown-linux-gnu".to_string()),
             freestanding: false,
+            linker: None,
         }).unwrap();
         let status = Command::new(&out).status().unwrap();
         assert!(status.success(), "minimal program should exit 0");
@@ -169,12 +169,83 @@ pub def main() -> int32:
             output,
             target: Some("x86_64-unknown-linux-gnu".to_string()),
             freestanding: false,
+            linker: None,
         });
         assert!(err.is_err(), "ill-typed program should be rejected");
         let msg = err.unwrap_err().to_string();
         assert!(
             msg.contains("type checking failed"),
             "expected type-checker error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn embeds_file_bytes_into_the_binary() {
+        // `embed NAME = "file"` must bake the raw bytes of a data file into
+        // the executable: `NAME` is a pointer to the blob and `NAME_LEN` is
+        // its length.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("blob.bin"), [0x9A, 0x01, 0xFF]).unwrap();
+        let src = r#"
+package test
+
+embed BLOB = "blob.bin"
+
+pub def main() -> int32:
+    if BLOB_LEN != 3:
+        return 1
+    unsafe:
+        if (*BLOB) as int32 != 0x9A:
+            return 2
+    unsafe:
+        if (*(BLOB + 2 as uint64)) as int32 != 0xFF:
+            return 3
+    return 0
+    return 0
+"#;
+        let source = write_temp_dev(&dir, "embed", src);
+        let output = dir.path().join("out");
+        let out = compile(CompileOptions {
+            source,
+            output,
+            target: Some("x86_64-unknown-linux-gnu".to_string()),
+            freestanding: false,
+            linker: None,
+        }).unwrap();
+        let status = Command::new(&out).status().unwrap();
+        assert_eq!(
+            status.code(),
+            Some(0),
+            "embedded blob should be readable with the right length"
+        );
+    }
+
+    #[test]
+    fn missing_embed_file_is_a_compile_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = r#"
+package test
+
+embed MISSING = "nope.bin"
+
+pub def main() -> int32:
+    return 0
+"#;
+        let source = write_temp_dev(&dir, "missing_embed", src);
+        let output = dir.path().join("out");
+        let err = compile(CompileOptions {
+            source,
+            output,
+            target: Some("x86_64-unknown-linux-gnu".to_string()),
+            freestanding: false,
+            linker: None,
+        });
+        assert!(err.is_err(), "missing embed file should be rejected");
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("cannot read embedded file"),
+            "expected embed error, got: {}",
             msg
         );
     }

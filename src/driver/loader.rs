@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 
 use crate::ast::{Import, Item, Module, Visibility};
-use crate::parser::parse_module;
+use crate::parser::parse_module_in_dir;
 
 /// A loaded entry module plus all modules it transitively imports.
 pub struct ModuleGraph {
@@ -35,7 +35,11 @@ pub struct ModuleGraph {
 /// Parse `entry_source` (located at `entry_path`), then recursively load every
 /// module imported by the entry module.
 pub fn load_modules(entry_source: &str, entry_path: &Path) -> Result<ModuleGraph> {
-    let entry = parse_module(entry_source)
+    let entry_dir = entry_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let entry = parse_module_in_dir(entry_source, &entry_dir)
         .map_err(|e| anyhow::anyhow!("parse error in {}: {}", entry_path.display(), e))?;
 
     let mut graph = ModuleGraph {
@@ -57,7 +61,11 @@ pub fn load_modules(entry_source: &str, entry_path: &Path) -> Result<ModuleGraph
         let file = resolve_module_path(&path, entry_path)?;
         let src = std::fs::read_to_string(&file)
             .with_context(|| format!("reading module {} at {}", path.join("."), file.display()))?;
-        let module = parse_module(&src)
+        let dir = file
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+        let module = parse_module_in_dir(&src, &dir)
             .map_err(|e| anyhow::anyhow!("parse error in {}: {}", file.display(), e))?;
 
         for imp in &module.imports {
@@ -94,15 +102,17 @@ pub fn merge_modules(graph: ModuleGraph) -> Result<Module> {
 
     for (path, dep) in &graph.modules {
         for item in &dep.items {
-            let name = item_name(item);
-            if defined.contains(&name) {
-                bail!(
-                    "name conflict: `{}` from {} conflicts with an existing definition",
-                    name,
-                    path.join(".")
-                );
+            let names = defined_names(item);
+            for name in &names {
+                if defined.contains(name) {
+                    bail!(
+                        "name conflict: `{}` from {} conflicts with an existing definition",
+                        name,
+                        path.join(".")
+                    );
+                }
+                defined.insert(name.clone());
             }
-            defined.insert(name.clone());
             merged.items.push(item.clone());
         }
     }
@@ -174,7 +184,7 @@ fn resolve_local_module(path: &[String], entry_path: &Path) -> Result<PathBuf> {
 }
 
 fn collect_names(module: &Module) -> HashSet<String> {
-    module.items.iter().map(item_name).collect()
+    module.items.iter().flat_map(defined_names).collect()
 }
 
 fn public_names(module: &Module) -> HashSet<String> {
@@ -193,6 +203,7 @@ fn is_public(item: &Item) -> bool {
         Item::Union(u) => u.vis == Visibility::Public,
         Item::Enum(e) => e.vis == Visibility::Public,
         Item::Const(c) => c.vis == Visibility::Public,
+        Item::Embed(e) => e.vis == Visibility::Public,
         // Extern functions and use declarations are considered public for
         // import purposes; visibility is not modeled for them yet.
         Item::ExternFn(_) | Item::Use(_) => true,
@@ -208,10 +219,20 @@ fn item_name(item: &Item) -> String {
         Item::Enum(e) => e.name.clone(),
         Item::ExternFn(e) => e.name.clone(),
         Item::Const(c) => c.name.clone(),
+        Item::Embed(e) => e.name.clone(),
         Item::Use(u) => u
             .alias
             .clone()
             .unwrap_or_else(|| u.path.last().cloned().unwrap_or_default()),
         Item::Impl(_) => String::new(),
+    }
+}
+
+/// Names an item brings into the merged namespace. An `embed` binds both the
+/// data symbol `NAME` and its implicit length constant `NAME_LEN`.
+fn defined_names(item: &Item) -> Vec<String> {
+    match item {
+        Item::Embed(e) => vec![e.name.clone(), format!("{}_LEN", e.name)],
+        other => vec![item_name(other)],
     }
 }
