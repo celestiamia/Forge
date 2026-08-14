@@ -18,7 +18,7 @@ pub mod stmt;
 pub mod r#type;
 
 pub use crate::ast::*;
-pub use parser::{parse_module, parse_module_in_dir, ParseError, Parser};
+pub use parser::{ParseError, Parser, parse_module, parse_module_in_dir};
 
 #[cfg(test)]
 mod tests;

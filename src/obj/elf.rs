@@ -110,7 +110,11 @@ impl Elf64Writer {
         let data_name = shstrtab.add(".data");
         let bss_name = shstrtab.add(".bss");
         let shstrtab_name = shstrtab.add(".shstrtab");
-        let interp_name = if has_interp { Some(shstrtab.add(".interp")) } else { None };
+        let interp_name = if has_interp {
+            Some(shstrtab.add(".interp"))
+        } else {
+            None
+        };
 
         // Layout.
         let header_area = EHDR_SIZE + PHDR_SIZE * phnum as u64;

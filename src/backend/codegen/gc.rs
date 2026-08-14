@@ -96,7 +96,8 @@ impl<'p> CodeGen<'p> {
             .ok_or_else(|| anyhow::anyhow!("missing gc helper label: {}", name))?;
         self.bind_label(lab);
         self.gc_state_reg(Reg::Rax)?;
-        self.asm.mov(Reg::Rax, Mem::base_disp(Reg::Rax, field as i32))?;
+        self.asm
+            .mov(Reg::Rax, Mem::base_disp(Reg::Rax, field as i32))?;
         self.asm.ret()?;
         Ok(())
     }
@@ -136,8 +137,7 @@ impl<'p> CodeGen<'p> {
         self.asm.mov(Reg::R9, Mem::base(Reg::R8))?; // hdr
         self.asm.mov(Reg::R10, Reg::R9)?;
         self.asm.and(Reg::R10, !7i32)?; // size
-        self.asm
-            .mov(Mem::base_disp(Reg::Rbp, -8), Reg::R10)?; // save size
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -8), Reg::R10)?; // save size
         self.asm.test(Reg::R9, H_USED as i32)?;
         self.asm.je(mark_next)?; // free block: just advance
         // used block: clear mark
@@ -146,15 +146,11 @@ impl<'p> CodeGen<'p> {
         self.asm.mov(Mem::base(Reg::R8), Reg::R11)?;
         // p = H + 8 ; end = p + size
         self.asm.lea(Reg::R10, Mem::base_disp(Reg::R8, 8))?; // p
-        self.asm
-            .mov(Mem::base_disp(Reg::Rbp, -16), Reg::R10)?; // save p
-        self.asm
-            .mov(Reg::R10, Mem::base_disp(Reg::Rbp, -8))?; // size
-        self.asm
-            .mov(Reg::R11, Mem::base_disp(Reg::Rbp, -16))?; // p
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -16), Reg::R10)?; // save p
+        self.asm.mov(Reg::R10, Mem::base_disp(Reg::Rbp, -8))?; // size
+        self.asm.mov(Reg::R11, Mem::base_disp(Reg::Rbp, -16))?; // p
         self.asm.add(Reg::R11, Reg::R10)?; // end = p + size
-        self.asm
-            .mov(Mem::base_disp(Reg::Rbp, -24), Reg::R11)?; // save end
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -24), Reg::R11)?; // save end
 
         // Scan stack roots.  Scan from RBP (not RSP) so this GC helper's own
         // spill slots ([rbp-8..-24] hold the current block's size/p/end) are
@@ -167,12 +163,10 @@ impl<'p> CodeGen<'p> {
         self.asm.cmp(Reg::Rdx, Reg::Rcx)?;
         self.asm.jcc(Cond::Ae, rodata_setup)?; // stack scan done
         self.asm.mov(Reg::R9, Mem::base(Reg::Rdx))?; // w
-        self.asm
-            .mov(Reg::R10, Mem::base_disp(Reg::Rbp, -16))?; // p
+        self.asm.mov(Reg::R10, Mem::base_disp(Reg::Rbp, -16))?; // p
         self.asm.cmp(Reg::R10, Reg::R9)?; // p - w
         self.asm.jcc(Cond::A, stack_next)?; // w < p -> skip
-        self.asm
-            .mov(Reg::R11, Mem::base_disp(Reg::Rbp, -24))?; // end
+        self.asm.mov(Reg::R11, Mem::base_disp(Reg::Rbp, -24))?; // end
         self.asm.cmp(Reg::R9, Reg::R11)?; // w - end
         self.asm.jcc(Cond::Ae, stack_next)?; // w >= end -> skip
         self.asm.mov(Reg::R9, Mem::base(Reg::R8))?;
@@ -192,12 +186,10 @@ impl<'p> CodeGen<'p> {
         self.asm.cmp(Reg::Rdx, Reg::Rcx)?;
         self.asm.jcc(Cond::Ae, mark_next)?; // rodata scan done -> next block
         self.asm.mov(Reg::R9, Mem::base(Reg::Rdx))?; // w
-        self.asm
-            .mov(Reg::R10, Mem::base_disp(Reg::Rbp, -16))?; // p
+        self.asm.mov(Reg::R10, Mem::base_disp(Reg::Rbp, -16))?; // p
         self.asm.cmp(Reg::R10, Reg::R9)?; // p - w
         self.asm.jcc(Cond::A, rodata_next)?; // w < p -> skip
-        self.asm
-            .mov(Reg::R11, Mem::base_disp(Reg::Rbp, -24))?; // end
+        self.asm.mov(Reg::R11, Mem::base_disp(Reg::Rbp, -24))?; // end
         self.asm.cmp(Reg::R9, Reg::R11)?; // w - end
         self.asm.jcc(Cond::Ae, rodata_next)?; // w >= end -> skip
         self.asm.mov(Reg::R9, Mem::base(Reg::R8))?;
@@ -209,8 +201,7 @@ impl<'p> CodeGen<'p> {
 
         // Advance to the next block.
         self.bind_label(mark_next);
-        self.asm
-            .mov(Reg::R10, Mem::base_disp(Reg::Rbp, -8))?; // size
+        self.asm.mov(Reg::R10, Mem::base_disp(Reg::Rbp, -8))?; // size
         self.asm.add(Reg::R10, H_HDR_SIZE as i32)?; // 8 + size
         self.asm.add(Reg::R8, Reg::R10)?; // H += 8 + size
         self.asm.jmp(mark_walk)?;
@@ -230,8 +221,7 @@ impl<'p> CodeGen<'p> {
         self.asm.push(Reg::Rbp)?;
         self.asm.mov(Reg::Rbp, Reg::Rsp)?;
         self.asm.sub(Reg::Rsp, 16i32)?;
-        self.asm
-            .mov(Mem::base_disp(Reg::Rbp, -8), Reg::Rdi)?; // save size
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -8), Reg::Rdi)?; // save size
 
         // ---- lazy heap initialisation -------------------------------------
         self.gc_state_reg(Reg::Rsi)?; // RSI = &gc_state (anchor)
@@ -257,8 +247,7 @@ impl<'p> CodeGen<'p> {
         self.bind_label(after_init);
 
         // ---- round request up to 8 bytes (min 8) -------------------------
-        self.asm
-            .mov(Reg::Rdi, Mem::base_disp(Reg::Rbp, -8))?; // reload size
+        self.asm.mov(Reg::Rdi, Mem::base_disp(Reg::Rbp, -8))?; // reload size
         self.asm.add(Reg::Rdi, 7i32)?;
         self.asm.and(Reg::Rdi, !7i32)?; // 8-byte aligned
         let min_ok = self.asm.new_label();
@@ -266,10 +255,8 @@ impl<'p> CodeGen<'p> {
         self.asm.jcc(Cond::Ae, min_ok)?;
         self.asm.mov(Reg::Rdi, 8i32)?;
         self.bind_label(min_ok);
-        self.asm
-            .mov(Mem::base_disp(Reg::Rbp, -8), Reg::Rdi)?; // store req
-        self.asm
-            .mov(Mem::base_disp(Reg::Rbp, -16), 0i32)?; // tried_gc = 0
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -8), Reg::Rdi)?; // store req
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -16), 0i32)?; // tried_gc = 0
 
         let walk = self.asm.new_label();
         let walk_next = self.asm.new_label();
@@ -288,8 +275,7 @@ impl<'p> CodeGen<'p> {
         self.gc_state_reg(Reg::Rsi)?; // reload anchor (clobbered by gc_collect)
         self.asm
             .mov(Reg::Rax, Mem::base_disp(Reg::Rsi, GC_FREE_HEAD as i32))?; // cur
-        self.asm
-            .mov(Reg::Rdi, Mem::base_disp(Reg::Rbp, -8))?; // req
+        self.asm.mov(Reg::Rdi, Mem::base_disp(Reg::Rbp, -8))?; // req
         self.asm.xor(Reg::R10, Reg::R10)?; // prev = 0
 
         self.bind_label(walk);
@@ -329,7 +315,10 @@ impl<'p> CodeGen<'p> {
 
         // ---- split: unlink cur, splice in the remainder ----------------------
         self.bind_label(split);
-        self.asm.lea(Reg::Rcx, Mem::base_index_scale_disp(Reg::Rax, Reg::Rdi, Scale::One, 8))?;
+        self.asm.lea(
+            Reg::Rcx,
+            Mem::base_index_scale_disp(Reg::Rax, Reg::Rdi, Scale::One, 8),
+        )?;
         self.asm.mov(Mem::base(Reg::Rcx), Reg::R11)?; // *(rem) = nxt
         self.asm.cmp(Reg::R10, 0i32)?;
         self.asm.je(sp_head)?;
@@ -348,14 +337,15 @@ impl<'p> CodeGen<'p> {
         self.asm.mov(Reg::R8, Reg::R9)?;
         self.asm.sub(Reg::R8, Reg::Rdi)?;
         self.asm.sub(Reg::R8, H_HDR_SIZE as i32)?;
-        self.asm
-            .mov(Mem::base_index_scale(Reg::Rax, Reg::Rdi, Scale::One), Reg::R8)?;
+        self.asm.mov(
+            Mem::base_index_scale(Reg::Rax, Reg::Rdi, Scale::One),
+            Reg::R8,
+        )?;
 
         // ---- stats + return ---------------------------------------------
         self.bind_label(alloc_done);
         // RAX = cur (result), RSI = &gc_state, RDI = req.
-        self.asm
-            .mov(Reg::Rdx, Mem::base_disp(Reg::Rbp, -8))?; // req
+        self.asm.mov(Reg::Rdx, Mem::base_disp(Reg::Rbp, -8))?; // req
         self.asm
             .mov(Reg::Rcx, Mem::base_disp(Reg::Rsi, GC_LIVE_BYTES as i32))?;
         self.asm.add(Reg::Rcx, Reg::Rdx)?;
@@ -376,12 +366,10 @@ impl<'p> CodeGen<'p> {
 
         // ---- free list exhausted: collect once, then retry ----------------
         self.bind_label(nofit);
-        self.asm
-            .mov(Reg::Rcx, Mem::base_disp(Reg::Rbp, -16))?;
+        self.asm.mov(Reg::Rcx, Mem::base_disp(Reg::Rbp, -16))?;
         self.asm.cmp(Reg::Rcx, 0i32)?;
         self.asm.jne(fail)?;
-        self.asm
-            .mov(Mem::base_disp(Reg::Rbp, -16), 1i32)?; // tried_gc = 1
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -16), 1i32)?; // tried_gc = 1
         self.asm.call(gc_lab)?; // clobbers rax..r11; rsi/rdi reloaded at `retry`
         self.asm.jmp(retry)?;
 
@@ -485,8 +473,7 @@ impl<'p> CodeGen<'p> {
         self.asm.test(Reg::R9, H_MARK as i32)?;
         self.asm.jne(sweep_keep)?; // marked used -> keep
         // unmarked used -> sweep to free
-        self.asm
-            .mov(Mem::base(Reg::R8), Reg::R10)?; // *(H) = size (free)
+        self.asm.mov(Mem::base(Reg::R8), Reg::R10)?; // *(H) = size (free)
         self.asm.lea(Reg::Rdx, Mem::base_disp(Reg::R8, 8))?; // payload = H+8
         self.asm
             .mov(Reg::Rcx, Mem::base_disp(Reg::Rax, GC_FREE_HEAD as i32))?;
@@ -552,8 +539,7 @@ impl<'p> CodeGen<'p> {
 
         // Count walk: tally sizes of unreachable used blocks, then clear marks.
         self.asm.mov(Reg::R8, Reg::Rdi)?; // H = base
-        self.asm
-            .mov(Mem::base_disp(Reg::Rbp, -32), 0i32)?; // leak bytes = 0
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -32), 0i32)?; // leak bytes = 0
         let count_walk = self.asm.new_label();
         let count_next = self.asm.new_label();
         let count_live = self.asm.new_label();
@@ -569,11 +555,9 @@ impl<'p> CodeGen<'p> {
         self.asm.test(Reg::R9, H_MARK as i32)?;
         self.asm.jne(count_live)?; // marked (live) -> just clear mark
         // unreachable used block: tally it
-        self.asm
-            .mov(Reg::R11, Mem::base_disp(Reg::Rbp, -32))?;
+        self.asm.mov(Reg::R11, Mem::base_disp(Reg::Rbp, -32))?;
         self.asm.add(Reg::R11, Reg::R10)?;
-        self.asm
-            .mov(Mem::base_disp(Reg::Rbp, -32), Reg::R11)?;
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -32), Reg::R11)?;
         // fall through to clear mark
         self.bind_label(count_live);
         self.asm.mov(Reg::R11, Reg::R9)?;
@@ -585,8 +569,7 @@ impl<'p> CodeGen<'p> {
         self.asm.jmp(count_walk)?;
         self.bind_label(count_done);
 
-        self.asm
-            .mov(Reg::Rax, Mem::base_disp(Reg::Rbp, -32))?; // return leak bytes
+        self.asm.mov(Reg::Rax, Mem::base_disp(Reg::Rbp, -32))?; // return leak bytes
         self.asm.leave();
         self.asm.ret()?;
 

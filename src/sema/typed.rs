@@ -37,8 +37,7 @@ impl MonoInstance {
         for arg in &generic_args {
             mangled.push('$');
             mangled.push_str(
-                &arg
-                    .to_string()
+                &arg.to_string()
                     .replace([' ', '*', '&', '<', '>', ':', ';', ',', '(', ')', '-'], "_"),
             );
         }

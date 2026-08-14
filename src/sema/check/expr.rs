@@ -1,5 +1,5 @@
-use super::*;
 use super::typing::*;
+use super::*;
 
 impl Context {
     pub(super) fn check_expr(&mut self, expr: &Expr, expected: Option<&Type>) -> TypedExpr {
@@ -43,7 +43,10 @@ impl Context {
                     }
                     Type::Ref { pointee } | Type::RefMut { pointee } => *pointee.clone(),
                     _ => {
-                        self.error(format!("cannot dereference non-pointer type `{}`", operand.ty));
+                        self.error(format!(
+                            "cannot dereference non-pointer type `{}`",
+                            operand.ty
+                        ));
                         Type::Unknown
                     }
                 };
@@ -65,7 +68,10 @@ impl Context {
             Expr::Tuple(t) => {
                 let mut fields = Vec::new();
                 let mut field_tys = Vec::new();
-                if let Some(Type::Tuple { fields: expected_fields }) = expected {
+                if let Some(Type::Tuple {
+                    fields: expected_fields,
+                }) = expected
+                {
                     for (i, e) in t.iter().enumerate() {
                         let exp = expected_fields.get(i);
                         let te = self.check_expr(e, exp);
@@ -88,7 +94,11 @@ impl Context {
                 // When the expected type is a pointer, treat the array literal
                 // as a pointer to the element type (matching the IR representation).
                 let is_ptr_expected = matches!(expected, Some(t) if t.is_pointer());
-                if let Some(Type::Array { elem: expected_elem, .. }) = expected {
+                if let Some(Type::Array {
+                    elem: expected_elem,
+                    ..
+                }) = expected
+                {
                     if !is_ptr_expected {
                         elem_ty = *expected_elem.clone();
                         for e in a {
@@ -132,10 +142,7 @@ impl Context {
                 TypedExpr::new(TypedExprKind::Array(elems), ty)
             }
             Expr::Range(r) => {
-                let start = r
-                    .start
-                    .as_ref()
-                    .map(|e| Box::new(self.check_expr(e, None)));
+                let start = r.start.as_ref().map(|e| Box::new(self.check_expr(e, None)));
                 let end = r.end.as_ref().map(|e| Box::new(self.check_expr(e, None)));
                 TypedExpr::new(
                     TypedExprKind::Range {
@@ -185,11 +192,17 @@ impl Context {
                         fields: info.fields.clone(),
                     };
                     TypedExpr::new(
-                        TypedExprKind::StructLiteral { name: name.clone(), fields: field_values },
+                        TypedExprKind::StructLiteral {
+                            name: name.clone(),
+                            fields: field_values,
+                        },
                         ty,
                     )
                 } else {
-                    self.error_at(expr.span().unwrap_or_else(Span::unknown), format!("unknown struct type `{}`", name));
+                    self.error_at(
+                        expr.span().unwrap_or_else(Span::unknown),
+                        format!("unknown struct type `{}`", name),
+                    );
                     TypedExpr::new(TypedExprKind::Literal(Literal::Null), Type::Unknown)
                 }
             }
@@ -205,12 +218,13 @@ impl Context {
 
     pub(super) fn check_ident(&mut self, name: &str) -> TypedExpr {
         if let Some(var) = self.lookup_var(name) {
-            return TypedExpr::new(
-                TypedExprKind::Ident(name.to_string()),
-                var.ty.clone(),
-            );
+            return TypedExpr::new(TypedExprKind::Ident(name.to_string()), var.ty.clone());
         }
-        if let Some(sig) = self.functions.get(name).or_else(|| self.extern_fns.get(name)) {
+        if let Some(sig) = self
+            .functions
+            .get(name)
+            .or_else(|| self.extern_fns.get(name))
+        {
             let ty = Type::function(
                 sig.params.iter().map(|(_, t)| t.clone()).collect(),
                 sig.ret.clone(),
@@ -230,20 +244,27 @@ impl Context {
         TypedExpr::new(TypedExprKind::Ident(name.to_string()), Type::Unknown)
     }
 
-    pub(super) fn check_binary(&mut self, b: &ast::BinaryExpr, expected: Option<&Type>) -> TypedExpr {
+    pub(super) fn check_binary(
+        &mut self,
+        b: &ast::BinaryExpr,
+        expected: Option<&Type>,
+    ) -> TypedExpr {
         use BinOp::*;
 
         if b.op == Assign {
             let target = self.check_expr(&b.left, None);
             let value = self.check_expr(&b.right, Some(&target.ty));
             if !self.is_mutable_lvalue(&target) {
-                self.error_at(b.span, "cannot assign to immutable or non-lvalue expression".to_string());
+                self.error_at(
+                    b.span,
+                    "cannot assign to immutable or non-lvalue expression".to_string(),
+                );
             }
             if !value.ty.is_unknown() && !target.ty.is_unknown() && value.ty != target.ty {
-                self.error_at(b.span, format!(
-                    "assignment expected `{}`, found `{}`",
-                    target.ty, value.ty
-                ));
+                self.error_at(
+                    b.span,
+                    format!("assignment expected `{}`, found `{}`", target.ty, value.ty),
+                );
             }
             return TypedExpr::new(
                 TypedExprKind::Binary {
@@ -260,15 +281,24 @@ impl Context {
                 let left = self.check_expr(&b.left, Some(&Type::Bool));
                 let right = self.check_expr(&b.right, Some(&Type::Bool));
                 if !left.ty.is_unknown() && left.ty != Type::Bool {
-                    self.error_at(b.span, format!("`{}` expected bool, found `{}`", op_name(b.op), left.ty));
+                    self.error_at(
+                        b.span,
+                        format!("`{}` expected bool, found `{}`", op_name(b.op), left.ty),
+                    );
                 }
                 if !right.ty.is_unknown() && right.ty != Type::Bool {
-                    self.error_at(b.span, format!("`{}` expected bool, found `{}`", op_name(b.op), right.ty));
+                    self.error_at(
+                        b.span,
+                        format!("`{}` expected bool, found `{}`", op_name(b.op), right.ty),
+                    );
                 }
                 (left, right, Type::Bool)
             }
             Eq | Ne | Lt | Le | Gt | Ge => {
-                let left = self.check_expr(&b.left, expected.filter(|t| t.is_numeric() || t.is_pointer()));
+                let left = self.check_expr(
+                    &b.left,
+                    expected.filter(|t| t.is_numeric() || t.is_pointer()),
+                );
                 // Type the right operand against the left's type so that a
                 // `null` literal is coerced to the pointer type it is compared
                 // against (e.g. `buf == null` makes `null` take `buf`'s type).
@@ -292,10 +322,15 @@ impl Context {
                         && right.ty.is_pointer()
                         && (left_nullish || right_nullish));
                 if !compatible {
-                    self.error_at(b.span, format!(
-                        "comparison `{}` between incompatible types `{}` and `{}`",
-                        op_name(b.op), left.ty, right.ty
-                    ));
+                    self.error_at(
+                        b.span,
+                        format!(
+                            "comparison `{}` between incompatible types `{}` and `{}`",
+                            op_name(b.op),
+                            left.ty,
+                            right.ty
+                        ),
+                    );
                 }
                 (left, right, Type::Bool)
             }
@@ -303,10 +338,24 @@ impl Context {
                 let left = self.check_expr(&b.left, expected.filter(|t| t.is_integer()));
                 let right = self.check_expr(&b.right, Some(&left.ty).filter(|t| t.is_integer()));
                 if !left.ty.is_unknown() && !left.ty.is_integer() {
-                    self.error_at(b.span, format!("bitwise op `{}` requires integer, found `{}`", op_name(b.op), left.ty));
+                    self.error_at(
+                        b.span,
+                        format!(
+                            "bitwise op `{}` requires integer, found `{}`",
+                            op_name(b.op),
+                            left.ty
+                        ),
+                    );
                 }
                 if !right.ty.is_unknown() && !right.ty.is_integer() {
-                    self.error_at(b.span, format!("bitwise op `{}` requires integer, found `{}`", op_name(b.op), right.ty));
+                    self.error_at(
+                        b.span,
+                        format!(
+                            "bitwise op `{}` requires integer, found `{}`",
+                            op_name(b.op),
+                            right.ty
+                        ),
+                    );
                 }
                 let result_ty = left.ty.clone();
                 (left, right, result_ty)
@@ -328,16 +377,35 @@ impl Context {
                     right.ty.clone()
                 } else {
                     if !left.ty.is_unknown() && !left.ty.is_numeric() {
-                        self.error_at(b.span, format!("arithmetic op `{}` requires numeric type, found `{}`", op_name(b.op), left.ty));
+                        self.error_at(
+                            b.span,
+                            format!(
+                                "arithmetic op `{}` requires numeric type, found `{}`",
+                                op_name(b.op),
+                                left.ty
+                            ),
+                        );
                     }
                     if !right.ty.is_unknown() && !right.ty.is_numeric() {
-                        self.error_at(b.span, format!("arithmetic op `{}` requires numeric type, found `{}`", op_name(b.op), right.ty));
+                        self.error_at(
+                            b.span,
+                            format!(
+                                "arithmetic op `{}` requires numeric type, found `{}`",
+                                op_name(b.op),
+                                right.ty
+                            ),
+                        );
                     }
                     if !left.ty.is_unknown() && !right.ty.is_unknown() && left.ty != right.ty {
-                        self.error_at(b.span, format!(
-                            "arithmetic `{}` between incompatible types `{}` and `{}`",
-                            op_name(b.op), left.ty, right.ty
-                        ));
+                        self.error_at(
+                            b.span,
+                            format!(
+                                "arithmetic `{}` between incompatible types `{}` and `{}`",
+                                op_name(b.op),
+                                left.ty,
+                                right.ty
+                            ),
+                        );
                     }
                     left.ty.clone()
                 };
@@ -349,13 +417,35 @@ impl Context {
                 let right = self.check_expr(&b.right, Some(&left.ty).filter(|t| t.is_numeric()));
                 let result_ty = left.ty.clone();
                 if !left.ty.is_unknown() && !left.ty.is_numeric() {
-                    self.error_at(b.span, format!("floor division `{}` requires numeric type, found `{}`", op_name(b.op), left.ty));
+                    self.error_at(
+                        b.span,
+                        format!(
+                            "floor division `{}` requires numeric type, found `{}`",
+                            op_name(b.op),
+                            left.ty
+                        ),
+                    );
                 }
                 if !right.ty.is_unknown() && !right.ty.is_numeric() {
-                    self.error_at(b.span, format!("floor division `{}` requires numeric type, found `{}`", op_name(b.op), right.ty));
+                    self.error_at(
+                        b.span,
+                        format!(
+                            "floor division `{}` requires numeric type, found `{}`",
+                            op_name(b.op),
+                            right.ty
+                        ),
+                    );
                 }
                 if !left.ty.is_unknown() && !right.ty.is_unknown() && left.ty != right.ty {
-                    self.error_at(b.span, format!("floor division `{}` between incompatible types `{}` and `{}`", op_name(b.op), left.ty, right.ty));
+                    self.error_at(
+                        b.span,
+                        format!(
+                            "floor division `{}` between incompatible types `{}` and `{}`",
+                            op_name(b.op),
+                            left.ty,
+                            right.ty
+                        ),
+                    );
                 }
                 (left, right, result_ty)
             }
@@ -364,10 +454,24 @@ impl Context {
                 let right = self.check_expr(&b.right, Some(&left.ty).filter(|t| t.is_numeric()));
                 let result_ty = left.ty.clone();
                 if !left.ty.is_unknown() && !left.ty.is_numeric() {
-                    self.error_at(b.span, format!("power operator `{}` requires numeric type, found `{}`", op_name(b.op), left.ty));
+                    self.error_at(
+                        b.span,
+                        format!(
+                            "power operator `{}` requires numeric type, found `{}`",
+                            op_name(b.op),
+                            left.ty
+                        ),
+                    );
                 }
                 if !right.ty.is_unknown() && !right.ty.is_numeric() {
-                    self.error_at(b.span, format!("power operator `{}` requires numeric type, found `{}`", op_name(b.op), right.ty));
+                    self.error_at(
+                        b.span,
+                        format!(
+                            "power operator `{}` requires numeric type, found `{}`",
+                            op_name(b.op),
+                            right.ty
+                        ),
+                    );
                 }
                 (left, right, result_ty)
             }
@@ -389,23 +493,47 @@ impl Context {
         match u.op {
             Neg => {
                 if !operand.ty.is_unknown() && !operand.ty.is_numeric() {
-                    self.error(format!("negation requires numeric type, found `{}`", operand.ty));
+                    self.error(format!(
+                        "negation requires numeric type, found `{}`",
+                        operand.ty
+                    ));
                 }
                 let ty = expected.cloned().unwrap_or_else(|| operand.ty.clone());
-                TypedExpr::new(TypedExprKind::Unary { op: u.op, operand: Box::new(operand) }, ty)
+                TypedExpr::new(
+                    TypedExprKind::Unary {
+                        op: u.op,
+                        operand: Box::new(operand),
+                    },
+                    ty,
+                )
             }
             Not => {
                 if !operand.ty.is_unknown() && operand.ty != Type::Bool {
                     self.error(format!("logical not requires bool, found `{}`", operand.ty));
                 }
-                TypedExpr::new(TypedExprKind::Unary { op: u.op, operand: Box::new(operand) }, Type::Bool)
+                TypedExpr::new(
+                    TypedExprKind::Unary {
+                        op: u.op,
+                        operand: Box::new(operand),
+                    },
+                    Type::Bool,
+                )
             }
             BitNot => {
                 if !operand.ty.is_unknown() && !operand.ty.is_integer() {
-                    self.error(format!("bitwise not requires integer, found `{}`", operand.ty));
+                    self.error(format!(
+                        "bitwise not requires integer, found `{}`",
+                        operand.ty
+                    ));
                 }
                 let result_ty = operand.ty.clone();
-                TypedExpr::new(TypedExprKind::Unary { op: u.op, operand: Box::new(operand) }, result_ty)
+                TypedExpr::new(
+                    TypedExprKind::Unary {
+                        op: u.op,
+                        operand: Box::new(operand),
+                    },
+                    result_ty,
+                )
             }
             Deref => {
                 let result_ty = match &operand.ty {
@@ -417,11 +545,20 @@ impl Context {
                     }
                     Type::Ref { pointee } | Type::RefMut { pointee } => *pointee.clone(),
                     _ => {
-                        self.error(format!("cannot dereference non-pointer type `{}`", operand.ty));
+                        self.error(format!(
+                            "cannot dereference non-pointer type `{}`",
+                            operand.ty
+                        ));
                         Type::Unknown
                     }
                 };
-                TypedExpr::new(TypedExprKind::Unary { op: u.op, operand: Box::new(operand) }, result_ty)
+                TypedExpr::new(
+                    TypedExprKind::Unary {
+                        op: u.op,
+                        operand: Box::new(operand),
+                    },
+                    result_ty,
+                )
             }
             Ref => {
                 let pointee = operand.ty.clone();
@@ -439,7 +576,13 @@ impl Context {
             if let Some(target_name) = adt_name_from_type(&callee.ty) {
                 if let Some(methods) = self.methods.get(&target_name).cloned() {
                     if let Some(sig) = methods.iter().find(|m| m.name == field.field).cloned() {
-                        return self.resolve_call(callee, &args_in, &sig, expected, Some(target_name));
+                        return self.resolve_call(
+                            callee,
+                            &args_in,
+                            &sig,
+                            expected,
+                            Some(target_name),
+                        );
                     }
                 }
             }
@@ -447,7 +590,12 @@ impl Context {
 
         // Direct function call
         if let Expr::Ident(name) = &c.callee.as_ref() {
-            if let Some(sig) = self.functions.get(name).or_else(|| self.extern_fns.get(name)).cloned() {
+            if let Some(sig) = self
+                .functions
+                .get(name)
+                .or_else(|| self.extern_fns.get(name))
+                .cloned()
+            {
                 return self.resolve_call(callee, &args_in, &sig, expected, None);
             }
             self.error(format!("call to unknown function `{}`", name));
@@ -464,7 +612,9 @@ impl Context {
                 if !arg.ty.is_unknown() && !p.is_unknown() && arg.ty != *p {
                     self.error(format!(
                         "argument {} expected `{}`, found `{}`",
-                        i + 1, p, arg.ty
+                        i + 1,
+                        p,
+                        arg.ty
                     ));
                 }
             }
@@ -505,7 +655,9 @@ impl Context {
         if n != param_tys.len() {
             self.error(format!(
                 "function `{}` expects {} arguments, got {}",
-                sig.name, param_tys.len(), n
+                sig.name,
+                param_tys.len(),
+                n
             ));
         }
 
@@ -559,7 +711,9 @@ impl Context {
             if !compatible(p, &arg.ty) {
                 self.error(format!(
                     "argument {} expected `{}`, found `{}`",
-                    i + 1, p, arg.ty
+                    i + 1,
+                    p,
+                    arg.ty
                 ));
             }
         }
@@ -605,7 +759,12 @@ impl Context {
         }
 
         if let Some(info) = self.adts.get(&base_name) {
-            if let Some((idx, field)) = info.fields.iter().enumerate().find(|(_, fld)| fld.name == f.field) {
+            if let Some((idx, field)) = info
+                .fields
+                .iter()
+                .enumerate()
+                .find(|(_, fld)| fld.name == f.field)
+            {
                 let field_ty = field.ty.clone();
                 return TypedExpr::new(
                     TypedExprKind::Field {
@@ -633,10 +792,7 @@ impl Context {
             }
         }
 
-        self.error(format!(
-            "type `{}` has no field `{}`",
-            object.ty, f.field
-        ));
+        self.error(format!("type `{}` has no field `{}`", object.ty, f.field));
         TypedExpr::new(
             TypedExprKind::Field {
                 object: Box::new(object),
@@ -694,12 +850,15 @@ impl Context {
         let expr = self.check_expr(&c.expr, None);
         let to = self.resolve_type_expr(c.ty.as_ref());
         if !cast_allowed(&expr.ty, &to) {
-            self.error(format!(
-                "cannot cast from `{}` to `{}`",
-                expr.ty, to
-            ));
+            self.error(format!("cannot cast from `{}` to `{}`", expr.ty, to));
         }
-        TypedExpr::new(TypedExprKind::Cast { expr: Box::new(expr), ty: to.clone() }, to)
+        TypedExpr::new(
+            TypedExprKind::Cast {
+                expr: Box::new(expr),
+                ty: to.clone(),
+            },
+            to,
+        )
     }
 
     pub(super) fn check_asm(&mut self, a: &ast::AsmExpr) -> TypedExpr {
@@ -741,7 +900,8 @@ impl Context {
         let then_block = self.check_block(&i.then_block);
         let else_block = i.else_block.as_ref().map(|b| self.check_block(b));
         let ty = if let Some(else_b) = &else_block {
-            if then_block.ty != else_b.ty && !then_block.ty.is_unknown() && !else_b.ty.is_unknown() {
+            if then_block.ty != else_b.ty && !then_block.ty.is_unknown() && !else_b.ty.is_unknown()
+            {
                 self.error(format!(
                     "if expression branches have incompatible types `{}` and `{}`",
                     then_block.ty, else_b.ty
@@ -839,13 +999,14 @@ impl Context {
 
     pub(super) fn is_mutable_lvalue(&self, expr: &TypedExpr) -> bool {
         match &expr.kind {
-            TypedExprKind::Ident(name) => self
-                .lookup_var(name)
-                .map(|v| v.mutable)
-                .unwrap_or(false),
+            TypedExprKind::Ident(name) => self.lookup_var(name).map(|v| v.mutable).unwrap_or(false),
             TypedExprKind::Field { object, .. } => self.is_mutable_lvalue(object),
             TypedExprKind::Index { object, .. } => self.is_mutable_lvalue(object),
-            TypedExprKind::Deref(operand) | TypedExprKind::Unary { op: UnOp::Deref, operand } => {
+            TypedExprKind::Deref(operand)
+            | TypedExprKind::Unary {
+                op: UnOp::Deref,
+                operand,
+            } => {
                 if self.in_unsafe {
                     operand.ty.is_pointer() || operand.ty.is_mutable_reference()
                 } else {
@@ -858,8 +1019,10 @@ impl Context {
 
     pub(super) fn expect_type(&mut self, expected: &Type, got: &Type, context: &str) {
         if !got.is_unknown() && !expected.is_unknown() && got != expected {
-            self.error(format!("{} expected `{}`, found `{}`", context, expected, got));
+            self.error(format!(
+                "{} expected `{}`, found `{}`",
+                context, expected, got
+            ));
         }
     }
-
 }

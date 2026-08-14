@@ -47,14 +47,23 @@ impl<'p> CodeGen16<'p> {
             }
             Stmt::If { cond, then, else_ } => self.emit_if(cond, then, else_.as_deref())?,
             Stmt::While { cond, body } => self.emit_while(cond, body)?,
-            Stmt::For { init, cond, step, body } => self.emit_for(init.as_deref(), cond, step.as_ref(), body)?,
+            Stmt::For {
+                init,
+                cond,
+                step,
+                body,
+            } => self.emit_for(init.as_deref(), cond, step.as_ref(), body)?,
             Stmt::Break => {
-                let end = *self.loop_end_stack.last()
+                let end = *self
+                    .loop_end_stack
+                    .last()
                     .ok_or_else(|| anyhow!("break outside of loop"))?;
                 self.asm.jmp_short_lab(end);
             }
             Stmt::Continue => {
-                let head = *self.loop_head_stack.last()
+                let head = *self
+                    .loop_head_stack
+                    .last()
                     .ok_or_else(|| anyhow!("continue outside of loop"))?;
                 self.asm.jmp_short_lab(head);
             }
@@ -67,7 +76,12 @@ impl<'p> CodeGen16<'p> {
         Ok(())
     }
 
-    pub(super) fn emit_if(&mut self, cond: &Expr, then: &[Stmt], else_: Option<&[Stmt]>) -> Result<()> {
+    pub(super) fn emit_if(
+        &mut self,
+        cond: &Expr,
+        then: &[Stmt],
+        else_: Option<&[Stmt]>,
+    ) -> Result<()> {
         let end_lab = self.asm.new_label();
         self.eval_expr(cond)?;
         self.asm.test_ax_ax();
@@ -141,5 +155,4 @@ impl<'p> CodeGen16<'p> {
         self.loop_end_stack.pop();
         Ok(())
     }
-
 }

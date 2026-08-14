@@ -1,13 +1,12 @@
 use super::*;
 
 impl LowerCtx<'_> {
-    pub(super) fn lower_lvalue(
-        &mut self,
-        expr: &ast::Expr,
-    ) -> Result<ir::LValue> {
+    pub(super) fn lower_lvalue(&mut self, expr: &ast::Expr) -> Result<ir::LValue> {
         match expr {
             ast::Expr::Ident(name) => Ok(ir::LValue::Var(name.clone())),
-            ast::Expr::Unary(u) if u.op == ast::UnOp::Deref => Ok(ir::LValue::Deref(self.lower_expr(&u.operand)?)),
+            ast::Expr::Unary(u) if u.op == ast::UnOp::Deref => {
+                Ok(ir::LValue::Deref(self.lower_expr(&u.operand)?))
+            }
             ast::Expr::Deref(d) => Ok(ir::LValue::Deref(self.lower_expr(&d.expr)?)),
             ast::Expr::Field(f) => {
                 let base = self.lower_expr(&f.object)?;
@@ -52,8 +51,15 @@ impl LowerCtx<'_> {
             },
             _ => bail!("field access on non-struct type: {:?}", ty),
         };
-        let def = self.structs.get(&name).ok_or_else(|| anyhow::anyhow!("unknown struct: {}", name))?;
-        let idx = def.fields.iter().position(|(n, _)| n == field).ok_or_else(|| anyhow::anyhow!("unknown field {}.{}", name, field))?;
+        let def = self
+            .structs
+            .get(&name)
+            .ok_or_else(|| anyhow::anyhow!("unknown struct: {}", name))?;
+        let idx = def
+            .fields
+            .iter()
+            .position(|(n, _)| n == field)
+            .ok_or_else(|| anyhow::anyhow!("unknown field {}.{}", name, field))?;
         Ok((name, idx))
     }
 
@@ -79,18 +85,32 @@ impl LowerCtx<'_> {
                 let ty = self.lower_type(&o.ty)?;
                 let field_idx = match &ty {
                     ir::Type::Struct(name) => {
-                        let def = self.structs.get(name)
+                        let def = self
+                            .structs
+                            .get(name)
                             .ok_or_else(|| anyhow::anyhow!("unknown struct: {}", name))?;
-                        def.fields.iter().position(|(n, _)| n == &o.field)
+                        def.fields
+                            .iter()
+                            .position(|(n, _)| n == &o.field)
                             .ok_or_else(|| anyhow::anyhow!("unknown field {}.{}", name, o.field))?
                     }
                     _ => bail!("offsetof on non-struct type"),
                 };
-                Ok(ir::Expr::new(ir::ExprKind::OffsetOf { ty, field: field_idx }, ir::Type::U64))
+                Ok(ir::Expr::new(
+                    ir::ExprKind::OffsetOf {
+                        ty,
+                        field: field_idx,
+                    },
+                    ir::Type::U64,
+                ))
             }
             ast::Expr::If(_) => bail!("if-expressions are not supported in the first milestone"),
-            ast::Expr::Block(_) => bail!("block expressions are not supported in the first milestone"),
-            ast::Expr::Loop(_) => bail!("loop expressions are not supported in the first milestone"),
+            ast::Expr::Block(_) => {
+                bail!("block expressions are not supported in the first milestone")
+            }
+            ast::Expr::Loop(_) => {
+                bail!("loop expressions are not supported in the first milestone")
+            }
             ast::Expr::Break => bail!("break is not supported in expression position"),
             ast::Expr::Continue => bail!("continue is not supported in expression position"),
             ast::Expr::Tuple(_) => bail!("tuples are not supported in the first milestone"),
@@ -113,14 +133,10 @@ impl LowerCtx<'_> {
                 // Store each element using pointer arithmetic
                 for (i, elem) in elems.iter().enumerate() {
                     let value = self.lower_expr(elem)?;
-                    let var_expr = ir::Expr::new(
-                        ir::ExprKind::Var(slot_name.clone()),
-                        ptr_ty.clone(),
-                    );
-                    let idx_expr = ir::Expr::new(
-                        ir::ExprKind::Lit(ir::Literal::Int(i as i64)),
-                        ir::Type::I64,
-                    );
+                    let var_expr =
+                        ir::Expr::new(ir::ExprKind::Var(slot_name.clone()), ptr_ty.clone());
+                    let idx_expr =
+                        ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(i as i64)), ir::Type::I64);
                     let addr = ir::Expr::new(
                         ir::ExprKind::Bin {
                             op: ir::BinOp::Add,
@@ -136,21 +152,20 @@ impl LowerCtx<'_> {
                 }
 
                 // Return a block expression yielding the pointer
-                let result_expr = ir::Expr::new(
-                    ir::ExprKind::Var(slot_name),
-                    ptr_ty.clone(),
-                );
+                let result_expr = ir::Expr::new(ir::ExprKind::Var(slot_name), ptr_ty.clone());
                 Ok(ir::Expr::new(
                     ir::ExprKind::Block(stmts, Box::new(result_expr)),
                     ptr_ty,
                 ))
             }
             ast::Expr::Range(_) => bail!("range expressions are only allowed in for-loops"),
-            ast::Expr::RefMut(_) => bail!("refmut expressions are not supported in the first milestone"),
-            ast::Expr::StructLiteral { name, fields } => {
-                self.lower_struct_literal(name, fields)
+            ast::Expr::RefMut(_) => {
+                bail!("refmut expressions are not supported in the first milestone")
             }
-            ast::Expr::UnsafeBlock(_) => bail!("unsafe block expressions are not supported in the first milestone"),
+            ast::Expr::StructLiteral { name, fields } => self.lower_struct_literal(name, fields),
+            ast::Expr::UnsafeBlock(_) => {
+                bail!("unsafe block expressions are not supported in the first milestone")
+            }
         }
     }
 
@@ -175,11 +190,15 @@ impl LowerCtx<'_> {
 
     fn lower_binary(&mut self, b: &ast::BinaryExpr) -> Result<ir::Expr> {
         // Power desugars to a runtime call
-       if b.op == ast::BinOp::Power {
+        if b.op == ast::BinOp::Power {
             let left = self.lower_expr(&b.left)?;
             let right = self.lower_expr(&b.right)?;
             if !left.ty.is_integer() || !right.ty.is_integer() {
-                bail!("power operator requires integer operands, found `{:?}` and `{:?}`", left.ty, right.ty);
+                bail!(
+                    "power operator requires integer operands, found `{:?}` and `{:?}`",
+                    left.ty,
+                    right.ty
+                );
             }
             let ty = left.ty.clone();
             return Ok(ir::Expr::new(
@@ -193,7 +212,11 @@ impl LowerCtx<'_> {
         let left = self.lower_expr(&b.left)?;
         let right = self.lower_expr(&b.right)?;
         let op = self.lower_binop(b.op)?;
-        let ty = if op.is_comparison() || op.is_logical() { ir::Type::Bool } else { left.ty.clone() };
+        let ty = if op.is_comparison() || op.is_logical() {
+            ir::Type::Bool
+        } else {
+            left.ty.clone()
+        };
         Ok(ir::Expr::new(
             ir::ExprKind::Bin {
                 op,
@@ -298,7 +321,13 @@ impl LowerCtx<'_> {
     fn lower_cast(&mut self, c: &ast::CastExpr) -> Result<ir::Expr> {
         let expr = self.lower_expr(&c.expr)?;
         let ty = self.lower_type(&c.ty)?;
-        Ok(ir::Expr::new(ir::ExprKind::Cast { expr: Box::new(expr), ty: ty.clone() }, ty))
+        Ok(ir::Expr::new(
+            ir::ExprKind::Cast {
+                expr: Box::new(expr),
+                ty: ty.clone(),
+            },
+            ty,
+        ))
     }
 
     fn lower_field(&mut self, f: &ast::FieldExpr) -> Result<ir::Expr> {
@@ -311,7 +340,9 @@ impl LowerCtx<'_> {
         } else {
             ir::Expr::new(ir::ExprKind::AddrOf(Box::new(base)), ptr_ty.clone())
         };
-        let field_ty = self.structs.get(&struct_name).unwrap().fields[idx].1.clone();
+        let field_ty = self.structs.get(&struct_name).unwrap().fields[idx]
+            .1
+            .clone();
         let ptr_ty = ir::Type::Ptr(Box::new(field_ty.clone()));
         let gep = ir::Expr::new(
             ir::ExprKind::Gep {
@@ -351,7 +382,10 @@ impl LowerCtx<'_> {
         if a.outputs.len() > 1 {
             bail!("inline assembly with multiple outputs is not supported");
         }
-        let output = a.outputs.get(0).map(|o| (ir::Type::Void, o.constraint.clone()));
+        let output = a
+            .outputs
+            .get(0)
+            .map(|o| (ir::Type::Void, o.constraint.clone()));
         Ok(ir::Expr::new(
             ir::ExprKind::Asm {
                 template: a.template.clone(),

@@ -4,10 +4,12 @@
 //! `ast::Module`, producing a `TypedModule` where every expression is annotated
 //! with its resolved Forge type.
 
-use crate::sema::ast::{self, BinOp, Block, Expr, Import, Item, Literal, Pattern, Span, Stmt, TypeExpr, UnOp};
+use crate::sema::ast::{
+    self, BinOp, Block, Expr, Import, Item, Literal, Pattern, Span, Stmt, TypeExpr, UnOp,
+};
 use crate::sema::error::{Error, Loc};
 use crate::sema::typed::*;
-use crate::ty::{Type, Field as TyField, Variant as TyVariant};
+use crate::ty::{Field as TyField, Type, Variant as TyVariant};
 use std::collections::{HashMap, HashSet};
 
 /// Analyze an AST module and produce a typed module.
@@ -92,10 +94,10 @@ struct Context {
     errors: Vec<Error>,
 }
 
-#[cfg(test)]
-mod tests;
 mod expr;
 mod items;
+#[cfg(test)]
+mod tests;
 mod typing;
 
 use typing::*;
@@ -122,14 +124,20 @@ impl Context {
 
     pub(super) fn error(&mut self, message: impl Into<String>) {
         self.errors.push(Error::new(
-            self.file.as_ref().map(|f| Loc::with_file(f.clone())).unwrap_or_else(Loc::unknown),
+            self.file
+                .as_ref()
+                .map(|f| Loc::with_file(f.clone()))
+                .unwrap_or_else(Loc::unknown),
             message,
         ));
     }
 
     pub(super) fn error_at(&mut self, span: ast::Span, message: impl Into<String>) {
         let loc = if span.is_unknown() {
-            self.file.as_ref().map(|f| Loc::with_file(f.clone())).unwrap_or_else(Loc::unknown)
+            self.file
+                .as_ref()
+                .map(|f| Loc::with_file(f.clone()))
+                .unwrap_or_else(Loc::unknown)
         } else {
             Loc {
                 file: self.file.clone(),
@@ -188,7 +196,9 @@ impl Context {
         match expr {
             Expr::Literal(Literal::Int(n)) if *n >= 0 => Some(*n as u64),
             _ => {
-                self.error("array size must be a constant non-negative integer literal".to_string());
+                self.error(
+                    "array size must be a constant non-negative integer literal".to_string(),
+                );
                 None
             }
         }
@@ -228,9 +238,9 @@ impl Context {
     pub(super) fn register_import(&mut self, imp: &Import) {
         match imp {
             Import::Path { path, alias } => {
-                let alias = alias.clone().unwrap_or_else(|| {
-                    path.last().cloned().unwrap_or_default()
-                });
+                let alias = alias
+                    .clone()
+                    .unwrap_or_else(|| path.last().cloned().unwrap_or_default());
                 self.imports.insert(alias, path.clone());
             }
             Import::From { path, items } => {
@@ -277,12 +287,12 @@ impl Context {
                 self.extern_fns.insert(sig.name.clone(), sig);
             }
             Item::Const(c) => {
-                let ty = c
-                    .ty
-                    .as_ref()
-                    .map(|t| self.resolve_type_expr(t))
-                    .unwrap_or(Type::Unknown);
-                self.statics.insert(c.name.clone(), StaticInfo { ty, mutable: false });
+                let ty =
+                    c.ty.as_ref()
+                        .map(|t| self.resolve_type_expr(t))
+                        .unwrap_or(Type::Unknown);
+                self.statics
+                    .insert(c.name.clone(), StaticInfo { ty, mutable: false });
             }
             Item::Embed(e) => {
                 // `embed NAME = "file"` binds `NAME` as a read-only byte
@@ -290,11 +300,17 @@ impl Context {
                 // length constant.
                 self.statics.insert(
                     e.name.clone(),
-                    StaticInfo { ty: Type::pointer(Type::int(8, false)), mutable: false },
+                    StaticInfo {
+                        ty: Type::pointer(Type::int(8, false)),
+                        mutable: false,
+                    },
                 );
                 self.statics.insert(
                     format!("{}_LEN", e.name),
-                    StaticInfo { ty: Type::int(64, true), mutable: false },
+                    StaticInfo {
+                        ty: Type::int(64, true),
+                        mutable: false,
+                    },
                 );
             }
             Item::Impl(i) => {
@@ -308,9 +324,10 @@ impl Context {
                 }
             }
             Item::Use(u) => {
-                let alias = u.alias.clone().unwrap_or_else(|| {
-                    u.path.last().cloned().unwrap_or_default()
-                });
+                let alias = u
+                    .alias
+                    .clone()
+                    .unwrap_or_else(|| u.path.last().cloned().unwrap_or_default());
                 self.imports.insert(alias, u.path.clone());
             }
         }
@@ -341,7 +358,11 @@ impl Context {
     }
 
     pub(super) fn register_adt_skeleton(&mut self, s: &dyn AdtDefinition) {
-        let kind = if s.is_union() { AdtKind::Union } else { AdtKind::Struct };
+        let kind = if s.is_union() {
+            AdtKind::Union
+        } else {
+            AdtKind::Struct
+        };
         let info = AdtInfo {
             name: s.name().to_string(),
             kind,
@@ -419,7 +440,6 @@ impl Context {
     }
 
     // Blocks and statements
-
 }
 
 trait AdtDefinition {
@@ -430,15 +450,31 @@ trait AdtDefinition {
 }
 
 impl AdtDefinition for ast::Struct {
-    fn name(&self) -> &str { &self.name }
-    fn generics(&self) -> &[String] { &self.generics }
-    fn fields(&self) -> &[ast::Field] { &self.fields }
-    fn is_union(&self) -> bool { false }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn generics(&self) -> &[String] {
+        &self.generics
+    }
+    fn fields(&self) -> &[ast::Field] {
+        &self.fields
+    }
+    fn is_union(&self) -> bool {
+        false
+    }
 }
 
 impl AdtDefinition for ast::Union {
-    fn name(&self) -> &str { &self.name }
-    fn generics(&self) -> &[String] { &self.generics }
-    fn fields(&self) -> &[ast::Field] { &self.fields }
-    fn is_union(&self) -> bool { true }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn generics(&self) -> &[String] {
+        &self.generics
+    }
+    fn fields(&self) -> &[ast::Field] {
+        &self.fields
+    }
+    fn is_union(&self) -> bool {
+        true
+    }
 }

@@ -165,5 +165,4 @@ impl Parser {
             other => Err(self.error(format!("expected type, found {:?}", other))),
         }
     }
-
 }

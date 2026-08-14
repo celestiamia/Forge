@@ -9,12 +9,14 @@
 
 pub(super) use std::collections::HashMap;
 
-pub(super) use anyhow::{bail, Result};
+pub(super) use anyhow::{Result, bail};
 
-pub(super) use crate::backend::ir::{BinOp, Expr, ExprKind, Func, LValue, Literal, Program, Stmt, StructDef, Type};
+pub(super) use crate::backend::ir::{
+    BinOp, Expr, ExprKind, Func, LValue, Literal, Program, Stmt, StructDef, Type,
+};
 pub(super) use crate::backend::x86::{Assembler, Cond, Mem, Reg};
-pub(super) use crate::obj::elf32::Elf32Writer;
 pub(super) use crate::obj::ObjectWriter;
+pub(super) use crate::obj::elf32::Elf32Writer;
 
 pub(super) const BASE_VADDR: u32 = 0x08048000;
 pub(super) const EHDR_SIZE: u32 = 52;
@@ -209,9 +211,8 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
     let mut rodata = bytes[split..].to_vec();
 
     let text_offset = EHDR_SIZE + PHDR_SIZE * 2;
-    let entry_vaddr = BASE_VADDR
-        + text_offset
-        + *cg.label_offsets.get(&start_label).unwrap_or(&0) as u32;
+    let entry_vaddr =
+        BASE_VADDR + text_offset + *cg.label_offsets.get(&start_label).unwrap_or(&0) as u32;
 
     for (patch_off, label) in &cg.string_patches {
         let label_off = *cg.label_offsets.get(label).unwrap_or(&0) as u32;
@@ -248,7 +249,13 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         bss_size = ARENA_SIZE;
     }
 
-    Ok(Box::new(Elf32Writer::new(code, rodata, data, bss_size, entry_vaddr)))
+    Ok(Box::new(Elf32Writer::new(
+        code,
+        rodata,
+        data,
+        bss_size,
+        entry_vaddr,
+    )))
 }
 
 mod expr;
@@ -258,11 +265,11 @@ mod runtime;
 impl<'p> CodeGen<'p> {
     pub(super) fn type_size_bytes(&self, ty: &Type) -> usize {
         match ty {
-            Type::Struct(name) => {
-                self.struct_layouts.get(name)
-                    .map(|l| l.size)
-                    .unwrap_or_else(|| type_size(ty))
-            }
+            Type::Struct(name) => self
+                .struct_layouts
+                .get(name)
+                .map(|l| l.size)
+                .unwrap_or_else(|| type_size(ty)),
             _ => type_size(ty),
         }
     }
@@ -350,7 +357,11 @@ impl<'p> CodeGen<'p> {
                 }
                 let _ = ty;
             }
-            Stmt::StackAlloc { name, elem_ty, count } => {
+            Stmt::StackAlloc {
+                name,
+                elem_ty,
+                count,
+            } => {
                 let elem_size = elem_ty.byte_size()?;
                 let raw_size = elem_size * *count;
                 let align = elem_size.max(1);
@@ -425,7 +436,12 @@ impl<'p> CodeGen<'p> {
                 self.loop_head_stack.pop();
                 self.loop_end_stack.pop();
             }
-            Stmt::For { init, cond, step, body } => {
+            Stmt::For {
+                init,
+                cond,
+                step,
+                body,
+            } => {
                 if let Some(i) = init {
                     self.emit_stmt(i)?;
                 }
@@ -449,12 +465,16 @@ impl<'p> CodeGen<'p> {
                 self.loop_end_stack.pop();
             }
             Stmt::Break => {
-                let end = *self.loop_end_stack.last()
+                let end = *self
+                    .loop_end_stack
+                    .last()
                     .ok_or_else(|| anyhow::anyhow!("break outside of loop"))?;
                 self.asm.jmp(end)?;
             }
             Stmt::Continue => {
-                let head = *self.loop_head_stack.last()
+                let head = *self
+                    .loop_head_stack
+                    .last()
                     .ok_or_else(|| anyhow::anyhow!("continue outside of loop"))?;
                 self.asm.jmp(head)?;
             }
@@ -475,7 +495,6 @@ impl<'p> CodeGen<'p> {
         self.string_labels.insert(s.to_string(), lab);
         lab
     }
-
 }
 pub(super) fn layout_struct(s: &StructDef) -> StructLayout {
     let mut offset = 0usize;
@@ -487,7 +506,12 @@ pub(super) fn layout_struct(s: &StructDef) -> StructLayout {
         offsets.push(offset);
         offset += size;
     }
-    let align = s.fields.iter().map(|(_, ty)| type_align(ty)).max().unwrap_or(1);
+    let align = s
+        .fields
+        .iter()
+        .map(|(_, ty)| type_align(ty))
+        .max()
+        .unwrap_or(1);
     StructLayout {
         size: align_up(offset, align),
         align,

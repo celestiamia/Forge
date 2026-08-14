@@ -8,9 +8,9 @@
 
 #![allow(dead_code)]
 
-use crate::backend::error::{fmt_operand32, EncodeError};
+use crate::backend::error::{EncodeError, fmt_operand32};
 use crate::backend::x86::{AluOp, Cond, Inst, JmpTarget, Mem, Operand, Reg, Scale, ShiftOp};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 pub fn emit_u8(buf: &mut Vec<u8>, v: u8) {
     buf.push(v);
@@ -59,9 +59,7 @@ fn encode_mem(reg_op: u8, mem: Mem, out: &mut Vec<u8>) -> Result<()> {
             emit_i32(out, disp);
         }
         Mem::Base(base) => encode_base_mem(reg_op, base, None, Scale::One, 0, out)?,
-        Mem::BaseDisp(base, disp) => {
-            encode_base_mem(reg_op, base, None, Scale::One, disp, out)?
-        }
+        Mem::BaseDisp(base, disp) => encode_base_mem(reg_op, base, None, Scale::One, disp, out)?,
         Mem::BaseIndexScale(base, index, scale) => {
             encode_base_mem(reg_op, base, Some(index), scale, 0, out)?
         }

@@ -62,21 +62,52 @@ impl<'s> Lexer<'s> {
         let c = if let Some(&b) = self.bytes.get(self.pos) {
             b
         } else {
-            return Ok(Token { kind: Tk::Eof, line, col });
+            return Ok(Token {
+                kind: Tk::Eof,
+                line,
+                col,
+            });
         };
         let kind = match c {
-            b'{' => { self.advance(); Tk::LBrace }
-            b'}' => { self.advance(); Tk::RBrace }
-            b'(' => { self.advance(); Tk::LParen }
-            b')' => { self.advance(); Tk::RParen }
-            b':' => { self.advance(); Tk::Colon }
-            b',' => { self.advance(); Tk::Comma }
-            b'=' => { self.advance(); Tk::Equals }
-            b'>' => { self.advance(); Tk::Gt }
+            b'{' => {
+                self.advance();
+                Tk::LBrace
+            }
+            b'}' => {
+                self.advance();
+                Tk::RBrace
+            }
+            b'(' => {
+                self.advance();
+                Tk::LParen
+            }
+            b')' => {
+                self.advance();
+                Tk::RParen
+            }
+            b':' => {
+                self.advance();
+                Tk::Colon
+            }
+            b',' => {
+                self.advance();
+                Tk::Comma
+            }
+            b'=' => {
+                self.advance();
+                Tk::Equals
+            }
+            b'>' => {
+                self.advance();
+                Tk::Gt
+            }
             b'"' => self.read_string()?,
             b'0'..=b'9' => self.read_number()?,
             b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'.' => self.read_ident()?,
-            _ => Err(format!("unexpected byte {:?} at line {} col {}", c as char, line, col))?,
+            _ => Err(format!(
+                "unexpected byte {:?} at line {} col {}",
+                c as char, line, col
+            ))?,
         };
         Ok(Token { kind, line, col })
     }
@@ -97,7 +128,9 @@ impl<'s> Lexer<'s> {
                 Some(b) if b.is_ascii_whitespace() => self.advance(),
                 Some(b'#') => {
                     while let Some(&b) = self.bytes.get(self.pos) {
-                        if b == b'\n' { break; }
+                        if b == b'\n' {
+                            break;
+                        }
                         self.advance();
                     }
                 }
@@ -121,9 +154,7 @@ impl<'s> Lexer<'s> {
 
     fn read_number(&mut self) -> Result<Tk, String> {
         let start = self.pos;
-        if self.bytes.get(self.pos) == Some(&b'0')
-            && self.bytes.get(self.pos + 1) == Some(&b'x')
-        {
+        if self.bytes.get(self.pos) == Some(&b'0') && self.bytes.get(self.pos + 1) == Some(&b'x') {
             self.advance();
             self.advance();
             let hex_start = self.pos;
@@ -153,7 +184,9 @@ impl<'s> Lexer<'s> {
             .chars()
             .filter(|&c| c != '_')
             .collect();
-        let n: u64 = digits.parse().map_err(|e| format!("invalid integer literal: {}", e))?;
+        let n: u64 = digits
+            .parse()
+            .map_err(|e| format!("invalid integer literal: {}", e))?;
         self.apply_size_suffix(n)
     }
 
@@ -172,7 +205,9 @@ impl<'s> Lexer<'s> {
                 _ => return Ok(Tk::Number(n)),
             };
             let after = self.pos + len;
-            if after <= self.bytes.len() && (after == self.bytes.len() || !self.bytes[after].is_ascii_alphabetic()) {
+            if after <= self.bytes.len()
+                && (after == self.bytes.len() || !self.bytes[after].is_ascii_alphabetic())
+            {
                 self.pos = after;
                 self.col += len;
                 return Ok(Tk::Number(n * mult));
@@ -210,21 +245,34 @@ mod tests {
     fn tokenize_simple() {
         let mut lx = Lexer::new("MEMORY { ram (rwx) : origin = 0x100, length = 64K }");
         let toks = lx.tokenize().unwrap();
-        let kinds: Vec<&str> = toks.iter().map(|t| match &t.kind {
-            Tk::Ident(s) => s.as_str(),
-            Tk::Number(n) => match *n { 256 => "256", 65536 => "65536", _ => "num" },
-            Tk::LBrace => "{",
-            Tk::RBrace => "}",
-            Tk::LParen => "(",
-            Tk::RParen => ")",
-            Tk::Colon => ":",
-            Tk::Equals => "=",
-            Tk::Comma => ",",
-            Tk::Gt => ">",
-            Tk::Str(_) => "str",
-            Tk::Eof => "EOF",
-        }).collect();
-        assert_eq!(kinds, vec!["MEMORY", "{", "ram", "(", "rwx", ")", ":", "origin", "=", "256", ",", "length", "=", "65536", "}", "EOF"]);
+        let kinds: Vec<&str> = toks
+            .iter()
+            .map(|t| match &t.kind {
+                Tk::Ident(s) => s.as_str(),
+                Tk::Number(n) => match *n {
+                    256 => "256",
+                    65536 => "65536",
+                    _ => "num",
+                },
+                Tk::LBrace => "{",
+                Tk::RBrace => "}",
+                Tk::LParen => "(",
+                Tk::RParen => ")",
+                Tk::Colon => ":",
+                Tk::Equals => "=",
+                Tk::Comma => ",",
+                Tk::Gt => ">",
+                Tk::Str(_) => "str",
+                Tk::Eof => "EOF",
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                "MEMORY", "{", "ram", "(", "rwx", ")", ":", "origin", "=", "256", ",", "length",
+                "=", "65536", "}", "EOF"
+            ]
+        );
     }
 
     #[test]

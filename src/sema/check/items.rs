@@ -1,5 +1,5 @@
-use super::*;
 use super::typing::*;
+use super::*;
 
 impl Context {
     pub(super) fn check_item(&mut self, item: &Item) -> TypedItem {
@@ -8,17 +8,29 @@ impl Context {
             Item::Struct(s) => TypedItem::Struct {
                 name: s.name.clone(),
                 generics: s.generics.clone(),
-                fields: self.adts.get(&s.name).map(|i| i.fields.clone()).unwrap_or_default(),
+                fields: self
+                    .adts
+                    .get(&s.name)
+                    .map(|i| i.fields.clone())
+                    .unwrap_or_default(),
             },
             Item::Union(u) => TypedItem::Union {
                 name: u.name.clone(),
                 generics: u.generics.clone(),
-                fields: self.adts.get(&u.name).map(|i| i.fields.clone()).unwrap_or_default(),
+                fields: self
+                    .adts
+                    .get(&u.name)
+                    .map(|i| i.fields.clone())
+                    .unwrap_or_default(),
             },
             Item::Enum(e) => TypedItem::Enum {
                 name: e.name.clone(),
                 generics: e.generics.clone(),
-                variants: self.adts.get(&e.name).map(|i| i.variants.clone()).unwrap_or_default(),
+                variants: self
+                    .adts
+                    .get(&e.name)
+                    .map(|i| i.variants.clone())
+                    .unwrap_or_default(),
             },
             Item::ExternFn(e) => {
                 let sig = self.extern_fns.get(&e.name).cloned().unwrap();
@@ -30,11 +42,10 @@ impl Context {
                 }
             }
             Item::Const(c) => {
-                let ty = c
-                    .ty
-                    .as_ref()
-                    .map(|t| self.resolve_type_expr(t))
-                    .unwrap_or(Type::Unknown);
+                let ty =
+                    c.ty.as_ref()
+                        .map(|t| self.resolve_type_expr(t))
+                        .unwrap_or(Type::Unknown);
                 let value = self.check_expr(&c.value, Some(&ty));
                 self.expect_type(&ty, &value.ty, "constant initializer");
                 TypedItem::Const {
@@ -53,11 +64,8 @@ impl Context {
             },
             Item::Impl(i) => {
                 let target = self.resolve_type_expr(&i.target);
-                let methods: Vec<TypedFunction> = i
-                    .methods
-                    .iter()
-                    .map(|m| self.check_function(m))
-                    .collect();
+                let methods: Vec<TypedFunction> =
+                    i.methods.iter().map(|m| self.check_function(m)).collect();
                 TypedItem::Impl { target, methods }
             }
         }
@@ -153,8 +161,12 @@ impl Context {
         for stmt in &block.stmts {
             match stmt {
                 TypedStmt::Return(_) => return true,
-                TypedStmt::UnsafeBlock(b) |
-                TypedStmt::If { then_block: b, else_block: None, .. } => {
+                TypedStmt::UnsafeBlock(b)
+                | TypedStmt::If {
+                    then_block: b,
+                    else_block: None,
+                    ..
+                } => {
                     if Self::block_contains_return(b) {
                         return true;
                     }
@@ -168,7 +180,9 @@ impl Context {
                         return true;
                     }
                 }
-                TypedStmt::While { body, .. } | TypedStmt::For { body, .. } | TypedStmt::Loop(body) => {
+                TypedStmt::While { body, .. }
+                | TypedStmt::For { body, .. }
+                | TypedStmt::Loop(body) => {
                     if Self::block_contains_return(body) {
                         return true;
                     }
@@ -223,7 +237,13 @@ impl Context {
         }
     }
 
-    fn check_let_var(&mut self, name: &str, ty_opt: &Option<ast::TypeExpr>, value_opt: &Option<ast::Expr>, mutable: bool) -> TypedStmt {
+    fn check_let_var(
+        &mut self,
+        name: &str,
+        ty_opt: &Option<ast::TypeExpr>,
+        value_opt: &Option<ast::Expr>,
+        mutable: bool,
+    ) -> TypedStmt {
         let annotated = ty_opt.as_ref().map(|t| self.resolve_type_expr(t));
         let (init, ty) = if let Some(value) = value_opt {
             let init = self.check_expr(value, annotated.as_ref());
@@ -231,7 +251,10 @@ impl Context {
             if !init.ty.is_unknown() && !ty.is_unknown() && init.ty != ty {
                 self.error(format!(
                     "`{} {}` expected `{}`, found `{}`",
-                    if mutable { "var" } else { "let" }, name, ty, init.ty
+                    if mutable { "var" } else { "let" },
+                    name,
+                    ty,
+                    init.ty
                 ));
             }
             (init, ty)
@@ -239,7 +262,8 @@ impl Context {
             let ty = annotated.unwrap_or_else(|| {
                 self.error(format!(
                     "`{} {}` needs a type annotation or initializer",
-                    if mutable { "var" } else { "let" }, name
+                    if mutable { "var" } else { "let" },
+                    name
                 ));
                 Type::Unknown
             });
@@ -247,16 +271,28 @@ impl Context {
         };
         self.bind_var(name, ty.clone(), mutable);
         if mutable {
-            TypedStmt::Var { name: name.to_string(), ty, init }
+            TypedStmt::Var {
+                name: name.to_string(),
+                ty,
+                init,
+            }
         } else {
-            TypedStmt::Let { name: name.to_string(), ty, init, mutable: false }
+            TypedStmt::Let {
+                name: name.to_string(),
+                ty,
+                init,
+                mutable: false,
+            }
         }
     }
 
     fn check_bool_cond(&mut self, cond_expr: &ast::Expr, context: &str) -> TypedExpr {
         let cond = self.check_expr(cond_expr, Some(&Type::Bool));
         if !cond.ty.is_unknown() && cond.ty != Type::Bool {
-            self.error(format!("{} condition must be bool, found `{}`", context, cond.ty));
+            self.error(format!(
+                "{} condition must be bool, found `{}`",
+                context, cond.ty
+            ));
         }
         cond
     }
@@ -301,7 +337,12 @@ impl Context {
             })
             .collect();
         let else_block = i.else_block.as_ref().map(|b| self.check_block(b));
-        TypedStmt::If { cond, then_block, elifs, else_block }
+        TypedStmt::If {
+            cond,
+            then_block,
+            elifs,
+            else_block,
+        }
     }
 
     fn check_while(&mut self, w: &ast::WhileStmt) -> TypedStmt {
@@ -317,7 +358,11 @@ impl Context {
         self.bind_var(&f.var, elem_ty, true);
         let body = self.check_block(&f.body);
         self.pop_scope();
-        TypedStmt::For { var: f.var.clone(), iter, body }
+        TypedStmt::For {
+            var: f.var.clone(),
+            iter,
+            body,
+        }
     }
 
     fn check_match(&mut self, m: &ast::MatchStmt) -> TypedStmt {
@@ -364,7 +409,10 @@ impl Context {
             Pattern::Literal(l) => {
                 let lit_ty = literal_type(l, Some(ty));
                 if !lit_ty.is_unknown() && !ty.is_unknown() && lit_ty != *ty {
-                    self.error(format!("pattern literal type `{}` does not match `{}`", lit_ty, ty));
+                    self.error(format!(
+                        "pattern literal type `{}` does not match `{}`",
+                        lit_ty, ty
+                    ));
                 }
             }
             Pattern::Ident(name) => {
@@ -384,7 +432,10 @@ impl Context {
                         }
                     }
                 } else if !ty.is_unknown() {
-                    self.error(format!("cannot match tuple pattern against non-tuple type `{}`", ty));
+                    self.error(format!(
+                        "cannot match tuple pattern against non-tuple type `{}`",
+                        ty
+                    ));
                 }
             }
         }
@@ -395,10 +446,11 @@ impl Context {
             Pattern::Wildcard => TypedPattern::Wildcard,
             Pattern::Literal(l) => TypedPattern::Literal(l.clone()),
             Pattern::Ident(name) => TypedPattern::Ident(name.clone()),
-            Pattern::Tuple(pats) => TypedPattern::Tuple(pats.iter().map(|p| self.lower_pattern(p)).collect()),
+            Pattern::Tuple(pats) => {
+                TypedPattern::Tuple(pats.iter().map(|p| self.lower_pattern(p)).collect())
+            }
         }
     }
 
     // Expressions
-
 }

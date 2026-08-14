@@ -21,23 +21,57 @@ pub struct Variant {
 pub enum Type {
     Void,
     Bool,
-    Int { width: u32, signed: bool },
-    Float { width: u32 },
+    Int {
+        width: u32,
+        signed: bool,
+    },
+    Float {
+        width: u32,
+    },
     Char,
     USize,
     ISize,
-    Pointer { pointee: Box<Type> },
-    Slice { elem: Box<Type> },
-    Array { elem: Box<Type>, size: u64 },
-    Tuple { fields: Vec<Type> },
-    Struct { name: String, fields: Vec<Field> },
-    Union { name: String, fields: Vec<Field> },
-    Enum { name: String, variants: Vec<Variant> },
-    Function { params: Vec<Type>, ret: Box<Type> },
-    Own { pointee: Box<Type> },
-    Ref { pointee: Box<Type> },
-    RefMut { pointee: Box<Type> },
-    Generic { name: String },
+    Pointer {
+        pointee: Box<Type>,
+    },
+    Slice {
+        elem: Box<Type>,
+    },
+    Array {
+        elem: Box<Type>,
+        size: u64,
+    },
+    Tuple {
+        fields: Vec<Type>,
+    },
+    Struct {
+        name: String,
+        fields: Vec<Field>,
+    },
+    Union {
+        name: String,
+        fields: Vec<Field>,
+    },
+    Enum {
+        name: String,
+        variants: Vec<Variant>,
+    },
+    Function {
+        params: Vec<Type>,
+        ret: Box<Type>,
+    },
+    Own {
+        pointee: Box<Type>,
+    },
+    Ref {
+        pointee: Box<Type>,
+    },
+    RefMut {
+        pointee: Box<Type>,
+    },
+    Generic {
+        name: String,
+    },
     Unknown,
 }
 
@@ -61,7 +95,9 @@ impl Type {
 
     /// Convenience constructor for `Slice`.
     pub fn slice(elem: Type) -> Self {
-        Type::Slice { elem: Box::new(elem) }
+        Type::Slice {
+            elem: Box::new(elem),
+        }
     }
 
     /// Convenience constructor for `Array`.
@@ -186,8 +222,14 @@ impl fmt::Display for Type {
         match self {
             Type::Void => write!(f, "void"),
             Type::Bool => write!(f, "bool"),
-            Type::Int { width, signed: true } => write!(f, "i{width}"),
-            Type::Int { width, signed: false } => write!(f, "u{width}"),
+            Type::Int {
+                width,
+                signed: true,
+            } => write!(f, "i{width}"),
+            Type::Int {
+                width,
+                signed: false,
+            } => write!(f, "u{width}"),
             Type::Float { width } => write!(f, "f{width}"),
             Type::Char => write!(f, "char"),
             Type::USize => write!(f, "usize"),

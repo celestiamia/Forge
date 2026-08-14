@@ -34,19 +34,21 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
 
     /// A minimal x86-64 Linux static _start that exits with status 42.
     const EXIT_42: &[u8] = &[
         0x48, 0xc7, 0xc0, 0x3c, 0x00, 0x00, 0x00, // mov $60, %rax   (sys_exit)
         0x48, 0xc7, 0xc7, 0x2a, 0x00, 0x00, 0x00, // mov $42, %rdi   (status)
-        0x0f, 0x05,                               // syscall
+        0x0f, 0x05, // syscall
     ];
 
     /// A minimal x86-32 Linux static _start that exits with status 42.
     const EXIT_42_32: &[u8] = &[
         0xbb, 0x2a, 0x00, 0x00, 0x00, // mov $42, %ebx
         0xb8, 0x01, 0x00, 0x00, 0x00, // mov $1, %eax   (sys_exit)
-        0xcd, 0x80,                   // int $0x80
+        0xcd, 0x80, // int $0x80
     ];
 
     #[test]
@@ -56,13 +58,7 @@ mod tests {
         let header_area = 64 + 56 * phnum;
         let entry = base + header_area;
 
-        let writer = Elf64Writer::new(
-            EXIT_42.to_vec(),
-            Vec::new(),
-            Vec::new(),
-            0,
-            entry,
-        );
+        let writer = Elf64Writer::new(EXIT_42.to_vec(), Vec::new(), Vec::new(), 0, entry);
 
         let mut path = std::env::temp_dir();
         path.push(format!("elf64_writer_test_{}", std::process::id()));
@@ -72,6 +68,10 @@ mod tests {
         let mut perms = fs::metadata(&path).unwrap().permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).unwrap();
+
+        // Small delay to ensure file is fully written and permissions applied
+        // before attempting execution (prevents "Text file busy" in parallel runs)
+        thread::sleep(Duration::from_millis(10));
 
         let status = Command::new(&path).status().expect("failed to execute ELF");
 
@@ -89,13 +89,7 @@ mod tests {
         let header_area = 52 + 32 * phnum;
         let entry = base + header_area;
 
-        let writer = Elf32Writer::new(
-            EXIT_42_32.to_vec(),
-            Vec::new(),
-            Vec::new(),
-            0,
-            entry,
-        );
+        let writer = Elf32Writer::new(EXIT_42_32.to_vec(), Vec::new(), Vec::new(), 0, entry);
 
         let mut path = std::env::temp_dir();
         path.push(format!("elf32_writer_test_{}", std::process::id()));
@@ -105,6 +99,10 @@ mod tests {
         let mut perms = fs::metadata(&path).unwrap().permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&path, perms).unwrap();
+
+        // Small delay to ensure file is fully written and permissions applied
+        // before attempting execution (prevents "Text file busy" in parallel runs)
+        thread::sleep(Duration::from_millis(10));
 
         let status = Command::new(&path).status().expect("failed to execute ELF");
 

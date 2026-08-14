@@ -17,8 +17,7 @@ impl<'p> CodeGen<'p> {
     }
 
     pub(super) fn store_scalar(&mut self, offset: i32) -> Result<()> {
-        self.asm
-            .mov(Mem::base_disp(Reg::Ebp, offset), Reg::Eax)?;
+        self.asm.mov(Mem::base_disp(Reg::Ebp, offset), Reg::Eax)?;
         Ok(())
     }
 
@@ -98,5 +97,4 @@ impl<'p> CodeGen<'p> {
             .copied()
             .ok_or_else(|| anyhow::anyhow!("field index {} out of range", idx))
     }
-
 }

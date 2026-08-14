@@ -3,9 +3,9 @@
 
 use crate::backend::error::{AssemblerError, EncodeError};
 use crate::backend::x64::{
-    encode, AluOp, Cond, IntoJmpTarget, IntoOp, JmpTarget, Label, Mem, Operand, Reg,
+    AluOp, Cond, IntoJmpTarget, IntoOp, JmpTarget, Label, Mem, Operand, Reg, encode,
 };
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 #[derive(Debug)]
 struct Fixup {

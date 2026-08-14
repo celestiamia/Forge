@@ -54,14 +54,7 @@ impl Reg {
     pub fn is_high(self) -> bool {
         matches!(
             self,
-            Reg::R8
-                | Reg::R9
-                | Reg::R10
-                | Reg::R11
-                | Reg::R12
-                | Reg::R13
-                | Reg::R14
-                | Reg::R15
+            Reg::R8 | Reg::R9 | Reg::R10 | Reg::R11 | Reg::R12 | Reg::R13 | Reg::R14 | Reg::R15
         )
     }
 
@@ -69,8 +62,14 @@ impl Reg {
     pub fn is_xmm(self) -> bool {
         matches!(
             self,
-            Reg::Xmm0 | Reg::Xmm1 | Reg::Xmm2 | Reg::Xmm3
-                | Reg::Xmm4 | Reg::Xmm5 | Reg::Xmm6 | Reg::Xmm7
+            Reg::Xmm0
+                | Reg::Xmm1
+                | Reg::Xmm2
+                | Reg::Xmm3
+                | Reg::Xmm4
+                | Reg::Xmm5
+                | Reg::Xmm6
+                | Reg::Xmm7
         )
     }
 

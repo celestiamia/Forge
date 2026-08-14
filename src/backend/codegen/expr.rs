@@ -46,7 +46,14 @@ impl<'p> CodeGen<'p> {
                     .get(name)
                     .ok_or_else(|| anyhow::anyhow!("unknown variable: {}", name))?;
                 match &e.ty {
-                    Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => {
+                    Type::I8
+                    | Type::I16
+                    | Type::I32
+                    | Type::U8
+                    | Type::U16
+                    | Type::U32
+                    | Type::Bool
+                    | Type::Char => {
                         self.asm
                             .lea(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset))?;
                         self.load_from_addr(&e.ty)?;
@@ -57,7 +64,7 @@ impl<'p> CodeGen<'p> {
                             .mov(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset))?;
                     }
                     Type::Slice(_) => {
-                        # [allow(unreachable_code)]
+                        #[allow(unreachable_code)]
                         // For now, just load the data pointer
                         self.asm
                             .mov(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset))?;
@@ -106,7 +113,13 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
-    pub(super) fn eval_bin(&mut self, op: BinOp, left: &Expr, right: &Expr, _ty: &Type) -> Result<()> {
+    pub(super) fn eval_bin(
+        &mut self,
+        op: BinOp,
+        left: &Expr,
+        right: &Expr,
+        _ty: &Type,
+    ) -> Result<()> {
         if op.is_logical() {
             return self.eval_logical(op, left, right);
         }
@@ -118,9 +131,9 @@ impl<'p> CodeGen<'p> {
 
         self.eval_expr(left)?;
         self.asm.mov(Reg::R10, Reg::Rax)?; // left -> R10
-        self.asm.push(Reg::R10)?;          // preserve left across right evaluation
-        self.eval_expr(right)?;           // right -> RAX
-        self.asm.pop(Reg::R10)?;           // restore left
+        self.asm.push(Reg::R10)?; // preserve left across right evaluation
+        self.eval_expr(right)?; // right -> RAX
+        self.asm.pop(Reg::R10)?; // restore left
 
         if op.is_arithmetic() {
             match op {
@@ -134,7 +147,9 @@ impl<'p> CodeGen<'p> {
                             self.asm.shl(Reg::Rax, elem.trailing_zeros() as i8)?;
                         }
                         self.asm.add(Reg::Rax, Reg::R10)?;
-                    } else if let (Some(elem), true) = (ptr_elem_size(&right.ty), left.ty.is_integer()) {
+                    } else if let (Some(elem), true) =
+                        (ptr_elem_size(&right.ty), left.ty.is_integer())
+                    {
                         if elem > 1 {
                             self.asm.mov(Reg::R11, Reg::R10)?;
                             self.asm.shl(Reg::R11, elem.trailing_zeros() as i8)?;
@@ -204,7 +219,10 @@ impl<'p> CodeGen<'p> {
             return Ok(());
         }
 
-        if matches!(op, BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr) {
+        if matches!(
+            op,
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr
+        ) {
             match op {
                 BinOp::BitAnd => self.asm.and(Reg::Rax, Reg::R10)?,
                 BinOp::BitOr => self.asm.or(Reg::Rax, Reg::R10)?,
@@ -271,7 +289,7 @@ impl<'p> CodeGen<'p> {
                 let cond = match op {
                     BinOp::Eq => Cond::E,
                     BinOp::Ne => Cond::Ne,
-                    BinOp::Lt => Cond::B,  // below (unordered-safe: use B for lt)
+                    BinOp::Lt => Cond::B, // below (unordered-safe: use B for lt)
                     BinOp::Le => Cond::Be,
                     BinOp::Gt => Cond::A,
                     BinOp::Ge => Cond::Ae,
@@ -400,7 +418,8 @@ impl<'p> CodeGen<'p> {
                     .locals
                     .get(name)
                     .ok_or_else(|| anyhow::anyhow!("unknown variable: {}", name))?;
-                self.asm.lea(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset))?;
+                self.asm
+                    .lea(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset))?;
             }
             ExprKind::Gep { base, field } => {
                 self.eval_expr(base)?;
@@ -425,7 +444,8 @@ impl<'p> CodeGen<'p> {
                     .locals
                     .get(name)
                     .ok_or_else(|| anyhow::anyhow!("unknown variable: {}", name))?;
-                self.asm.lea(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset))?;
+                self.asm
+                    .lea(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset))?;
             }
             LValue::Deref(ptr) => {
                 self.eval_expr(ptr)?; // pointer value is already the address
@@ -441,5 +461,4 @@ impl<'p> CodeGen<'p> {
         }
         Ok(())
     }
-
 }

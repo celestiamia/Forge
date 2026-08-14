@@ -136,7 +136,11 @@ impl Parser {
         }))
     }
 
-    pub(super) fn parse_struct(&mut self, attrs: Vec<Attribute>, vis: Visibility) -> Result<Item, ParseError> {
+    pub(super) fn parse_struct(
+        &mut self,
+        attrs: Vec<Attribute>,
+        vis: Visibility,
+    ) -> Result<Item, ParseError> {
         self.expect(Token::Struct)?;
         let name = self.expect_ident()?;
         let generics = self.parse_generics()?;
@@ -150,7 +154,11 @@ impl Parser {
         }))
     }
 
-    pub(super) fn parse_union(&mut self, attrs: Vec<Attribute>, vis: Visibility) -> Result<Item, ParseError> {
+    pub(super) fn parse_union(
+        &mut self,
+        attrs: Vec<Attribute>,
+        vis: Visibility,
+    ) -> Result<Item, ParseError> {
         self.expect(Token::Union)?;
         let name = self.expect_ident()?;
         let generics = self.parse_generics()?;
@@ -164,7 +172,11 @@ impl Parser {
         }))
     }
 
-    pub(super) fn parse_enum(&mut self, attrs: Vec<Attribute>, vis: Visibility) -> Result<Item, ParseError> {
+    pub(super) fn parse_enum(
+        &mut self,
+        attrs: Vec<Attribute>,
+        vis: Visibility,
+    ) -> Result<Item, ParseError> {
         self.expect(Token::Enum)?;
         let name = self.expect_ident()?;
         let generics = self.parse_generics()?;
@@ -253,7 +265,7 @@ impl Parser {
                 return Err(self.error(format!(
                     "embed path must be a string literal, found {:?}",
                     other
-                )))
+                )));
             }
         };
         let full = self.base_dir.join(&path);
@@ -379,5 +391,4 @@ impl Parser {
         self.expect(Token::Dedent)?;
         Ok(items)
     }
-
 }

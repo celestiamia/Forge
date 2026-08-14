@@ -10,14 +10,16 @@
 
 pub(super) use std::collections::HashMap;
 
-pub(super) use anyhow::{bail, Result};
+pub(super) use anyhow::{Result, bail};
 
-pub(super) use crate::backend::ir::{BinOp, Expr, ExprKind, Func, LValue, Literal, Program, Stmt, StructDef, Type};
 pub(super) use crate::backend::codegen16;
+pub(super) use crate::backend::ir::{
+    BinOp, Expr, ExprKind, Func, LValue, Literal, Program, Stmt, StructDef, Type,
+};
 pub(super) use crate::backend::x64::{Assembler, Cond, Mem, Reg};
+pub(super) use crate::obj::ObjectWriter;
 pub(super) use crate::obj::elf::Elf64Writer;
 pub(super) use crate::obj::flat::FlatWriter;
-pub(super) use crate::obj::ObjectWriter;
 
 pub(super) const BASE_VADDR: u64 = 0x400000;
 pub(super) const EHDR_SIZE: u64 = 64;
@@ -180,32 +182,38 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         // any of the `_dev_*` memory-management helpers.  All of the GC
         // helpers are emitted together as a unit whenever any one of them is
         // referenced, so callers can use alloc/free plus explicit collect/stats.
-        let need_gc = prog
-            .externs
-            .iter()
-            .any(|e| match e.name.as_str() {
-                "_dev_alloc"
-                | "_dev_free"
-                | "_dev_gc_collect"
-                | "_dev_gc_leak_check"
-                | "_dev_gc_alloc_count"
-                | "_dev_gc_free_count"
-                | "_dev_gc_collections"
-                | "_dev_gc_heap_live"
-                | "_dev_gc_heap_capacity" => true,
-                _ => false,
-            });
+        let need_gc = prog.externs.iter().any(|e| match e.name.as_str() {
+            "_dev_alloc"
+            | "_dev_free"
+            | "_dev_gc_collect"
+            | "_dev_gc_leak_check"
+            | "_dev_gc_alloc_count"
+            | "_dev_gc_free_count"
+            | "_dev_gc_collections"
+            | "_dev_gc_heap_live"
+            | "_dev_gc_heap_capacity" => true,
+            _ => false,
+        });
         cg.gc_enabled = need_gc;
         if need_gc {
-            cg.func_labels.insert("_dev_alloc".to_string(), cg.asm.new_label());
-            cg.func_labels.insert("_dev_free".to_string(), cg.asm.new_label());
-            cg.func_labels.insert("_dev_gc_collect".to_string(), cg.asm.new_label());
-            cg.func_labels.insert("_dev_gc_leak_check".to_string(), cg.asm.new_label());
-            cg.func_labels.insert("_dev_gc_alloc_count".to_string(), cg.asm.new_label());
-            cg.func_labels.insert("_dev_gc_free_count".to_string(), cg.asm.new_label());
-            cg.func_labels.insert("_dev_gc_collections".to_string(), cg.asm.new_label());
-            cg.func_labels.insert("_dev_gc_heap_live".to_string(), cg.asm.new_label());
-            cg.func_labels.insert("_dev_gc_heap_capacity".to_string(), cg.asm.new_label());
+            cg.func_labels
+                .insert("_dev_alloc".to_string(), cg.asm.new_label());
+            cg.func_labels
+                .insert("_dev_free".to_string(), cg.asm.new_label());
+            cg.func_labels
+                .insert("_dev_gc_collect".to_string(), cg.asm.new_label());
+            cg.func_labels
+                .insert("_dev_gc_leak_check".to_string(), cg.asm.new_label());
+            cg.func_labels
+                .insert("_dev_gc_alloc_count".to_string(), cg.asm.new_label());
+            cg.func_labels
+                .insert("_dev_gc_free_count".to_string(), cg.asm.new_label());
+            cg.func_labels
+                .insert("_dev_gc_collections".to_string(), cg.asm.new_label());
+            cg.func_labels
+                .insert("_dev_gc_heap_live".to_string(), cg.asm.new_label());
+            cg.func_labels
+                .insert("_dev_gc_heap_capacity".to_string(), cg.asm.new_label());
         }
         let pow = cg.asm.new_label();
         cg.func_labels.insert("__forge_pow".to_string(), pow);
@@ -231,7 +239,14 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         .prog
         .globals
         .iter()
-        .map(|g| (g.name.clone(), *cg.global_labels.get(&g.name).unwrap(), g.init.clone(), g.ty.clone()))
+        .map(|g| {
+            (
+                g.name.clone(),
+                *cg.global_labels.get(&g.name).unwrap(),
+                g.init.clone(),
+                g.ty.clone(),
+            )
+        })
         .collect();
     globals.sort_by_key(|(_, lab, _, _)| *lab);
     let mut string_patches: Vec<(u32, u32)> = Vec::new();
@@ -287,7 +302,8 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
     let mut rodata = bytes[split..].to_vec();
 
     let text_offset = EHDR_SIZE + PHDR_SIZE * 2;
-    let entry_vaddr = BASE_VADDR + text_offset + *cg.label_offsets.get(&start_label).unwrap_or(&0) as u64;
+    let entry_vaddr =
+        BASE_VADDR + text_offset + *cg.label_offsets.get(&start_label).unwrap_or(&0) as u64;
 
     let rodata_start_off = *cg.label_offsets.get(&rodata_start).unwrap_or(&0);
     let rodata_vaddr = BASE_VADDR + text_offset + code.len() as u64;
@@ -336,7 +352,13 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
             .copy_from_slice(&rd_end.to_le_bytes());
     }
 
-    Ok(Box::new(Elf64Writer::new(code, rodata, data, bss_size, entry_vaddr)))
+    Ok(Box::new(Elf64Writer::new(
+        code,
+        rodata,
+        data,
+        bss_size,
+        entry_vaddr,
+    )))
 }
 
 pub(super) const PAGE_SIZE: u64 = 0x1000;
@@ -412,8 +434,7 @@ impl<'p> CodeGen<'p> {
         for (i, (name, _ty)) in f.params.iter().enumerate() {
             let slot = self.locals.get(name).unwrap();
             let reg = abi_reg(i)?;
-            self.asm
-                .mov(Mem::base_disp(Reg::Rbp, slot.offset), reg);
+            self.asm.mov(Mem::base_disp(Reg::Rbp, slot.offset), reg);
         }
 
         self.ret_label = self.asm.new_label();
@@ -445,17 +466,26 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
-pub(super) fn emit_stmt(&mut self, s: &Stmt) -> Result<()> {
+    pub(super) fn emit_stmt(&mut self, s: &Stmt) -> Result<()> {
         match s {
             Stmt::Let { name, ty, init } => self.emit_let(name, ty, init),
-            Stmt::StackAlloc { name, elem_ty, count } => self.emit_stack_alloc(name, elem_ty, count),
+            Stmt::StackAlloc {
+                name,
+                elem_ty,
+                count,
+            } => self.emit_stack_alloc(name, elem_ty, count),
             Stmt::Assign { lhs, rhs } => self.emit_assign(lhs, rhs),
             Stmt::Return(None) => self.emit_return_none(),
             Stmt::Return(Some(e)) => self.emit_return(e),
             Stmt::Expr(e) => self.emit_expr(e),
             Stmt::If { cond, then, else_ } => self.emit_if(cond, then, else_),
             Stmt::While { cond, body } => self.emit_while(cond, body),
-            Stmt::For { init, cond, step, body } => self.emit_for(init, cond, step, body),
+            Stmt::For {
+                init,
+                cond,
+                step,
+                body,
+            } => self.emit_for(init, cond, step, body),
             Stmt::Break => self.emit_break(),
             Stmt::Continue => self.emit_continue(),
             Stmt::Unsafe(b) => self.emit_unsafe(b),
@@ -566,7 +596,13 @@ pub(super) fn emit_stmt(&mut self, s: &Stmt) -> Result<()> {
         Ok(())
     }
 
-    fn emit_for(&mut self, init: &Option<Box<Stmt>>, cond: &Expr, step: &Option<Expr>, body: &[Stmt]) -> Result<()> {
+    fn emit_for(
+        &mut self,
+        init: &Option<Box<Stmt>>,
+        cond: &Expr,
+        step: &Option<Expr>,
+        body: &[Stmt],
+    ) -> Result<()> {
         if let Some(i) = init {
             self.emit_stmt(i)?;
         }
@@ -592,14 +628,18 @@ pub(super) fn emit_stmt(&mut self, s: &Stmt) -> Result<()> {
     }
 
     fn emit_break(&mut self) -> Result<()> {
-        let end = *self.loop_end_stack.last()
+        let end = *self
+            .loop_end_stack
+            .last()
             .ok_or_else(|| anyhow::anyhow!("break outside of loop"))?;
         self.asm.jmp(end);
         Ok(())
     }
 
     fn emit_continue(&mut self) -> Result<()> {
-        let head = *self.loop_head_stack.last()
+        let head = *self
+            .loop_head_stack
+            .last()
             .ok_or_else(|| anyhow::anyhow!("continue outside of loop"))?;
         self.asm.jmp(head);
         Ok(())
@@ -620,7 +660,6 @@ pub(super) fn emit_stmt(&mut self, s: &Stmt) -> Result<()> {
         self.string_labels.insert(s.to_string(), lab);
         lab
     }
-
 }
 pub(super) fn layout_struct(s: &StructDef) -> StructLayout {
     let mut offset = 0usize;
@@ -632,7 +671,12 @@ pub(super) fn layout_struct(s: &StructDef) -> StructLayout {
         offsets.push(offset);
         offset += size;
     }
-    let align = s.fields.iter().map(|(_, ty)| type_align(ty)).max().unwrap_or(1);
+    let align = s
+        .fields
+        .iter()
+        .map(|(_, ty)| type_align(ty))
+        .max()
+        .unwrap_or(1);
     StructLayout {
         size: align_up(offset, align),
         align,
@@ -655,11 +699,11 @@ pub(super) fn type_size(ty: &Type) -> usize {
 impl<'p> CodeGen<'p> {
     pub(super) fn type_size_bytes(&self, ty: &Type) -> usize {
         match ty {
-            Type::Struct(name) => {
-                self.struct_layouts.get(name)
-                    .map(|l| l.size)
-                    .unwrap_or_else(|| type_size(ty))
-            }
+            Type::Struct(name) => self
+                .struct_layouts
+                .get(name)
+                .map(|l| l.size)
+                .unwrap_or_else(|| type_size(ty)),
             Type::Slice(_) => 16,
             _ => type_size(ty),
         }

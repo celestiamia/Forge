@@ -17,16 +17,46 @@ pub(super) fn primitive_type(name: &str) -> Option<Type> {
         "char" => Some(Type::Char),
         "usize" => Some(Type::USize),
         "isize" => Some(Type::ISize),
-        "i8" | "int8" => Some(Type::Int { width: 8, signed: true }),
-        "i16" | "int16" => Some(Type::Int { width: 16, signed: true }),
-        "i32" | "int" | "int32" => Some(Type::Int { width: 32, signed: true }),
-        "i64" | "int64" => Some(Type::Int { width: 64, signed: true }),
-        "i128" | "int128" => Some(Type::Int { width: 128, signed: true }),
-        "u8" | "uint8" | "byte" => Some(Type::Int { width: 8, signed: false }),
-        "u16" | "uint16" => Some(Type::Int { width: 16, signed: false }),
-        "u32" | "uint32" => Some(Type::Int { width: 32, signed: false }),
-        "u64" | "uint64" => Some(Type::Int { width: 64, signed: false }),
-        "u128" | "uint128" => Some(Type::Int { width: 128, signed: false }),
+        "i8" | "int8" => Some(Type::Int {
+            width: 8,
+            signed: true,
+        }),
+        "i16" | "int16" => Some(Type::Int {
+            width: 16,
+            signed: true,
+        }),
+        "i32" | "int" | "int32" => Some(Type::Int {
+            width: 32,
+            signed: true,
+        }),
+        "i64" | "int64" => Some(Type::Int {
+            width: 64,
+            signed: true,
+        }),
+        "i128" | "int128" => Some(Type::Int {
+            width: 128,
+            signed: true,
+        }),
+        "u8" | "uint8" | "byte" => Some(Type::Int {
+            width: 8,
+            signed: false,
+        }),
+        "u16" | "uint16" => Some(Type::Int {
+            width: 16,
+            signed: false,
+        }),
+        "u32" | "uint32" => Some(Type::Int {
+            width: 32,
+            signed: false,
+        }),
+        "u64" | "uint64" => Some(Type::Int {
+            width: 64,
+            signed: false,
+        }),
+        "u128" | "uint128" => Some(Type::Int {
+            width: 128,
+            signed: false,
+        }),
         "f32" | "float32" => Some(Type::Float { width: 32 }),
         "f64" | "float" | "float64" => Some(Type::Float { width: 64 }),
         _ => None,
@@ -38,7 +68,10 @@ pub(super) fn literal_type(lit: &Literal, expected: Option<&Type>) -> Type {
         Literal::Int(_) => expected
             .filter(|t| t.is_integer())
             .cloned()
-            .unwrap_or(Type::Int { width: 32, signed: true }),
+            .unwrap_or(Type::Int {
+                width: 32,
+                signed: true,
+            }),
         Literal::Float(_) => expected
             .filter(|t| t.is_float())
             .cloned()
@@ -72,11 +105,13 @@ pub(super) fn adt_type(info: &AdtInfo) -> Type {
 
 pub(super) fn base_type_name(ty: &Type) -> String {
     match ty {
-        Type::Struct { name, .. }
-        | Type::Union { name, .. }
-        | Type::Enum { name, .. } => name.clone(),
+        Type::Struct { name, .. } | Type::Union { name, .. } | Type::Enum { name, .. } => {
+            name.clone()
+        }
         Type::Pointer { pointee } => base_type_name(pointee),
-        Type::Ref { pointee } | Type::RefMut { pointee } | Type::Own { pointee } => base_type_name(pointee),
+        Type::Ref { pointee } | Type::RefMut { pointee } | Type::Own { pointee } => {
+            base_type_name(pointee)
+        }
         _ => String::new(),
     }
 }
@@ -91,9 +126,9 @@ pub(super) fn base_type_name_from_type_expr(tx: &TypeExpr) -> String {
 
 pub(super) fn adt_name_from_type(ty: &Type) -> Option<String> {
     match ty {
-        Type::Struct { name, .. }
-        | Type::Union { name, .. }
-        | Type::Enum { name, .. } => Some(name.clone()),
+        Type::Struct { name, .. } | Type::Union { name, .. } | Type::Enum { name, .. } => {
+            Some(name.clone())
+        }
         Type::Pointer { pointee } => adt_name_from_type(pointee),
         Type::Ref { pointee } | Type::RefMut { pointee } => adt_name_from_type(pointee),
         _ => None,
@@ -103,7 +138,11 @@ pub(super) fn adt_name_from_type(ty: &Type) -> Option<String> {
 pub(super) fn field_index(ty: &Type, field: &str, ctx: &Context) -> usize {
     let name = base_type_name(ty);
     if let Some(info) = ctx.adts.get(&name) {
-        return info.fields.iter().position(|f| f.name == field).unwrap_or(0);
+        return info
+            .fields
+            .iter()
+            .position(|f| f.name == field)
+            .unwrap_or(0);
     }
     0
 }
@@ -203,7 +242,11 @@ pub(super) fn infer_generic_params(
     Some(mapping)
 }
 
-pub(super) fn collect_substitutions(pattern: &Type, concrete: &Type, map: &mut HashMap<String, Type>) -> Option<()> {
+pub(super) fn collect_substitutions(
+    pattern: &Type,
+    concrete: &Type,
+    map: &mut HashMap<String, Type>,
+) -> Option<()> {
     match (pattern, concrete) {
         (Type::Generic { name }, _) => {
             map.insert(name.clone(), concrete.clone());
@@ -212,7 +255,9 @@ pub(super) fn collect_substitutions(pattern: &Type, concrete: &Type, map: &mut H
         (Type::Pointer { pointee: p }, Type::Pointer { pointee: c })
         | (Type::Own { pointee: p }, Type::Own { pointee: c })
         | (Type::Ref { pointee: p }, Type::Ref { pointee: c })
-        | (Type::RefMut { pointee: p }, Type::RefMut { pointee: c }) => collect_substitutions(p, c, map),
+        | (Type::RefMut { pointee: p }, Type::RefMut { pointee: c }) => {
+            collect_substitutions(p, c, map)
+        }
         (Type::Slice { elem: p }, Type::Slice { elem: c }) => collect_substitutions(p, c, map),
         (Type::Array { elem: p, size: ps }, Type::Array { elem: c, size: cs }) if ps == cs => {
             collect_substitutions(p, c, map)
@@ -223,9 +268,16 @@ pub(super) fn collect_substitutions(pattern: &Type, concrete: &Type, map: &mut H
             }
             Some(())
         }
-        (Type::Function { params: pp, ret: pr }, Type::Function { params: cp, ret: cr })
-            if pp.len() == cp.len() =>
-        {
+        (
+            Type::Function {
+                params: pp,
+                ret: pr,
+            },
+            Type::Function {
+                params: cp,
+                ret: cr,
+            },
+        ) if pp.len() == cp.len() => {
             for (p, c) in pp.iter().zip(cp.iter()) {
                 collect_substitutions(p, c, map)?;
             }
@@ -245,7 +297,9 @@ pub(super) fn substitute(ty: &Type, mapping: &HashMap<String, Type>) -> Type {
         Type::RefMut { pointee } => Type::ref_mut(substitute(pointee, mapping)),
         Type::Slice { elem } => Type::slice(substitute(elem, mapping)),
         Type::Array { elem, size } => Type::array(substitute(elem, mapping), *size),
-        Type::Tuple { fields } => Type::tuple(fields.iter().map(|f| substitute(f, mapping)).collect()),
+        Type::Tuple { fields } => {
+            Type::tuple(fields.iter().map(|f| substitute(f, mapping)).collect())
+        }
         Type::Function { params, ret } => Type::function(
             params.iter().map(|p| substitute(p, mapping)).collect(),
             substitute(ret, mapping),

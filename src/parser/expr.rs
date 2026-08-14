@@ -1,5 +1,5 @@
-use super::*;
 use super::parser::parse_int;
+use super::*;
 use crate::lexer::Token;
 
 impl Parser {
@@ -11,7 +11,8 @@ impl Parser {
         let mut left = self.parse_and()?;
         while self.eat(&Token::OrOr) {
             let right = self.parse_and()?;
-            left = Expr::Binary(BinaryExpr { span: self.current_span(),
+            left = Expr::Binary(BinaryExpr {
+                span: self.current_span(),
                 op: BinOp::Or,
                 left: Box::new(left),
                 right: Box::new(right),
@@ -24,7 +25,8 @@ impl Parser {
         let mut left = self.parse_range()?;
         while self.eat(&Token::AndAnd) {
             let right = self.parse_range()?;
-            left = Expr::Binary(BinaryExpr { span: self.current_span(),
+            left = Expr::Binary(BinaryExpr {
+                span: self.current_span(),
                 op: BinOp::And,
                 left: Box::new(left),
                 right: Box::new(right),
@@ -40,7 +42,8 @@ impl Parser {
             } else {
                 None
             };
-            return Ok(Expr::Range(RangeExpr { span: self.current_span(),
+            return Ok(Expr::Range(RangeExpr {
+                span: self.current_span(),
                 start: None,
                 end,
                 inclusive: false,
@@ -52,7 +55,8 @@ impl Parser {
             } else {
                 None
             };
-            return Ok(Expr::Range(RangeExpr { span: self.current_span(),
+            return Ok(Expr::Range(RangeExpr {
+                span: self.current_span(),
                 start: None,
                 end,
                 inclusive: true,
@@ -66,7 +70,8 @@ impl Parser {
             } else {
                 None
             };
-            left = Expr::Range(RangeExpr { span: self.current_span(),
+            left = Expr::Range(RangeExpr {
+                span: self.current_span(),
                 start: Some(Box::new(left)),
                 end,
                 inclusive: false,
@@ -77,7 +82,8 @@ impl Parser {
             } else {
                 None
             };
-            left = Expr::Range(RangeExpr { span: self.current_span(),
+            left = Expr::Range(RangeExpr {
+                span: self.current_span(),
                 start: Some(Box::new(left)),
                 end,
                 inclusive: true,
@@ -90,7 +96,8 @@ impl Parser {
         let mut left = self.parse_bitxor()?;
         while self.eat(&Token::Or) {
             let right = self.parse_bitxor()?;
-            left = Expr::Binary(BinaryExpr { span: self.current_span(),
+            left = Expr::Binary(BinaryExpr {
+                span: self.current_span(),
                 op: BinOp::BitOr,
                 left: Box::new(left),
                 right: Box::new(right),
@@ -103,7 +110,8 @@ impl Parser {
         let mut left = self.parse_bitand()?;
         while self.eat(&Token::Xor) {
             let right = self.parse_bitand()?;
-            left = Expr::Binary(BinaryExpr { span: self.current_span(),
+            left = Expr::Binary(BinaryExpr {
+                span: self.current_span(),
                 op: BinOp::BitXor,
                 left: Box::new(left),
                 right: Box::new(right),
@@ -116,7 +124,8 @@ impl Parser {
         let mut left = self.parse_equality()?;
         while self.eat(&Token::And) {
             let right = self.parse_equality()?;
-            left = Expr::Binary(BinaryExpr { span: self.current_span(),
+            left = Expr::Binary(BinaryExpr {
+                span: self.current_span(),
                 op: BinOp::BitAnd,
                 left: Box::new(left),
                 right: Box::new(right),
@@ -130,14 +139,16 @@ impl Parser {
         loop {
             if self.eat(&Token::Eq) {
                 let right = self.parse_rel()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Eq,
                     left: Box::new(left),
                     right: Box::new(right),
                 });
             } else if self.eat(&Token::Ne) {
                 let right = self.parse_rel()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Ne,
                     left: Box::new(left),
                     right: Box::new(right),
@@ -154,28 +165,32 @@ impl Parser {
         loop {
             if self.eat(&Token::Lt) {
                 let right = self.parse_shift()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Lt,
                     left: Box::new(left),
                     right: Box::new(right),
                 });
             } else if self.eat(&Token::Le) {
                 let right = self.parse_shift()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Le,
                     left: Box::new(left),
                     right: Box::new(right),
                 });
             } else if self.eat(&Token::Gt) {
                 let right = self.parse_shift()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Gt,
                     left: Box::new(left),
                     right: Box::new(right),
                 });
             } else if self.eat(&Token::Ge) {
                 let right = self.parse_shift()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Ge,
                     left: Box::new(left),
                     right: Box::new(right),
@@ -192,14 +207,16 @@ impl Parser {
         loop {
             if self.eat(&Token::Shl) {
                 let right = self.parse_add()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Shl,
                     left: Box::new(left),
                     right: Box::new(right),
                 });
             } else if self.eat(&Token::Shr) {
                 let right = self.parse_add()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Shr,
                     left: Box::new(left),
                     right: Box::new(right),
@@ -216,14 +233,16 @@ impl Parser {
         loop {
             if self.eat(&Token::Plus) {
                 let right = self.parse_mul()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Add,
                     left: Box::new(left),
                     right: Box::new(right),
                 });
             } else if self.eat(&Token::Minus) {
                 let right = self.parse_mul()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Sub,
                     left: Box::new(left),
                     right: Box::new(right),
@@ -240,28 +259,32 @@ impl Parser {
         loop {
             if self.eat(&Token::Star) {
                 let right = self.parse_power()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Mul,
                     left: Box::new(left),
                     right: Box::new(right),
                 });
             } else if self.eat(&Token::Slash) {
                 let right = self.parse_power()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Div,
                     left: Box::new(left),
                     right: Box::new(right),
                 });
             } else if self.eat(&Token::FloorDiv) {
                 let right = self.parse_power()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::FloorDiv,
                     left: Box::new(left),
                     right: Box::new(right),
                 });
             } else if self.eat(&Token::Percent) {
                 let right = self.parse_power()?;
-                left = Expr::Binary(BinaryExpr { span: self.current_span(),
+                left = Expr::Binary(BinaryExpr {
+                    span: self.current_span(),
                     op: BinOp::Mod,
                     left: Box::new(left),
                     right: Box::new(right),
@@ -277,7 +300,8 @@ impl Parser {
         let left = self.parse_unary()?;
         if self.eat(&Token::Power) {
             let right = self.parse_power()?;
-            Ok(Expr::Binary(BinaryExpr { span: self.current_span(),
+            Ok(Expr::Binary(BinaryExpr {
+                span: self.current_span(),
                 op: BinOp::Power,
                 left: Box::new(left),
                 right: Box::new(right),
@@ -291,34 +315,39 @@ impl Parser {
         self.skip_newlines();
         if self.eat(&Token::Minus) {
             let operand = self.parse_unary()?;
-            return Ok(Expr::Unary(UnaryExpr { span: self.current_span(),
+            return Ok(Expr::Unary(UnaryExpr {
+                span: self.current_span(),
                 op: UnOp::Neg,
                 operand: Box::new(operand),
             }));
         }
         if self.eat(&Token::Bang) {
             let operand = self.parse_unary()?;
-            return Ok(Expr::Unary(UnaryExpr { span: self.current_span(),
+            return Ok(Expr::Unary(UnaryExpr {
+                span: self.current_span(),
                 op: UnOp::Not,
                 operand: Box::new(operand),
             }));
         }
         if self.eat(&Token::Tilde) {
             let operand = self.parse_unary()?;
-            return Ok(Expr::Unary(UnaryExpr { span: self.current_span(),
+            return Ok(Expr::Unary(UnaryExpr {
+                span: self.current_span(),
                 op: UnOp::BitNot,
                 operand: Box::new(operand),
             }));
         }
         if self.eat(&Token::Star) {
             let operand = self.parse_unary()?;
-            return Ok(Expr::Deref(DerefExpr { span: self.current_span(),
+            return Ok(Expr::Deref(DerefExpr {
+                span: self.current_span(),
                 expr: Box::new(operand),
             }));
         }
         if self.eat(&Token::And) {
             let operand = self.parse_unary()?;
-            return Ok(Expr::Ref(RefExpr { span: self.current_span(),
+            return Ok(Expr::Ref(RefExpr {
+                span: self.current_span(),
                 expr: Box::new(operand),
             }));
         }
@@ -336,7 +365,8 @@ impl Parser {
                 let continues = matches!(
                     ahead,
                     Token::LParen | Token::LBracket | Token::Dot | Token::As
-                ) || (matches!(ahead, Token::LBrace) && matches!(expr, Expr::Ident(_)));
+                ) || (matches!(ahead, Token::LBrace)
+                    && matches!(expr, Expr::Ident(_)));
                 if !continues {
                     break;
                 }
@@ -359,20 +389,23 @@ impl Parser {
                     }
                     self.expect(Token::RParen)?;
                 }
-                expr = Expr::Call(CallExpr { span: self.current_span(),
+                expr = Expr::Call(CallExpr {
+                    span: self.current_span(),
                     callee: Box::new(expr),
                     args,
                 });
             } else if self.eat(&Token::LBracket) {
                 let index = self.parse_expr()?;
                 self.expect(Token::RBracket)?;
-                expr = Expr::Index(IndexExpr { span: self.current_span(),
+                expr = Expr::Index(IndexExpr {
+                    span: self.current_span(),
                     object: Box::new(expr),
                     index: Box::new(index),
                 });
             } else if self.eat(&Token::Dot) {
                 let field = self.expect_ident()?;
-                expr = Expr::Field(FieldExpr { span: self.current_span(),
+                expr = Expr::Field(FieldExpr {
+                    span: self.current_span(),
                     object: Box::new(expr),
                     field,
                 });
@@ -405,7 +438,8 @@ impl Parser {
             } else if self.peek() == &Token::As {
                 self.advance();
                 let ty = self.parse_type_noskip()?;
-                expr = Expr::Cast(CastExpr { span: self.current_span(),
+                expr = Expr::Cast(CastExpr {
+                    span: self.current_span(),
                     expr: Box::new(expr),
                     ty: Box::new(ty),
                 });
@@ -500,7 +534,10 @@ impl Parser {
         self.expect(Token::LParen)?;
         let ty = self.parse_type()?;
         self.expect(Token::RParen)?;
-        Ok(Expr::SizeOf(SizeOfExpr { span: self.current_span(), ty }))
+        Ok(Expr::SizeOf(SizeOfExpr {
+            span: self.current_span(),
+            ty,
+        }))
     }
 
     pub(super) fn parse_offsetof(&mut self) -> Result<Expr, ParseError> {
@@ -510,7 +547,11 @@ impl Parser {
         self.expect(Token::Comma)?;
         let field = self.expect_ident()?;
         self.expect(Token::RParen)?;
-        Ok(Expr::OffsetOf(OffsetOfExpr { span: self.current_span(), ty, field }))
+        Ok(Expr::OffsetOf(OffsetOfExpr {
+            span: self.current_span(),
+            ty,
+            field,
+        }))
     }
 
     pub(super) fn parse_asm(&mut self) -> Result<Expr, ParseError> {
@@ -561,7 +602,8 @@ impl Parser {
         } else {
             self.expect(Token::RParen)?;
         }
-        Ok(Expr::Asm(AsmExpr { span: self.current_span(),
+        Ok(Expr::Asm(AsmExpr {
+            span: self.current_span(),
             template,
             inputs,
             outputs,
@@ -587,7 +629,8 @@ impl Parser {
         } else {
             None
         };
-        Ok(Expr::If(IfExpr { span: self.current_span(),
+        Ok(Expr::If(IfExpr {
+            span: self.current_span(),
             condition,
             then_block,
             else_block,
@@ -600,7 +643,11 @@ impl Parser {
         self.expect(Token::Colon)?;
         self.skip_newlines();
         let cases = self.parse_match_cases()?;
-        Ok(MatchExpr { span: self.current_span(), scrutinee, cases })
+        Ok(MatchExpr {
+            span: self.current_span(),
+            scrutinee,
+            cases,
+        })
     }
 
     pub(super) fn parse_atom(&mut self) -> Result<Expr, ParseError> {
@@ -613,10 +660,7 @@ impl Parser {
             self.advance();
             return self.parse_postfix(Expr::Ident(name));
         }
-        Err(self.error(format!(
-            "expected expression, found {:?}",
-            self.peek()
-        )))
+        Err(self.error(format!("expected expression, found {:?}", self.peek())))
     }
 
     pub(super) fn try_parse_literal(&mut self) -> Result<Option<Literal>, ParseError> {
@@ -716,5 +760,4 @@ impl Parser {
         self.try_parse_literal()?
             .ok_or_else(|| self.error("expected literal".to_string()))
     }
-
 }

@@ -38,9 +38,7 @@ mod tests {
 
     #[test]
     fn function_params() {
-        let m = parse_ok(
-            "package test\n\ndef add(a: i32, b: i32) -> i32:\n    return a + b\n",
-        );
+        let m = parse_ok("package test\n\ndef add(a: i32, b: i32) -> i32:\n    return a + b\n");
         let Item::Function(ref f) = m.items[0] else {
             panic!("expected function");
         };
@@ -122,10 +120,7 @@ mod tests {
         let Stmt::While(ref stmt) = f.body.as_ref().unwrap().stmts[0] else {
             panic!("expected while")
         };
-        assert!(matches!(
-            stmt.condition,
-            Expr::Literal(Literal::Bool(true))
-        ));
+        assert!(matches!(stmt.condition, Expr::Literal(Literal::Bool(true))));
     }
 
     #[test]
@@ -150,10 +145,7 @@ mod tests {
         let Item::Function(ref f) = m.items[0] else {
             panic!("expected function")
         };
-        assert!(matches!(
-            f.body.as_ref().unwrap().stmts[0],
-            Stmt::Return(_)
-        ));
+        assert!(matches!(f.body.as_ref().unwrap().stmts[0], Stmt::Return(_)));
     }
 
     #[test]
@@ -300,8 +292,16 @@ def main() -> int32:
             panic!("expected function");
         };
         let body = f.body.as_ref().expect("function body");
-        assert_eq!(body.stmts.len(), 2, "expected two statements, got {}", body.stmts.len());
-        assert!(matches!(body.stmts[0], Stmt::Var(_)), "first stmt should be a var");
+        assert_eq!(
+            body.stmts.len(),
+            2,
+            "expected two statements, got {}",
+            body.stmts.len()
+        );
+        assert!(
+            matches!(body.stmts[0], Stmt::Var(_)),
+            "first stmt should be a var"
+        );
         let Stmt::Assign(ref a) = body.stmts[1] else {
             panic!("expected an assignment, got {:?}", body.stmts[1]);
         };

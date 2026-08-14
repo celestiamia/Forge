@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use std::collections::HashMap;
 
 /// A tiny two-pass assembler for the subset of 16-bit x86 real-mode

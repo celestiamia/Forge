@@ -298,7 +298,10 @@ pub enum Expr {
     Deref(DerefExpr),
     Ref(RefExpr),
     RefMut(RefExpr),
-    StructLiteral { name: String, fields: Vec<(String, Expr)> },
+    StructLiteral {
+        name: String,
+        fields: Vec<(String, Expr)>,
+    },
     Tuple(Vec<Expr>),
     Array(Vec<Expr>),
     Range(RangeExpr),

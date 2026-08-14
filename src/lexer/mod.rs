@@ -4,7 +4,7 @@
 
 pub mod lexer;
 
-pub use lexer::{tokenize, tokenize_with_pos, Lexer, TokenPos};
+pub use lexer::{Lexer, TokenPos, tokenize, tokenize_with_pos};
 
 /// A lexical token produced by the Forge lexer.
 #[derive(Debug, Clone, PartialEq, Eq)]

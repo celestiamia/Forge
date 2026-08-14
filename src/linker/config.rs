@@ -156,10 +156,22 @@ pub fn builtin_x86_64_linux() -> LinkerConfig {
             length: 512 * 1024 * 1024,
         }],
         sections: vec![
-            SectionMapping { section: ".text".to_string(), region: "ram".to_string() },
-            SectionMapping { section: ".rodata".to_string(), region: "ram".to_string() },
-            SectionMapping { section: ".data".to_string(), region: "ram".to_string() },
-            SectionMapping { section: ".bss".to_string(), region: "ram".to_string() },
+            SectionMapping {
+                section: ".text".to_string(),
+                region: "ram".to_string(),
+            },
+            SectionMapping {
+                section: ".rodata".to_string(),
+                region: "ram".to_string(),
+            },
+            SectionMapping {
+                section: ".data".to_string(),
+                region: "ram".to_string(),
+            },
+            SectionMapping {
+                section: ".bss".to_string(),
+                region: "ram".to_string(),
+            },
         ],
         runtime: RuntimeConfig {
             syscalls: true,
@@ -190,10 +202,22 @@ pub fn builtin_x86_32_linux() -> LinkerConfig {
             length: 512 * 1024 * 1024,
         }],
         sections: vec![
-            SectionMapping { section: ".text".to_string(), region: "ram".to_string() },
-            SectionMapping { section: ".rodata".to_string(), region: "ram".to_string() },
-            SectionMapping { section: ".data".to_string(), region: "ram".to_string() },
-            SectionMapping { section: ".bss".to_string(), region: "ram".to_string() },
+            SectionMapping {
+                section: ".text".to_string(),
+                region: "ram".to_string(),
+            },
+            SectionMapping {
+                section: ".rodata".to_string(),
+                region: "ram".to_string(),
+            },
+            SectionMapping {
+                section: ".data".to_string(),
+                region: "ram".to_string(),
+            },
+            SectionMapping {
+                section: ".bss".to_string(),
+                region: "ram".to_string(),
+            },
         ],
         runtime: RuntimeConfig {
             syscalls: true,
@@ -224,10 +248,22 @@ pub fn builtin_x86_16_boot() -> LinkerConfig {
             length: 64 * 1024,
         }],
         sections: vec![
-            SectionMapping { section: ".text".to_string(), region: "ram".to_string() },
-            SectionMapping { section: ".rodata".to_string(), region: "ram".to_string() },
-            SectionMapping { section: ".data".to_string(), region: "ram".to_string() },
-            SectionMapping { section: ".bss".to_string(), region: "ram".to_string() },
+            SectionMapping {
+                section: ".text".to_string(),
+                region: "ram".to_string(),
+            },
+            SectionMapping {
+                section: ".rodata".to_string(),
+                region: "ram".to_string(),
+            },
+            SectionMapping {
+                section: ".data".to_string(),
+                region: "ram".to_string(),
+            },
+            SectionMapping {
+                section: ".bss".to_string(),
+                region: "ram".to_string(),
+            },
         ],
         runtime: RuntimeConfig {
             syscalls: false,

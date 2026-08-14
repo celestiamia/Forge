@@ -54,7 +54,8 @@ impl<'p> CodeGen<'p> {
     /// stack: sa_handler = SIG_IGN (1), sa_flags = 0, sa_mask = 0.
     fn emit_signal_ignore_sigpipe(&mut self) -> Result<()> {
         let lab = self.asm.new_label();
-        self.func_labels.insert("_dev_ignore_sigpipe".to_string(), lab);
+        self.func_labels
+            .insert("_dev_ignore_sigpipe".to_string(), lab);
         self.bind_label(lab);
         // Build struct sigaction on the stack (32 bytes, zeroed).
         self.asm.push(Reg::Rbp);
@@ -62,10 +63,8 @@ impl<'p> CodeGen<'p> {
         self.asm.sub(Reg::Rsp, 32i32);
         // Zero the whole struct with two qword stores (16 bytes each).
         self.asm.xor(Reg::Rax, Reg::Rax);
-        self.asm
-            .mov(Mem::base_disp(Reg::Rbp, -32), Reg::Rax)?; // [rbp-32 .. rbp-24]
-        self.asm
-            .mov(Mem::base_disp(Reg::Rbp, -16), Reg::Rax)?; // [rbp-16 .. rbp-8]
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -32), Reg::Rax)?; // [rbp-32 .. rbp-24]
+        self.asm.mov(Mem::base_disp(Reg::Rbp, -16), Reg::Rax)?; // [rbp-16 .. rbp-8]
         // sa_handler = SIG_IGN (1)
         self.asm.mov(Mem::base_disp(Reg::Rbp, -32), 1i32)?;
 

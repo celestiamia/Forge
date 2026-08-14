@@ -33,8 +33,15 @@ impl Type {
     pub fn is_integer(&self) -> bool {
         matches!(
             self,
-            Type::I8 | Type::I16 | Type::I32 | Type::I64 |
-            Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::Char
+            Type::I8
+                | Type::I16
+                | Type::I32
+                | Type::I64
+                | Type::U8
+                | Type::U16
+                | Type::U32
+                | Type::U64
+                | Type::Char
         )
     }
 
@@ -103,7 +110,10 @@ impl Program {
 
     /// Whether the allocator (`_dev_alloc`/`_dev_free`) should be emitted.
     pub fn needs_alloc(&self) -> bool {
-        self.config.as_ref().map(|c| c.runtime.alloc).unwrap_or(false)
+        self.config
+            .as_ref()
+            .map(|c| c.runtime.alloc)
+            .unwrap_or(false)
     }
 }
 
@@ -147,19 +157,42 @@ pub struct Func {
 
 #[derive(Clone, Debug)]
 pub enum Stmt {
-    Let { name: String, ty: Type, init: Option<Expr> },
-    Assign { lhs: LValue, rhs: Expr },
+    Let {
+        name: String,
+        ty: Type,
+        init: Option<Expr>,
+    },
+    Assign {
+        lhs: LValue,
+        rhs: Expr,
+    },
     Return(Option<Expr>),
     Expr(Expr),
-    If { cond: Expr, then: Vec<Stmt>, else_: Option<Vec<Stmt>> },
-    While { cond: Expr, body: Vec<Stmt> },
-    For { init: Option<Box<Stmt>>, cond: Expr, step: Option<Expr>, body: Vec<Stmt> },
+    If {
+        cond: Expr,
+        then: Vec<Stmt>,
+        else_: Option<Vec<Stmt>>,
+    },
+    While {
+        cond: Expr,
+        body: Vec<Stmt>,
+    },
+    For {
+        init: Option<Box<Stmt>>,
+        cond: Expr,
+        step: Option<Expr>,
+        body: Vec<Stmt>,
+    },
     Unsafe(Vec<Stmt>),
     Break,
     Continue,
     /// Allocate `count` elements of `elem_ty` on the stack and bind `name` to
     /// the address (as `ptr[elem_ty]`).
-    StackAlloc { name: String, elem_ty: Type, count: usize },
+    StackAlloc {
+        name: String,
+        elem_ty: Type,
+        count: usize,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -185,21 +218,43 @@ impl Expr {
 pub enum ExprKind {
     Lit(Literal),
     Var(String),
-    Bin { op: BinOp, left: Box<Expr>, right: Box<Expr> },
-    Call { func: String, args: Vec<Expr> },
-    Cast { expr: Box<Expr>, ty: Type },
-    Gep { base: Box<Expr>, field: usize },
+    Bin {
+        op: BinOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    Call {
+        func: String,
+        args: Vec<Expr>,
+    },
+    Cast {
+        expr: Box<Expr>,
+        ty: Type,
+    },
+    Gep {
+        base: Box<Expr>,
+        field: usize,
+    },
     Load(Box<Expr>),
     AddrOf(Box<Expr>),
     /// A statement block used to represent expression-level match and other
     /// multi-statement expressions.  The statements are executed for side
     /// effects and the trailing expression is the value of the block.
     Block(Vec<Stmt>, Box<Expr>),
-    Asm { template: String, constraints: String, inputs: Vec<(Expr, String)>, output: Option<(Type, String)>, clobbers: Vec<String> },
+    Asm {
+        template: String,
+        constraints: String,
+        inputs: Vec<(Expr, String)>,
+        output: Option<(Type, String)>,
+        clobbers: Vec<String>,
+    },
     /// `sizeof(T)` — compile-time constant size of a type in bytes.
     SizeOf(Type),
     /// `offsetof(T, field)` — compile-time constant byte offset of a struct field.
-    OffsetOf { ty: Type, field: usize },
+    OffsetOf {
+        ty: Type,
+        field: usize,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -241,10 +296,16 @@ pub enum BinOp {
 
 impl BinOp {
     pub fn is_arithmetic(&self) -> bool {
-        matches!(self, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::FloorDiv)
+        matches!(
+            self,
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::FloorDiv
+        )
     }
     pub fn is_comparison(&self) -> bool {
-        matches!(self, BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge)
+        matches!(
+            self,
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge
+        )
     }
     pub fn is_logical(&self) -> bool {
         matches!(self, BinOp::And | BinOp::Or)

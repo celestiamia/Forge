@@ -2,9 +2,7 @@
 //!
 //! Converts a token stream from [`super::lexer`] into a [`super::config::LinkerConfig`].
 
-use super::config::{
-    LinkerConfig, MemoryRegion, OutputFormat, RuntimeConfig, SectionMapping,
-};
+use super::config::{LinkerConfig, MemoryRegion, OutputFormat, RuntimeConfig, SectionMapping};
 use super::lexer::{Lexer, Tk, Token};
 
 pub struct Parser {
@@ -50,9 +48,15 @@ impl Parser {
                 "FORMAT" => format = Some(self.parse_format()?),
                 "HOSTED" => hosted = Some(self.parse_bool()?),
                 "ENTRY" => entry = Some(self.expect_ident()?),
-                "STACK" => { self.skip_stack(); }
+                "STACK" => {
+                    self.skip_stack();
+                }
                 "HEAP" => heap_size = self.parse_heap()?,
-                _ => Err(format!("unknown block/key `{}` at line {}", ident, self.cur_line()))?,
+                _ => Err(format!(
+                    "unknown block/key `{}` at line {}",
+                    ident,
+                    self.cur_line()
+                ))?,
             }
         }
 
@@ -60,7 +64,11 @@ impl Parser {
         let format = format.ok_or_else(|| "missing FORMAT".to_string())?;
         let hosted = hosted.unwrap_or(true);
         let entry = entry.unwrap_or_else(|| {
-            if hosted { "_forge_main".to_string() } else { "_start".to_string() }
+            if hosted {
+                "_forge_main".to_string()
+            } else {
+                "_start".to_string()
+            }
         });
         let base_address = base_address.unwrap_or(match &format {
             OutputFormat::Elf => 0x400000,
@@ -79,7 +87,9 @@ impl Parser {
             sections,
             runtime,
         };
-        config.validate().map_err(|e| format!("validation: {}", e))?;
+        config
+            .validate()
+            .map_err(|e| format!("validation: {}", e))?;
         Ok(config)
     }
 
@@ -175,7 +185,10 @@ impl Parser {
             "elf32" => Ok(OutputFormat::Elf32),
             "flat" => Ok(OutputFormat::Flat),
             "raw" => Ok(OutputFormat::Raw),
-            _ => Err(format!("unknown format `{}` (expected elf, elf32, flat, raw)", s)),
+            _ => Err(format!(
+                "unknown format `{}` (expected elf, elf32, flat, raw)",
+                s
+            )),
         }
     }
 
@@ -219,17 +232,31 @@ impl Parser {
 
     fn expect_ident(&mut self) -> Result<String, String> {
         match self.cur() {
-            Tk::Ident(s) => { self.advance(); Ok(s.clone()) }
+            Tk::Ident(s) => {
+                self.advance();
+                Ok(s.clone())
+            }
             Tk::Eof => Err(format!("unexpected EOF at line {}", self.cur_line())),
-            other => Err(format!("expected identifier, got {:?} at line {}", other, self.cur_line())),
+            other => Err(format!(
+                "expected identifier, got {:?} at line {}",
+                other,
+                self.cur_line()
+            )),
         }
     }
 
     fn expect_number(&mut self) -> Result<u64, String> {
         match self.cur() {
-            Tk::Number(n) => { self.advance(); Ok(n) }
+            Tk::Number(n) => {
+                self.advance();
+                Ok(n)
+            }
             Tk::Eof => Err(format!("unexpected EOF at line {}", self.cur_line())),
-            other => Err(format!("expected number, got {:?} at line {}", other, self.cur_line())),
+            other => Err(format!(
+                "expected number, got {:?} at line {}",
+                other,
+                self.cur_line()
+            )),
         }
     }
 
@@ -238,7 +265,12 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            Err(format!("expected {:?}, got {:?} at line {}", tk, self.peek(), self.cur_line()))
+            Err(format!(
+                "expected {:?}, got {:?} at line {}",
+                tk,
+                self.peek(),
+                self.cur_line()
+            ))
         }
     }
 
@@ -247,7 +279,10 @@ impl Parser {
     }
 
     fn cur(&self) -> Tk {
-        self.toks.get(self.pos).map(|t| t.kind.clone()).unwrap_or(Tk::Eof)
+        self.toks
+            .get(self.pos)
+            .map(|t| t.kind.clone())
+            .unwrap_or(Tk::Eof)
     }
 
     fn cur_line(&self) -> usize {

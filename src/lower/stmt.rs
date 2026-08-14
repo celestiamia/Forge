@@ -12,23 +12,21 @@ impl LowerCtx<'_> {
     pub(super) fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Result<Vec<ir::Stmt>> {
         match stmt {
             ast::Stmt::Let(l) => {
-                let ty = l
-                    .ty
-                    .as_ref()
-                    .map(|t| self.lower_type(t))
-                    .transpose()?
-                    .unwrap_or(ir::Type::I64);
+                let ty =
+                    l.ty.as_ref()
+                        .map(|t| self.lower_type(t))
+                        .transpose()?
+                        .unwrap_or(ir::Type::I64);
                 let init = l.value.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 self.vars.insert(l.name.clone(), ty.clone());
                 self.lower_binding(&l.name, l.ty.as_ref(), ty, init)
             }
             ast::Stmt::Var(v) => {
-                let ty = v
-                    .ty
-                    .as_ref()
-                    .map(|t| self.lower_type(t))
-                    .transpose()?
-                    .unwrap_or(ir::Type::I64);
+                let ty =
+                    v.ty.as_ref()
+                        .map(|t| self.lower_type(t))
+                        .transpose()?
+                        .unwrap_or(ir::Type::I64);
                 let init = v.value.as_ref().map(|e| self.lower_expr(e)).transpose()?;
                 self.vars.insert(v.name.clone(), ty.clone());
                 self.lower_binding(&v.name, v.ty.as_ref(), ty, init)
@@ -59,10 +57,18 @@ impl LowerCtx<'_> {
                         nested = vec![ir::Stmt::If {
                             cond: self.lower_expr(cond)?,
                             then,
-                            else_: if nested.is_empty() { None } else { Some(nested) },
+                            else_: if nested.is_empty() {
+                                None
+                            } else {
+                                Some(nested)
+                            },
                         }];
                     }
-                    else_ = if nested.is_empty() { None } else { Some(nested) };
+                    else_ = if nested.is_empty() {
+                        None
+                    } else {
+                        Some(nested)
+                    };
                 }
 
                 Ok(vec![ir::Stmt::If { cond, then, else_ }])
@@ -89,18 +95,31 @@ impl LowerCtx<'_> {
                     rhs: ir::Expr::new(
                         ir::ExprKind::Bin {
                             op: ir::BinOp::Add,
-                            left: Box::new(ir::Expr::new(ir::ExprKind::Var(loop_var.clone()), iter_ty.clone())),
-                            right: Box::new(ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(1)), iter_ty.clone())),
+                            left: Box::new(ir::Expr::new(
+                                ir::ExprKind::Var(loop_var.clone()),
+                                iter_ty.clone(),
+                            )),
+                            right: Box::new(ir::Expr::new(
+                                ir::ExprKind::Lit(ir::Literal::Int(1)),
+                                iter_ty.clone(),
+                            )),
                         },
                         iter_ty.clone(),
                     ),
                 });
 
-                let cond_op = if inclusive { ir::BinOp::Le } else { ir::BinOp::Lt };
+                let cond_op = if inclusive {
+                    ir::BinOp::Le
+                } else {
+                    ir::BinOp::Lt
+                };
                 let cond = ir::Expr::new(
                     ir::ExprKind::Bin {
                         op: cond_op,
-                        left: Box::new(ir::Expr::new(ir::ExprKind::Var(loop_var.clone()), iter_ty.clone())),
+                        left: Box::new(ir::Expr::new(
+                            ir::ExprKind::Var(loop_var.clone()),
+                            iter_ty.clone(),
+                        )),
                         right: Box::new(end),
                     },
                     ir::Type::Bool,
@@ -120,7 +139,8 @@ impl LowerCtx<'_> {
                 Ok(vec![ir::Stmt::Unsafe(body)])
             }
             ast::Stmt::Loop(b) => {
-                let cond = ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Bool(true)), ir::Type::Bool);
+                let cond =
+                    ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Bool(true)), ir::Type::Bool);
                 let body = self.lower_block(b)?;
                 Ok(vec![ir::Stmt::While { cond, body }])
             }
@@ -144,7 +164,11 @@ impl LowerCtx<'_> {
     ) -> Result<Vec<ir::Stmt>> {
         // If the initializer is a struct literal, inline its block and bind
         // the resulting pointer to the variable.
-        if let Some(ir::Expr { kind: ir::ExprKind::Block(stmts, result), .. }) = init {
+        if let Some(ir::Expr {
+            kind: ir::ExprKind::Block(stmts, result),
+            ..
+        }) = init
+        {
             let mut stmts = stmts.clone();
             let var_ty = result.ty.clone();
             stmts.push(ir::Stmt::Let {
@@ -178,7 +202,10 @@ impl LowerCtx<'_> {
                 stmts.push(ir::Stmt::Let {
                     name: idx.clone(),
                     ty: ir::Type::I64,
-                    init: Some(ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(0)), ir::Type::I64)),
+                    init: Some(ir::Expr::new(
+                        ir::ExprKind::Lit(ir::Literal::Int(0)),
+                        ir::Type::I64,
+                    )),
                 });
                 let var_tmp = ir::Expr::new(ir::ExprKind::Var(tmp.clone()), ty.clone());
                 let var_idx = ir::Expr::new(ir::ExprKind::Var(idx.clone()), ir::Type::I64);
@@ -203,7 +230,10 @@ impl LowerCtx<'_> {
                     ir::ExprKind::Bin {
                         op: ir::BinOp::Lt,
                         left: Box::new(var_idx.clone()),
-                        right: Box::new(ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(count as i64)), ir::Type::I64)),
+                        right: Box::new(ir::Expr::new(
+                            ir::ExprKind::Lit(ir::Literal::Int(count as i64)),
+                            ir::Type::I64,
+                        )),
                     },
                     ir::Type::Bool,
                 );
@@ -221,10 +251,7 @@ impl LowerCtx<'_> {
                     body: vec![
                         ir::Stmt::Assign {
                             lhs: ir::LValue::Deref(dst),
-                            rhs: ir::Expr::new(
-                                ir::ExprKind::Load(Box::new(src)),
-                                elem_ty.clone(),
-                            ),
+                            rhs: ir::Expr::new(ir::ExprKind::Load(Box::new(src)), elem_ty.clone()),
                         },
                         ir::Stmt::Assign {
                             lhs: ir::LValue::Var(idx),
@@ -250,7 +277,9 @@ impl LowerCtx<'_> {
                     .as_ref()
                     .map(|e| self.lower_expr(e))
                     .transpose()?
-                    .unwrap_or_else(|| ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(0)), ir::Type::I64));
+                    .unwrap_or_else(|| {
+                        ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(0)), ir::Type::I64)
+                    });
                 let end = r
                     .end
                     .as_ref()
@@ -322,12 +351,18 @@ impl LowerCtx<'_> {
         let mut body = vec![init];
         body.append(&mut chain);
         Ok(ir::Expr::new(
-            ir::ExprKind::Block(body, Box::new(ir::Expr::new(ir::ExprKind::Var(tmp), result_ty.clone()))),
+            ir::ExprKind::Block(
+                body,
+                Box::new(ir::Expr::new(ir::ExprKind::Var(tmp), result_ty.clone())),
+            ),
             result_ty,
         ))
     }
 
-    pub(super) fn lower_match_case_value(&mut self, block: &ast::Block) -> Result<(Vec<ir::Stmt>, ir::Expr)> {
+    pub(super) fn lower_match_case_value(
+        &mut self,
+        block: &ast::Block,
+    ) -> Result<(Vec<ir::Stmt>, ir::Expr)> {
         if block.stmts.is_empty() {
             bail!("match case body is empty");
         }
@@ -346,7 +381,11 @@ impl LowerCtx<'_> {
     pub(super) fn infer_match_result_ty(&mut self, m: &ast::MatchExpr) -> Result<ir::Type> {
         let mut ty: Option<ir::Type> = None;
         for case in &m.cases {
-            let last = case.body.stmts.last().ok_or_else(|| anyhow::anyhow!("match case body is empty"))?;
+            let last = case
+                .body
+                .stmts
+                .last()
+                .ok_or_else(|| anyhow::anyhow!("match case body is empty"))?;
             let candidate = match last {
                 ast::Stmt::Expr(e) => self.lower_expr(e)?.ty,
                 _ => bail!("last statement of a match case body must be an expression"),

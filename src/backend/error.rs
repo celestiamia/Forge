@@ -4,7 +4,9 @@
 //! through the compiler pipeline while providing structured, actionable diagnostics.
 
 use crate::backend::ir::{BinOp, Type};
-use crate::backend::x64::{JmpTarget as JmpTarget64, Label as Label64, Mem as Mem64, Operand as Operand64};
+use crate::backend::x64::{
+    JmpTarget as JmpTarget64, Label as Label64, Mem as Mem64, Operand as Operand64,
+};
 use crate::backend::x86::{JmpTarget as JmpTarget32, Mem as Mem32, Operand as Operand32};
 use thiserror::Error;
 

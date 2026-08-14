@@ -14,7 +14,11 @@ mod sema;
 mod ty;
 
 #[derive(Parser, Debug)]
-#[command(name = "forgec", version = "0.1.0", about = "Forge compiler (.dev sources)")]
+#[command(
+    name = "forgec",
+    version = "0.1.0",
+    about = "Forge compiler (.dev sources)"
+)]
 struct Args {
     #[arg(short, long, value_name = "TRIPLE")]
     target: Option<String>,

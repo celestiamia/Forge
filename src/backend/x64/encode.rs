@@ -3,9 +3,9 @@
 
 #![allow(dead_code)]
 
-use crate::backend::error::{fmt_operand64, EncodeError};
+use crate::backend::error::{EncodeError, fmt_operand64};
 use crate::backend::x64::{AluOp, Cond, Inst, JmpTarget, Mem, Operand, Reg, Scale, ShiftOp};
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 pub fn emit_u8(buf: &mut Vec<u8>, v: u8) {
     buf.push(v);
@@ -71,7 +71,13 @@ pub fn sib(scale: u8, index: u8, base: u8) -> u8 {
     ((scale & 3) << 6) | ((index & 7) << 3) | (base & 7)
 }
 
-fn encode_modrm_sib_disp(rex: &mut Rex, reg_op: u8, rm: Operand, out: &mut Vec<u8>, is_byte: bool) -> Result<()> {
+fn encode_modrm_sib_disp(
+    rex: &mut Rex,
+    reg_op: u8,
+    rm: Operand,
+    out: &mut Vec<u8>,
+    is_byte: bool,
+) -> Result<()> {
     match rm {
         Operand::Reg(r) => {
             if r.is_high() {

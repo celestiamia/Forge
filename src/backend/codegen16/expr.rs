@@ -80,7 +80,13 @@ impl<'p> CodeGen16<'p> {
         Ok(())
     }
 
-    pub(super) fn eval_bin(&mut self, op: BinOp, left: &Expr, right: &Expr, _result_ty: &Type) -> Result<()> {
+    pub(super) fn eval_bin(
+        &mut self,
+        op: BinOp,
+        left: &Expr,
+        right: &Expr,
+        _result_ty: &Type,
+    ) -> Result<()> {
         if op.is_logical() {
             return self.eval_logical(op, left, right);
         }
@@ -249,10 +255,13 @@ impl<'p> CodeGen16<'p> {
                     .iter()
                     .find(|s| s.name == name)
                     .ok_or_else(|| anyhow!("unknown struct: {}", name))?;
-                let ty = &def.fields.get(*field).ok_or_else(|| anyhow!("field index out of range"))?.1;
+                let ty = &def
+                    .fields
+                    .get(*field)
+                    .ok_or_else(|| anyhow!("field index out of range"))?
+                    .1;
                 type_info(ty)
             }
         }
     }
-
 }

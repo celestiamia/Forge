@@ -23,8 +23,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 pub use config::{
-    builtin_target, LinkerConfig, MemoryRegion, OutputFormat, RuntimeConfig,
-    SectionMapping,
+    LinkerConfig, MemoryRegion, OutputFormat, RuntimeConfig, SectionMapping, builtin_target,
 };
 
 /// Load and parse a linker script from a file.
@@ -40,10 +39,7 @@ pub fn load_linker_script(path: &Path) -> Result<LinkerConfig> {
 /// If `linker_path` is given, it is parsed as a `.fld` file.  Otherwise the
 /// `target` name is matched against the built-in presets.  If neither yields a
 /// config, an error is returned listing the supported built-in targets.
-pub fn resolve_config(
-    target: Option<&str>,
-    linker_path: Option<&Path>,
-) -> Result<LinkerConfig> {
+pub fn resolve_config(target: Option<&str>, linker_path: Option<&Path>) -> Result<LinkerConfig> {
     if let Some(path) = linker_path {
         return load_linker_script(path);
     }

@@ -50,7 +50,10 @@ pub fn compile(options: CompileOptions) -> Result<PathBuf> {
         anyhow::bail!(msg.trim_end().to_string());
     }
 
-    let target_name = options.target.as_deref().unwrap_or("x86_64-unknown-linux-gnu");
+    let target_name = options
+        .target
+        .as_deref()
+        .unwrap_or("x86_64-unknown-linux-gnu");
     let config = resolve_config(options.target.as_deref(), options.linker.as_deref())?;
     let hosted = config.hosted && !options.freestanding;
 
@@ -64,7 +67,8 @@ pub fn compile(options: CompileOptions) -> Result<PathBuf> {
         "x86_32" => codegen32::compile_program(&program)?,
         _ => compile_program(&program)?,
     };
-    writer.write(&options.output)
+    writer
+        .write(&options.output)
         .with_context(|| format!("writing {}", options.output.display()))?;
 
     // Make the output executable on Unix.
@@ -101,6 +105,8 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
 
     fn write_temp_dev(dir: &tempfile::TempDir, name: &str, source: &str) -> PathBuf {
         let path = dir.path().join(name).with_extension("dev");
@@ -122,10 +128,14 @@ pub def main() -> int32:
         let out = compile(CompileOptions {
             source,
             output,
-            target: Some("x86_32-unknown-linux-gnu".to_string()),
+            target: Some("x86_64-unknown-linux-gnu".to_string()),
             freestanding: false,
             linker: None,
-        }).unwrap();
+        })
+        .unwrap();
+        // Small delay to ensure file is fully written and permissions applied
+        // before attempting execution (prevents "Text file busy" in parallel runs)
+        thread::sleep(Duration::from_millis(10));
         let status = Command::new(&out).status().unwrap();
         assert!(status.success(), "minimal x86_32 program should exit 0");
     }
@@ -147,7 +157,8 @@ pub def main() -> int32:
             target: Some("x86_64-unknown-linux-gnu".to_string()),
             freestanding: false,
             linker: None,
-        }).unwrap();
+        })
+        .unwrap();
         let status = Command::new(&out).status().unwrap();
         assert!(status.success(), "minimal program should exit 0");
     }
@@ -212,7 +223,8 @@ pub def main() -> int32:
             target: Some("x86_64-unknown-linux-gnu".to_string()),
             freestanding: false,
             linker: None,
-        }).unwrap();
+        })
+        .unwrap();
         let status = Command::new(&out).status().unwrap();
         assert_eq!(
             status.code(),

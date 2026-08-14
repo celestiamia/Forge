@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::lexer::{tokenize_with_pos, LexError, Token, TokenPos};
+use crate::lexer::{LexError, Token, TokenPos, tokenize_with_pos};
 
 /// A parse error reported by the Forge parser, including 1-based line/column
 /// information from the lexer.
@@ -105,11 +105,7 @@ impl Parser {
         if self.peek() == &kind {
             Ok(self.advance())
         } else {
-            Err(self.error(format!(
-                "expected {:?}, found {:?}",
-                kind,
-                self.peek()
-            )))
+            Err(self.error(format!("expected {:?}, found {:?}", kind, self.peek())))
         }
     }
 
@@ -191,7 +187,6 @@ impl Parser {
             items,
         })
     }
-
 }
 
 pub(super) fn parse_int(s: &str) -> Literal {

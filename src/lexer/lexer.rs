@@ -31,7 +31,11 @@ pub fn tokenize_with_pos(src: &str) -> Result<Vec<TokenPos>, LexError> {
         let (line, col) = lexer.position();
         let tok = lexer.next_token()?;
         let is_eof = tok == Token::Eof;
-        tokens.push(TokenPos { token: tok, line, col });
+        tokens.push(TokenPos {
+            token: tok,
+            line,
+            col,
+        });
         if is_eof {
             break;
         }
@@ -151,9 +155,9 @@ impl<'src> Lexer<'src> {
                     }
                     return self.lex_operator_or_delim();
                 }
-                '+' | '-' | '*' | '/' | '%' | '<' | '>' | '&' | '|' | '^' | '~' | '!'
-                | '=' | '@' | ',' | ':' | ';' | '(' | ')' | '[' | ']' | '{' | '}' => {
-                    return self.lex_operator_or_delim()
+                '+' | '-' | '*' | '/' | '%' | '<' | '>' | '&' | '|' | '^' | '~' | '!' | '='
+                | '@' | ',' | ':' | ';' | '(' | ')' | '[' | ']' | '{' | '}' => {
+                    return self.lex_operator_or_delim();
                 }
                 _ => return Err(self.error(format!("unexpected character: {}", c))),
             }

@@ -22,7 +22,10 @@ mod tests {
             generics: Vec::new(),
             params: params
                 .into_iter()
-                .map(|(n, t)| Param { name: n.to_string(), ty: t })
+                .map(|(n, t)| Param {
+                    name: n.to_string(),
+                    ty: t,
+                })
                 .collect(),
             ret,
             body: Some(body),
@@ -30,7 +33,9 @@ mod tests {
     }
 
     fn body(expr: Expr) -> Block {
-        Block { stmts: vec![Stmt::Expr(expr)] }
+        Block {
+            stmts: vec![Stmt::Expr(expr)],
+        }
     }
 
     fn ret(expr: Expr) -> Stmt {
@@ -66,11 +71,20 @@ mod tests {
     }
 
     fn bin(op: BinOp, l: Expr, r: Expr) -> Expr {
-        Expr::Binary(BinaryExpr { span: Span::unknown(), op, left: Box::new(l), right: Box::new(r) })
+        Expr::Binary(BinaryExpr {
+            span: Span::unknown(),
+            op,
+            left: Box::new(l),
+            right: Box::new(r),
+        })
     }
 
     fn call(callee: Expr, args: Vec<Expr>) -> Expr {
-        Expr::Call(CallExpr { span: Span::unknown(), callee: Box::new(callee), args })
+        Expr::Call(CallExpr {
+            span: Span::unknown(),
+            callee: Box::new(callee),
+            args,
+        })
     }
 
     fn ty_name(s: &str) -> TypeExpr {
@@ -90,7 +104,9 @@ mod tests {
             "main",
             Vec::new(),
             Some(ty_name("i32")),
-            Block { stmts: vec![ret(int(0))] },
+            Block {
+                stmts: vec![ret(int(0))],
+            },
         )];
         let m = typed_mod(items);
         assert!(m.errors.is_empty(), "{:?}", m.errors);
@@ -118,7 +134,10 @@ mod tests {
         )];
         let m = typed_mod(items);
         let msgs: Vec<String> = m.errors.iter().map(|e| e.message.clone()).collect();
-        assert!(msgs.iter().any(|s| s.contains("cannot assign to immutable")));
+        assert!(
+            msgs.iter()
+                .any(|s| s.contains("cannot assign to immutable"))
+        );
     }
 
     #[test]
@@ -136,7 +155,11 @@ mod tests {
             },
         )];
         let m = typed_mod(items);
-        assert!(m.errors.iter().any(|e| e.message.contains("expected `bool`")));
+        assert!(
+            m.errors
+                .iter()
+                .any(|e| e.message.contains("expected `bool`"))
+        );
     }
 
     #[test]
@@ -152,7 +175,9 @@ mod tests {
                 ty: TypeExpr::Name("T".to_string()),
             }],
             ret: Some(TypeExpr::Name("T".to_string())),
-            body: Some(Block { stmts: vec![ret(ident("x"))] }),
+            body: Some(Block {
+                stmts: vec![ret(ident("x"))],
+            }),
         };
         let call_site = call(ident("identity"), vec![int(42)]);
         let items = vec![
@@ -165,7 +190,11 @@ mod tests {
         }
         assert!(m.errors.is_empty(), "{:?}", m.errors);
         assert!(!m.mono_instances.is_empty());
-        assert!(m.mono_instances.iter().any(|mi| mi.function_name == "identity"));
+        assert!(
+            m.mono_instances
+                .iter()
+                .any(|mi| mi.function_name == "identity")
+        );
     }
 
     #[test]
@@ -183,7 +212,10 @@ mod tests {
         )];
         let m = typed_mod(items);
         let msgs: Vec<String> = m.errors.iter().map(|e| e.message.clone()).collect();
-        assert!(msgs.iter().any(|s| s.contains("raw pointer dereference requires `unsafe`")));
+        assert!(
+            msgs.iter()
+                .any(|s| s.contains("raw pointer dereference requires `unsafe`"))
+        );
     }
 
     #[test]
@@ -206,7 +238,10 @@ mod tests {
         let main = func("main", vec![("u", ty_name("U"))], None, body(access));
         let m = typed_mod(vec![union_item, main]);
         let msgs: Vec<String> = m.errors.iter().map(|e| e.message.clone()).collect();
-        assert!(msgs.iter().any(|s| s.contains("union field access requires `unsafe`")));
+        assert!(
+            msgs.iter()
+                .any(|s| s.contains("union field access requires `unsafe`"))
+        );
     }
 
     #[test]
@@ -241,7 +276,11 @@ mod tests {
             },
         )];
         let m = typed_mod(items);
-        assert!(m.errors.iter().any(|e| e.message.contains("if condition must be bool")));
+        assert!(
+            m.errors
+                .iter()
+                .any(|e| e.message.contains("if condition must be bool"))
+        );
     }
 
     #[test]
@@ -280,7 +319,11 @@ mod tests {
             },
         )];
         let m = typed_mod(items);
-        assert!(m.errors.iter().any(|e| e.message.contains("mutable reference")));
+        assert!(
+            m.errors
+                .iter()
+                .any(|e| e.message.contains("mutable reference"))
+        );
     }
 
     #[test]
@@ -291,9 +334,18 @@ mod tests {
             name: "Color".to_string(),
             generics: Vec::new(),
             variants: vec![
-                Variant { name: "Red".to_string(), payload: None },
-                Variant { name: "Green".to_string(), payload: None },
-                Variant { name: "Blue".to_string(), payload: None },
+                Variant {
+                    name: "Red".to_string(),
+                    payload: None,
+                },
+                Variant {
+                    name: "Green".to_string(),
+                    payload: None,
+                },
+                Variant {
+                    name: "Blue".to_string(),
+                    payload: None,
+                },
             ],
         });
         let body = Block {
@@ -303,18 +355,26 @@ mod tests {
                 cases: vec![
                     MatchCase {
                         pattern: Pattern::Ident("Red".to_string()),
-                        body: Block { stmts: vec![Stmt::Expr(int(0))] },
+                        body: Block {
+                            stmts: vec![Stmt::Expr(int(0))],
+                        },
                     },
                     MatchCase {
                         pattern: Pattern::Ident("Green".to_string()),
-                        body: Block { stmts: vec![Stmt::Expr(int(1))] },
+                        body: Block {
+                            stmts: vec![Stmt::Expr(int(1))],
+                        },
                     },
                 ],
             }))],
         };
         let main = func("main", vec![("c", ty_name("Color"))], None, body);
         let m = typed_mod(vec![color, main]);
-        assert!(m.errors.iter().any(|e| e.message.contains("non-exhaustive")));
+        assert!(
+            m.errors
+                .iter()
+                .any(|e| e.message.contains("non-exhaustive"))
+        );
     }
 
     #[test]
@@ -328,10 +388,18 @@ mod tests {
             },
         )];
         let m = typed_mod(items);
-        assert!(m.errors.iter().any(|e| e.message.contains("pointer arithmetic requires `unsafe`")));
+        assert!(
+            m.errors
+                .iter()
+                .any(|e| e.message.contains("pointer arithmetic requires `unsafe`"))
+        );
     }
 
     fn format_errors(errors: &[super::super::Error]) -> String {
-        errors.iter().map(|e| e.message.clone()).collect::<Vec<_>>().join(", ")
+        errors
+            .iter()
+            .map(|e| e.message.clone())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }

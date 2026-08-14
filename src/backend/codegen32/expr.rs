@@ -20,7 +20,9 @@ impl<'p> CodeGen<'p> {
                     self.asm.mov(Reg::Eax, 0i32)?;
                     self.string_patches.push((patch_off, lab));
                 }
-                Literal::Float(_) => bail!("floating point is not implemented in the x86_32 backend"),
+                Literal::Float(_) => {
+                    bail!("floating point is not implemented in the x86_32 backend")
+                }
                 Literal::Null => self.asm.mov(Reg::Eax, 0i32)?,
             },
             ExprKind::Var(name) => {
@@ -46,7 +48,14 @@ impl<'p> CodeGen<'p> {
                     .get(name)
                     .ok_or_else(|| anyhow::anyhow!("unknown variable: {}", name))?;
                 match &e.ty {
-                    Type::I8 | Type::I16 | Type::I32 | Type::U8 | Type::U16 | Type::U32 | Type::Bool | Type::Char => {
+                    Type::I8
+                    | Type::I16
+                    | Type::I32
+                    | Type::U8
+                    | Type::U16
+                    | Type::U32
+                    | Type::Bool
+                    | Type::Char => {
                         self.asm
                             .lea(Reg::Eax, Mem::base_disp(Reg::Ebp, slot.offset))?;
                         self.load_from_addr(&e.ty)?;
@@ -79,7 +88,9 @@ impl<'p> CodeGen<'p> {
                 }
                 self.eval_expr(trailing)?;
             }
-            ExprKind::Asm { .. } => bail!("inline assembly is not implemented in the x86_32 backend"),
+            ExprKind::Asm { .. } => {
+                bail!("inline assembly is not implemented in the x86_32 backend")
+            }
             ExprKind::SizeOf(ty) => {
                 let size = self.type_size_bytes(ty);
                 self.asm.mov(Reg::Eax, size as i32)?;
@@ -95,16 +106,22 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
-    pub(super) fn eval_bin(&mut self, op: BinOp, left: &Expr, right: &Expr, _ty: &Type) -> Result<()> {
+    pub(super) fn eval_bin(
+        &mut self,
+        op: BinOp,
+        left: &Expr,
+        right: &Expr,
+        _ty: &Type,
+    ) -> Result<()> {
         if op.is_logical() {
             return self.eval_logical(op, left, right);
         }
 
         self.eval_expr(left)?;
         self.asm.mov(Reg::Ecx, Reg::Eax)?; // left -> Ecx
-        self.asm.push(Reg::Ecx)?;          // preserve left across right evaluation
-        self.eval_expr(right)?;           // right -> Eax
-        self.asm.pop(Reg::Ecx)?;           // restore left
+        self.asm.push(Reg::Ecx)?; // preserve left across right evaluation
+        self.eval_expr(right)?; // right -> Eax
+        self.asm.pop(Reg::Ecx)?; // restore left
 
         if op.is_arithmetic() {
             match op {
@@ -118,7 +135,9 @@ impl<'p> CodeGen<'p> {
                             self.asm.shl(Reg::Eax, elem.trailing_zeros() as i8)?;
                         }
                         self.asm.add(Reg::Eax, Reg::Ecx)?;
-                    } else if let (Some(elem), true) = (ptr_elem_size(&right.ty), left.ty.is_integer()) {
+                    } else if let (Some(elem), true) =
+                        (ptr_elem_size(&right.ty), left.ty.is_integer())
+                    {
                         if elem > 1 {
                             self.asm.shl(Reg::Ecx, elem.trailing_zeros() as i8)?;
                         }
@@ -142,7 +161,7 @@ impl<'p> CodeGen<'p> {
                 }
                 BinOp::Div | BinOp::Mod => {
                     if left.ty.is_signed() {
-                        self.asm.push(Reg::Eax)?;          // save divisor (right)
+                        self.asm.push(Reg::Eax)?; // save divisor (right)
                         self.asm.mov(Reg::Eax, Reg::Ecx)?; // dividend (left)
                         self.asm.cdq()?;
                         self.asm.pop(Reg::Ecx)?; // divisor
@@ -160,7 +179,7 @@ impl<'p> CodeGen<'p> {
                 }
                 BinOp::FloorDiv => {
                     // Floor division: floor(a/b)
-                    self.asm.push(Reg::Eax)?;          // save divisor
+                    self.asm.push(Reg::Eax)?; // save divisor
                     self.asm.mov(Reg::Eax, Reg::Ecx)?; // dividend
                     if left.ty.is_signed() {
                         self.asm.cdq()?;
@@ -261,7 +280,8 @@ impl<'p> CodeGen<'p> {
         }
 
         for slot in arg_slots.iter().rev() {
-            self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, slot.offset))?;
+            self.asm
+                .mov(Reg::Eax, Mem::base_disp(Reg::Ebp, slot.offset))?;
             self.asm.push(Reg::Eax)?;
         }
 
@@ -306,7 +326,8 @@ impl<'p> CodeGen<'p> {
                     .locals
                     .get(name)
                     .ok_or_else(|| anyhow::anyhow!("unknown variable: {}", name))?;
-                self.asm.lea(Reg::Eax, Mem::base_disp(Reg::Ebp, slot.offset))?;
+                self.asm
+                    .lea(Reg::Eax, Mem::base_disp(Reg::Ebp, slot.offset))?;
             }
             ExprKind::Gep { base, field } => {
                 self.eval_expr(base)?;
@@ -331,7 +352,8 @@ impl<'p> CodeGen<'p> {
                     .locals
                     .get(name)
                     .ok_or_else(|| anyhow::anyhow!("unknown variable: {}", name))?;
-                self.asm.lea(Reg::Eax, Mem::base_disp(Reg::Ebp, slot.offset))?;
+                self.asm
+                    .lea(Reg::Eax, Mem::base_disp(Reg::Ebp, slot.offset))?;
             }
             LValue::Deref(ptr) => {
                 self.eval_expr(ptr)?; // pointer value is already the address
@@ -347,5 +369,4 @@ impl<'p> CodeGen<'p> {
         }
         Ok(())
     }
-
 }

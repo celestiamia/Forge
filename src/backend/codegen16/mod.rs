@@ -5,7 +5,7 @@
 //! small but complete subset of Forge: functions, calls, scalar locals,
 //! control flow, raw pointer load/store, arithmetic, and string literals.
 
-pub(super) use anyhow::{anyhow, bail, Result};
+pub(super) use anyhow::{Result, anyhow, bail};
 pub(super) use std::collections::HashMap;
 
 pub(super) use crate::backend::ir::{
@@ -73,7 +73,6 @@ impl<'p> CodeGen16<'p> {
         self.string_labels.insert(s.to_string(), lab);
         lab
     }
-
 }
 pub(super) fn type_info(ty: &Type) -> Result<(u8, bool)> {
     match ty {

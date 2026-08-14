@@ -6,11 +6,11 @@
 //! [`crate::backend::error::AssemblerError`] instead of panicking, mirroring
 //! the 64-bit assembler.
 
-use crate::backend::error::{fmt_operand32, AssemblerError, EncodeError};
+use crate::backend::error::{AssemblerError, EncodeError, fmt_operand32};
 use crate::backend::x86::{
-    encode, AluOp, Cond, IntoJmpTarget, IntoOp, JmpTarget, Label, Mem, Operand, Reg,
+    AluOp, Cond, IntoJmpTarget, IntoOp, JmpTarget, Label, Mem, Operand, Reg, encode,
 };
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 #[derive(Debug)]
 struct Fixup {

@@ -12,10 +12,7 @@ impl Parser {
             if self.peek() == &Token::Indent {
                 self.advance();
             }
-            while self.peek() != &Token::RBrace
-                && self.peek() != &Token::Dedent
-                && !self.at_end()
-            {
+            while self.peek() != &Token::RBrace && self.peek() != &Token::Dedent && !self.at_end() {
                 stmts.push(self.parse_stmt()?);
                 self.skip_newlines();
             }
@@ -254,10 +251,12 @@ impl Parser {
         self.skip_newlines();
         if self.eat(&Token::Assign) {
             let value = self.parse_expr()?;
-            Ok(Stmt::Assign(AssignStmt { target: expr, value }))
+            Ok(Stmt::Assign(AssignStmt {
+                target: expr,
+                value,
+            }))
         } else {
             Ok(Stmt::Expr(expr))
         }
     }
-
 }

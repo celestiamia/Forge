@@ -17,4 +17,7 @@ pub mod typed;
 
 pub use check::{check, check_with_file};
 pub use error::{Error, Loc};
-pub use typed::{MonoInstance, TypedBlock, TypedExpr, TypedExprKind, TypedFunction, TypedItem, TypedMatchCase, TypedModule, TypedPattern, TypedStmt};
+pub use typed::{
+    MonoInstance, TypedBlock, TypedExpr, TypedExprKind, TypedFunction, TypedItem, TypedMatchCase,
+    TypedModule, TypedPattern, TypedStmt,
+};

@@ -11,7 +11,8 @@ impl<'p> CodeGen16<'p> {
                 funcs.push(f);
             }
         }
-        let start = start.ok_or_else(|| anyhow!("flat binary boot target requires a _start function"))?;
+        let start =
+            start.ok_or_else(|| anyhow!("flat binary boot target requires a _start function"))?;
 
         let start_lab = self.asm.new_label();
         self.func_labels.insert("_start".to_string(), start_lab);
@@ -26,8 +27,10 @@ impl<'p> CodeGen16<'p> {
         self.func_labels
             .insert("_dev_bios_teletype".to_string(), teletype_lab);
         self.func_labels.insert("_dev_halt".to_string(), halt_lab);
-        self.func_labels.insert("_dev_load_char".to_string(), load_char_lab);
-        self.func_labels.insert("_dev_serial_putc".to_string(), serial_lab);
+        self.func_labels
+            .insert("_dev_load_char".to_string(), load_char_lab);
+        self.func_labels
+            .insert("_dev_serial_putc".to_string(), serial_lab);
 
         self.emit_func(start, true)?;
         for f in &funcs {
@@ -75,7 +78,10 @@ impl<'p> CodeGen16<'p> {
         }
 
         for (i, (name, _ty)) in f.params.iter().enumerate() {
-            let slot = *self.locals.get(name).ok_or_else(|| anyhow!("missing param slot: {}", name))?;
+            let slot = *self
+                .locals
+                .get(name)
+                .ok_or_else(|| anyhow!("missing param slot: {}", name))?;
             let arg_off = (4 + i * 2) as i8;
             self.asm.load16_bp(Reg16::Ax, arg_off);
             self.store_slot(slot, Reg16::Ax, Reg8::Al)?;
@@ -188,7 +194,9 @@ impl<'p> CodeGen16<'p> {
                     self.scan_stmt(s)?;
                 }
             }
-            Stmt::For { init, body, step, .. } => {
+            Stmt::For {
+                init, body, step, ..
+            } => {
                 if let Some(i) = init {
                     self.scan_stmt(i)?;
                 }
@@ -201,5 +209,4 @@ impl<'p> CodeGen16<'p> {
         }
         Ok(())
     }
-
 }

@@ -12,10 +12,10 @@
 //! * `codegen16` - the 16-bit real-mode IR code generator.
 
 pub mod codegen;
-pub mod codegen32;
 pub mod codegen16;
+pub mod codegen32;
 pub mod error;
 pub mod ir;
+pub mod x16;
 pub mod x64;
 pub mod x86;
-pub mod x16;
