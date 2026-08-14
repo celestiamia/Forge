@@ -89,9 +89,9 @@ mod tests {
         a.push(Reg::Ebp)?;
         a.mov(Reg::Ebp, Reg::Esp)?;
         a.call(0i32)?;
-        a.pop(Reg::Ebp);
-        a.ret();
-        a.syscall();
+        a.pop(Reg::Ebp)?;
+        a.ret()?;
+        a.syscall()?;
         assert_eq!(
             a.bytes(),
             &[
@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn int_imm8() -> Result<()> {
         let mut a = Assembler::new();
-        a.int(0x80u8);
+        a.int(0x80u8)?;
         assert_eq!(a.bytes(), &[0xCD, 0x80]);
         Ok(())
     }
@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn rdtsc_encoding() -> Result<()> {
         let mut a = Assembler::new();
-        a.rdtsc();
+        a.rdtsc()?;
         assert_eq!(a.bytes(), &[0x0F, 0x31]);
         Ok(())
     }
