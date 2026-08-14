@@ -296,6 +296,7 @@ impl<'src> Lexer<'src> {
             "pub" => Token::Pub,
             "const" => Token::Const,
             "static" => Token::Static,
+            "embed" => Token::Embed,
             "as" => Token::As,
             "true" => Token::True,
             "false" => Token::False,

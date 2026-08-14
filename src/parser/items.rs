@@ -53,6 +53,7 @@ impl Parser {
             Token::Impl => self.parse_impl(),
             Token::Extern => self.parse_extern_fn(attrs),
             Token::Const | Token::Static => self.parse_const_item(vis),
+            Token::Embed => self.parse_embed_item(vis),
             other => Err(self.error(format!("expected item, found {:?}", other))),
         }
     }
@@ -240,6 +241,25 @@ impl Parser {
             ty,
             value,
         }))
+    }
+
+    pub(super) fn parse_embed_item(&mut self, vis: Visibility) -> Result<Item, ParseError> {
+        self.expect(Token::Embed)?;
+        let name = self.expect_ident()?;
+        self.expect(Token::Assign)?;
+        let path = match self.advance() {
+            Token::StringLit(p) => p,
+            other => {
+                return Err(self.error(format!(
+                    "embed path must be a string literal, found {:?}",
+                    other
+                )))
+            }
+        };
+        let full = self.base_dir.join(&path);
+        let data = std::fs::read(&full)
+            .map_err(|_| self.error(format!("cannot read embedded file `{}`", full.display())))?;
+        Ok(Item::Embed(EmbedItem { vis, name, data }))
     }
 
     pub(super) fn parse_generics(&mut self) -> Result<Vec<String>, ParseError> {

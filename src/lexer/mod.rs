@@ -72,6 +72,8 @@ pub enum Token {
     Const,
     /// `static`
     Static,
+    /// `embed`
+    Embed,
     /// `as`
     As,
     /// `true`
@@ -251,7 +253,7 @@ mod tests {
 
     #[test]
     fn all_keywords() {
-        let src = "package import from def let var return if elif else for in while match case struct union enum interface impl unsafe extern pub const static as true false null\n";
+        let src = "package import from def let var return if elif else for in while match case struct union enum interface impl unsafe extern pub const static embed as true false null\n";
         let expected = vec![
             Token::Package,
             Token::Import,
@@ -278,6 +280,7 @@ mod tests {
             Token::Pub,
             Token::Const,
             Token::Static,
+            Token::Embed,
             Token::As,
             Token::True,
             Token::False,

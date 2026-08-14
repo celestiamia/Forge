@@ -5,7 +5,7 @@
 //! semantic analysis lives in `sema`; the lowerer is a pragmatic bridge for the
 //! first milestone.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Result};
 
@@ -26,6 +26,7 @@ struct LowerCtx<'a> {
     funcs: HashMap<String, (Vec<ir::Type>, ir::Type)>,
     externs: HashMap<String, (Vec<ir::Type>, ir::Type)>,
     vars: HashMap<String, ir::Type>,
+    global_vars: HashSet<String>,
 }
 
 mod expr;
@@ -40,6 +41,7 @@ impl<'a> LowerCtx<'a> {
             funcs: HashMap::new(),
             externs: HashMap::new(),
             vars: HashMap::new(),
+            global_vars: HashSet::new(),
         }
     }
 
@@ -49,17 +51,22 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn collect_signatures(&mut self, module: &ast::Module) {
+        // Structs first so function signatures can reference any struct
+        // regardless of item order in the merged module.
+        for item in &module.items {
+            if let ast::Item::Struct(s) = item {
+                let fields = s
+                    .fields
+                    .iter()
+                    .map(|f| Ok((f.name.clone(), self.lower_type(&f.ty)?)))
+                    .collect::<Result<Vec<_>>>()
+                    .expect("struct field type resolution");
+                self.structs.insert(s.name.clone(), ir::StructDef { name: s.name.clone(), fields });
+            }
+        }
         for item in &module.items {
             match item {
-                ast::Item::Struct(s) => {
-                    let fields = s
-                        .fields
-                        .iter()
-                        .map(|f| Ok((f.name.clone(), self.lower_type(&f.ty)?)))
-                        .collect::<Result<Vec<_>>>()
-                        .expect("struct field type resolution");
-                    self.structs.insert(s.name.clone(), ir::StructDef { name: s.name.clone(), fields });
-                }
+                ast::Item::Struct(_) => {}
                 ast::Item::Function(f) => {
                     let params = f
                         .params
@@ -97,6 +104,25 @@ impl<'a> LowerCtx<'a> {
                         .unwrap_or(ir::Type::Void);
                     self.externs.insert(e.name.clone(), (params, ret));
                 }
+                ast::Item::Const(c) => {
+                    let ty = c
+                        .ty
+                        .as_ref()
+                        .map(|t| self.lower_type(t))
+                        .transpose()
+                        .expect("const type resolution")
+                        .unwrap_or(ir::Type::I64);
+                    self.vars.insert(c.name.clone(), ty);
+                    self.global_vars.insert(c.name.clone());
+                }
+                ast::Item::Embed(e) => {
+                    let ptr_ty = ir::Type::Ptr(Box::new(ir::Type::U8));
+                    self.vars.insert(e.name.clone(), ptr_ty);
+                    let len_name = format!("{}_LEN", e.name);
+                    self.vars.insert(len_name.clone(), ir::Type::I64);
+                    self.global_vars.insert(e.name.clone());
+                    self.global_vars.insert(len_name);
+                }
                 _ => {}
             }
         }
@@ -127,7 +153,10 @@ impl<'a> LowerCtx<'a> {
                         .transpose()?
                         .unwrap_or(ir::Type::Void);
 
-                    self.vars.clear();
+                    // Drop the previous function's locals but keep module-level
+                    // globals (consts, embeds) so they can be referenced inside
+                    // function bodies.
+                    self.vars.retain(|k, _| self.global_vars.contains(k));
                     for (n, t) in &params {
                         self.vars.insert(n.clone(), t.clone());
                     }
@@ -170,10 +199,37 @@ impl<'a> LowerCtx<'a> {
                         .transpose()?
                         .unwrap_or(ir::Type::I64);
                     let init_expr = self.lower_expr(&c.value)?;
-                    let init = expr_to_literal(&init_expr)?;
+                    let init = match &init_expr.kind {
+                        // Negative literals lower to `0 - <literal>`; fold them
+                        // back into a negative literal for const initializers.
+                        ir::ExprKind::Bin { op: ir::BinOp::Sub, left, right }
+                            if matches!(left.kind, ir::ExprKind::Lit(ir::Literal::Int(0))) =>
+                        {
+                            match &right.kind {
+                                ir::ExprKind::Lit(ir::Literal::Int(n)) => ir::Literal::Int(-n),
+                                _ => bail!("const initializer must be a literal"),
+                            }
+                        }
+                        _ => expr_to_literal(&init_expr)?,
+                    };
                     globals.push(ir::Global { name: c.name.clone(), ty: ty.clone(), init });
-                    // Add to vars so the constant can be referenced in expressions
-                    self.vars.insert(c.name.clone(), ty);
+                }
+                ast::Item::Embed(e) => {
+                    // `embed NAME = "file"` emits two globals: `NAME` (a
+                    // pointer slot patched to the raw bytes in .rodata) and
+                    // the implicit `NAME_LEN` length constant.
+                    let ptr_ty = ir::Type::Ptr(Box::new(ir::Type::U8));
+                    globals.push(ir::Global {
+                        name: e.name.clone(),
+                        ty: ptr_ty.clone(),
+                        init: ir::Literal::Bytes(e.data.clone()),
+                    });
+                    let len_name = format!("{}_LEN", e.name);
+                    globals.push(ir::Global {
+                        name: len_name.clone(),
+                        ty: ir::Type::I64,
+                        init: ir::Literal::Int(e.data.len() as i64),
+                    });
                 }
                 _ => {}
             }
@@ -191,6 +247,7 @@ impl<'a> LowerCtx<'a> {
             target: None,
             arch: None,
             obj_format: None,
+            config: None,
         })
     }
 

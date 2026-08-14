@@ -43,6 +43,10 @@ impl Context {
                     value,
                 }
             }
+            Item::Embed(e) => TypedItem::Embed {
+                name: e.name.clone(),
+                len: e.data.len(),
+            },
             Item::Use(u) => TypedItem::Use {
                 path: u.path.clone(),
                 alias: u.alias.clone(),

@@ -162,6 +162,7 @@ impl LowerCtx<'_> {
             ir::Literal::Bool(_) => ir::Type::Bool,
             ir::Literal::Char(_) => ir::Type::Char,
             ir::Literal::String(_) => ir::Type::Ptr(Box::new(ir::Type::Char)),
+            ir::Literal::Bytes(_) => ir::Type::Ptr(Box::new(ir::Type::U8)),
             ir::Literal::Null => ir::Type::Ptr(Box::new(ir::Type::Void)),
         };
         Ok(ir::Expr::new(ir::ExprKind::Lit(lit), ty))

@@ -80,6 +80,10 @@ pub enum TypedItem {
         ty: Type,
         value: TypedExpr,
     },
+    Embed {
+        name: String,
+        len: usize,
+    },
     Use {
         path: Vec<String>,
         alias: Option<String>,

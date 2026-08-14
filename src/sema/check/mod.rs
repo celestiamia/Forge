@@ -200,6 +200,26 @@ impl Context {
         for imp in &module.imports {
             self.register_import(imp);
         }
+        // Phase 1: register ADT names so any item can reference any type,
+        // regardless of item order in the merged module.
+        for item in &module.items {
+            match item {
+                Item::Struct(s) => self.register_adt_skeleton(s),
+                Item::Union(u) => self.register_adt_skeleton(u),
+                Item::Enum(e) => self.register_enum_skeleton(e),
+                _ => {}
+            }
+        }
+        // Phase 2: resolve ADT fields and variants.
+        for item in &module.items {
+            match item {
+                Item::Struct(s) => self.resolve_adt_fields(s),
+                Item::Union(u) => self.resolve_adt_fields(u),
+                Item::Enum(e) => self.resolve_enum_variants(e),
+                _ => {}
+            }
+        }
+        // Phase 3: function signatures, externs, consts, impls, uses.
         for item in &module.items {
             self.register_item(item);
         }
@@ -231,9 +251,7 @@ impl Context {
                 let sig = self.register_fn_sig(f, true);
                 self.functions.insert(sig.name.clone(), sig);
             }
-            Item::Struct(s) => self.register_adt(s),
-            Item::Union(u) => self.register_adt(u),
-            Item::Enum(e) => self.register_enum(e),
+            Item::Struct(_) | Item::Union(_) | Item::Enum(_) => {}
             Item::ExternFn(e) => {
                 let generics: HashSet<String> = e.generics.iter().cloned().collect();
                 self.generic_stack.push(generics);
@@ -265,6 +283,19 @@ impl Context {
                     .map(|t| self.resolve_type_expr(t))
                     .unwrap_or(Type::Unknown);
                 self.statics.insert(c.name.clone(), StaticInfo { ty, mutable: false });
+            }
+            Item::Embed(e) => {
+                // `embed NAME = "file"` binds `NAME` as a read-only byte
+                // pointer into .rodata plus an implicit `NAME_LEN: int64`
+                // length constant.
+                self.statics.insert(
+                    e.name.clone(),
+                    StaticInfo { ty: Type::pointer(Type::int(8, false)), mutable: false },
+                );
+                self.statics.insert(
+                    format!("{}_LEN", e.name),
+                    StaticInfo { ty: Type::int(64, true), mutable: false },
+                );
             }
             Item::Impl(i) => {
                 let target_name = base_type_name_from_type_expr(&i.target);
@@ -309,7 +340,19 @@ impl Context {
         }
     }
 
-    pub(super) fn register_adt(&mut self, s: &dyn AdtDefinition) {
+    pub(super) fn register_adt_skeleton(&mut self, s: &dyn AdtDefinition) {
+        let kind = if s.is_union() { AdtKind::Union } else { AdtKind::Struct };
+        let info = AdtInfo {
+            name: s.name().to_string(),
+            kind,
+            generics: s.generics().to_vec(),
+            fields: Vec::new(),
+            variants: Vec::new(),
+        };
+        self.adts.insert(info.name.clone(), info);
+    }
+
+    pub(super) fn resolve_adt_fields(&mut self, s: &dyn AdtDefinition) {
         let generics: HashSet<String> = s.generics().iter().cloned().collect();
         self.generic_stack.push(generics);
         let fields: Vec<TyField> = s
@@ -321,18 +364,23 @@ impl Context {
             })
             .collect();
         self.generic_stack.pop();
-        let kind = if s.is_union() { AdtKind::Union } else { AdtKind::Struct };
+        if let Some(info) = self.adts.get_mut(s.name()) {
+            info.fields = fields;
+        }
+    }
+
+    pub(super) fn register_enum_skeleton(&mut self, e: &ast::Enum) {
         let info = AdtInfo {
-            name: s.name().to_string(),
-            kind,
-            generics: s.generics().to_vec(),
-            fields,
+            name: e.name.clone(),
+            kind: AdtKind::Enum,
+            generics: e.generics.clone(),
+            fields: Vec::new(),
             variants: Vec::new(),
         };
         self.adts.insert(info.name.clone(), info);
     }
 
-    pub(super) fn register_enum(&mut self, e: &ast::Enum) {
+    pub(super) fn resolve_enum_variants(&mut self, e: &ast::Enum) {
         let generics: HashSet<String> = e.generics.iter().cloned().collect();
         self.generic_stack.push(generics);
         let variants: Vec<TyVariant> = e
@@ -344,14 +392,9 @@ impl Context {
             })
             .collect();
         self.generic_stack.pop();
-        let info = AdtInfo {
-            name: e.name.clone(),
-            kind: AdtKind::Enum,
-            generics: e.generics.clone(),
-            fields: Vec::new(),
-            variants,
-        };
-        self.adts.insert(info.name.clone(), info);
+        if let Some(info) = self.adts.get_mut(&e.name) {
+            info.variants = variants;
+        }
     }
 
     // Type checking: second pass

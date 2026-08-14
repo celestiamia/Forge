@@ -73,6 +73,7 @@ pub enum Item {
     Use(Use),
     ExternFn(ExternFn),
     Const(ConstItem),
+    Embed(EmbedItem),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -159,6 +160,15 @@ pub struct ConstItem {
     pub name: String,
     pub ty: Option<TypeExpr>,
     pub value: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmbedItem {
+    pub vis: Visibility,
+    pub name: String,
+    /// Raw bytes of the embedded file, read at parse time relative to the
+    /// source file's directory.
+    pub data: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
