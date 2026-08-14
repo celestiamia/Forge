@@ -6,6 +6,7 @@
 /// `r32`, `r64`) return the same register and are intended as semantic markers
 /// in the assembler API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum Reg {
     Rax,
     Rcx,
@@ -34,6 +35,7 @@ pub enum Reg {
     Xmm7,
 }
 
+#[allow(dead_code)]
 impl Reg {
     /// 3-bit register encoding used in ModR/M, SIB, and opcode register fields.
     pub fn enc(self) -> u8 {

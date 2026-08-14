@@ -20,6 +20,7 @@ pub fn lower(module: &ast::Module, hosted: bool) -> Result<ir::Program> {
 }
 
 struct LowerCtx<'a> {
+    #[allow(dead_code)]
     module: &'a ast::Module,
     hosted: bool,
     structs: HashMap<String, ir::StructDef>,
@@ -354,7 +355,7 @@ impl<'a> LowerCtx<'a> {
                 _ => 8,
             })
             .sum();
-        let count = ((total_size + 7) / 8).max(1);
+        let count = total_size.div_ceil(8).max(1);
 
         // Allocate stack space for the struct
         let slot_name = self.fresh_temp("$struct");

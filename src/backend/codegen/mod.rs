@@ -51,6 +51,7 @@ pub(super) const GC_STATE_SIZE: usize = 96; // 12 u64s, 16-byte aligned
 // payload size.
 pub(super) const H_USED: u64 = 0x1;
 pub(super) const H_MARK: u64 = 0x2;
+#[allow(dead_code)]
 pub(super) const H_SIZE_MASK: u64 = !0x7;
 pub(super) const H_HDR_SIZE: u64 = 8;
 
@@ -182,18 +183,18 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         // any of the `_dev_*` memory-management helpers.  All of the GC
         // helpers are emitted together as a unit whenever any one of them is
         // referenced, so callers can use alloc/free plus explicit collect/stats.
-        let need_gc = prog.externs.iter().any(|e| match e.name.as_str() {
+        let need_gc = prog.externs.iter().any(|e| matches!(
+            e.name.as_str(),
             "_dev_alloc"
-            | "_dev_free"
-            | "_dev_gc_collect"
-            | "_dev_gc_leak_check"
-            | "_dev_gc_alloc_count"
-            | "_dev_gc_free_count"
-            | "_dev_gc_collections"
-            | "_dev_gc_heap_live"
-            | "_dev_gc_heap_capacity" => true,
-            _ => false,
-        });
+                | "_dev_free"
+                | "_dev_gc_collect"
+                | "_dev_gc_leak_check"
+                | "_dev_gc_alloc_count"
+                | "_dev_gc_free_count"
+                | "_dev_gc_collections"
+                | "_dev_gc_heap_live"
+                | "_dev_gc_heap_capacity"
+        ));
         cg.gc_enabled = need_gc;
         if need_gc {
             cg.func_labels
@@ -267,7 +268,7 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
                 let val = if v { 1i8 } else { 0i8 };
                 val.to_le_bytes().to_vec()
             }
-            Literal::Char(v) => (v as u8).to_le_bytes().to_vec(),
+            Literal::Char(v) => v.to_le_bytes().to_vec(),
             Literal::String(s) => {
                 let s_lab = cg.string_label(&s);
                 string_patches.push((lab, s_lab));
@@ -367,7 +368,7 @@ pub(super) fn align_up_u64(value: u64, align: u64) -> u64 {
     if align == 0 {
         return value;
     }
-    ((value + align - 1) / align) * align
+    value.div_ceil(align) * align
 }
 
 mod expr;
@@ -420,10 +421,10 @@ impl<'p> CodeGen<'p> {
         let entry = *self.func_labels.get(&f.name).unwrap();
         self.bind_label(entry);
 
-        self.asm.push(Reg::Rbp);
-        self.asm.mov(Reg::Rbp, Reg::Rsp);
+        self.asm.push(Reg::Rbp)?;
+        self.asm.mov(Reg::Rbp, Reg::Rsp)?;
         let sub_imm_offset = self.asm.len() + 3; // REX + opcode + modrm
-        self.asm.sub(Reg::Rsp, 0i32);
+        self.asm.sub(Reg::Rsp, 0i32)?;
 
         let slot = self.alloc_slot(8, 8);
         self.addr_tmp = slot.offset;
@@ -434,7 +435,7 @@ impl<'p> CodeGen<'p> {
         for (i, (name, _ty)) in f.params.iter().enumerate() {
             let slot = self.locals.get(name).unwrap();
             let reg = abi_reg(i)?;
-            self.asm.mov(Mem::base_disp(Reg::Rbp, slot.offset), reg);
+            self.asm.mov(Mem::base_disp(Reg::Rbp, slot.offset), reg)?;
         }
 
         self.ret_label = self.asm.new_label();
@@ -458,7 +459,7 @@ impl<'p> CodeGen<'p> {
 
         self.bind_label(self.ret_label);
         self.asm.leave();
-        self.asm.ret();
+        self.asm.ret()?;
 
         let frame = align_up(self.frame_size, 16);
         self.asm.patch_i32(sub_imm_offset, frame as i32);
@@ -532,13 +533,13 @@ impl<'p> CodeGen<'p> {
     }
 
     fn emit_return_none(&mut self) -> Result<()> {
-        self.asm.jmp(self.ret_label);
+        self.asm.jmp(self.ret_label)?;
         Ok(())
     }
 
     fn emit_return(&mut self, e: &Expr) -> Result<()> {
         self.eval_expr(e)?;
-        self.asm.jmp(self.ret_label);
+        self.asm.jmp(self.ret_label)?;
         Ok(())
     }
 
@@ -556,17 +557,17 @@ impl<'p> CodeGen<'p> {
             None
         };
         self.eval_expr(cond)?;
-        self.asm.test(Reg::Rax, Reg::Rax);
+        self.asm.test(Reg::Rax, Reg::Rax)?;
         if let Some(l) = else_lab {
-            self.asm.je(l);
+            self.asm.je(l)?;
         } else {
-            self.asm.je(end_lab);
+            self.asm.je(end_lab)?;
         }
         self.bind_label(then_lab);
         for st in then {
             self.emit_stmt(st)?;
         }
-        self.asm.jmp(end_lab);
+        self.asm.jmp(end_lab)?;
         if let Some(l) = else_lab {
             self.bind_label(l);
             for st in else_.as_ref().unwrap() {
@@ -584,12 +585,12 @@ impl<'p> CodeGen<'p> {
         self.loop_end_stack.push(end);
         self.bind_label(head);
         self.eval_expr(cond)?;
-        self.asm.test(Reg::Rax, Reg::Rax);
-        self.asm.je(end);
+        self.asm.test(Reg::Rax, Reg::Rax)?;
+        self.asm.je(end)?;
         for st in body {
             self.emit_stmt(st)?;
         }
-        self.asm.jmp(head);
+        self.asm.jmp(head)?;
         self.bind_label(end);
         self.loop_head_stack.pop();
         self.loop_end_stack.pop();
@@ -612,15 +613,15 @@ impl<'p> CodeGen<'p> {
         self.loop_end_stack.push(end);
         self.bind_label(head);
         self.eval_expr(cond)?;
-        self.asm.test(Reg::Rax, Reg::Rax);
-        self.asm.je(end);
+        self.asm.test(Reg::Rax, Reg::Rax)?;
+        self.asm.je(end)?;
         for st in body {
             self.emit_stmt(st)?;
         }
         if let Some(st) = step {
             self.eval_expr(st)?;
         }
-        self.asm.jmp(head);
+        self.asm.jmp(head)?;
         self.bind_label(end);
         self.loop_head_stack.pop();
         self.loop_end_stack.pop();
@@ -632,7 +633,7 @@ impl<'p> CodeGen<'p> {
             .loop_end_stack
             .last()
             .ok_or_else(|| anyhow::anyhow!("break outside of loop"))?;
-        self.asm.jmp(end);
+        self.asm.jmp(end)?;
         Ok(())
     }
 
@@ -641,7 +642,7 @@ impl<'p> CodeGen<'p> {
             .loop_head_stack
             .last()
             .ok_or_else(|| anyhow::anyhow!("continue outside of loop"))?;
-        self.asm.jmp(head);
+        self.asm.jmp(head)?;
         Ok(())
     }
 
@@ -819,5 +820,5 @@ pub(super) fn align_up(v: usize, align: usize) -> usize {
     if align == 0 {
         return v;
     }
-    ((v + align - 1) / align) * align
+    v.div_ceil(align) * align
 }

@@ -125,7 +125,6 @@ impl Context {
     /// This is intentionally conservative: it recognizes top-level returns,
     /// returns inside `unsafe` blocks, and infinite loops (`while true` / `loop`)
     /// that contain a return anywhere in their body.
-
     pub(super) fn block_definitely_returns(block: &TypedBlock) -> bool {
         for (i, stmt) in block.stmts.iter().enumerate() {
             let is_last = i == block.stmts.len() - 1;
@@ -137,10 +136,8 @@ impl Context {
                         return true;
                     }
                 }
-                TypedStmt::Loop(body) if is_last => {
-                    if Self::block_contains_return(body) {
-                        return true;
-                    }
+                TypedStmt::Loop(body) if is_last && Self::block_contains_return(body) => {
+                    return true;
                 }
                 _ => {}
             }
@@ -156,7 +153,6 @@ impl Context {
     }
 
     /// Return true if the block contains a `return` statement at any nesting level.
-
     pub(super) fn block_contains_return(block: &TypedBlock) -> bool {
         for stmt in &block.stmts {
             match stmt {
@@ -187,10 +183,8 @@ impl Context {
                         return true;
                     }
                 }
-                TypedStmt::Match { cases, .. } => {
-                    if cases.iter().any(|c| Self::block_contains_return(&c.body)) {
-                        return true;
-                    }
+                TypedStmt::Match { cases, .. } if cases.iter().any(|c| Self::block_contains_return(&c.body)) => {
+                    return true;
                 }
                 _ => {}
             }

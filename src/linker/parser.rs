@@ -20,7 +20,7 @@ impl Parser {
         let mut format: Option<OutputFormat> = None;
         let mut hosted: Option<bool> = None;
         let mut entry: Option<String> = None;
-        let mut base_address: Option<u64> = None;
+        let base_address: Option<u64> = None;
         let mut heap_size: u64 = 0;
         let mut regions: Vec<MemoryRegion> = Vec::new();
         let mut sections: Vec<SectionMapping> = Vec::new();

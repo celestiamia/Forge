@@ -1,6 +1,7 @@
 use super::{LexError, Token};
 
 /// Convenience function: tokenize an entire source string.
+#[allow(dead_code)]
 pub fn tokenize(src: &str) -> Result<Vec<Token>, LexError> {
     let mut lexer = Lexer::new(src);
     let mut tokens = Vec::new();
@@ -203,7 +204,7 @@ impl<'src> Lexer<'src> {
         }
 
         // Validate that indentation is a multiple of 4 spaces.
-        if spaces % 4 != 0 {
+        if !spaces.is_multiple_of(4) {
             return Err(self.error(format!(
                 "indentation must be a multiple of 4 spaces, got {} spaces",
                 spaces

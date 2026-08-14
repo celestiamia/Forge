@@ -99,18 +99,10 @@ impl Context {
                     ..
                 }) = expected
                 {
-                    if !is_ptr_expected {
-                        elem_ty = *expected_elem.clone();
-                        for e in a {
-                            let te = self.check_expr(e, Some(&elem_ty));
-                            elems.push(te);
-                        }
-                    } else {
-                        elem_ty = *expected_elem.clone();
-                        for e in a {
-                            let te = self.check_expr(e, Some(&elem_ty));
-                            elems.push(te);
-                        }
+                    elem_ty = *expected_elem.clone();
+                    for e in a {
+                        let te = self.check_expr(e, Some(&elem_ty));
+                        elems.push(te);
                     }
                 } else {
                     for (i, e) in a.iter().enumerate() {
@@ -572,20 +564,18 @@ impl Context {
         let args_in: Vec<&Expr> = c.args.iter().collect();
 
         // Method call: `obj.method(args)`
-        if let Expr::Field(field) = &c.callee.as_ref() {
-            if let Some(target_name) = adt_name_from_type(&callee.ty) {
-                if let Some(methods) = self.methods.get(&target_name).cloned() {
-                    if let Some(sig) = methods.iter().find(|m| m.name == field.field).cloned() {
-                        return self.resolve_call(
-                            callee,
-                            &args_in,
-                            &sig,
-                            expected,
-                            Some(target_name),
-                        );
-                    }
-                }
-            }
+        if let Expr::Field(field) = &c.callee.as_ref()
+            && let Some(target_name) = adt_name_from_type(&callee.ty)
+            && let Some(methods) = self.methods.get(&target_name).cloned()
+            && let Some(sig) = methods.iter().find(|m| m.name == field.field).cloned()
+        {
+            return self.resolve_call(
+                callee,
+                &args_in,
+                &sig,
+                expected,
+                Some(target_name),
+            );
         }
 
         // Direct function call
@@ -691,7 +681,7 @@ impl Context {
                             .unwrap_or_else(|| sig.name.clone()),
                         generic_args.clone(),
                     );
-                    if !self.mono_instances.iter().any(|m| *m == mono) {
+                    if !self.mono_instances.contains(&mono) {
                         self.mono_instances.push(mono);
                     }
                     (Some(generic_args), ret)
@@ -758,38 +748,36 @@ impl Context {
             self.error("union field access requires `unsafe`".to_string());
         }
 
-        if let Some(info) = self.adts.get(&base_name) {
-            if let Some((idx, field)) = info
+        if let Some(info) = self.adts.get(&base_name)
+            && let Some((idx, field)) = info
                 .fields
                 .iter()
                 .enumerate()
                 .find(|(_, fld)| fld.name == f.field)
-            {
-                let field_ty = field.ty.clone();
-                return TypedExpr::new(
-                    TypedExprKind::Field {
-                        object: Box::new(object),
-                        field: f.field.clone(),
-                        field_index: idx,
-                    },
-                    field_ty,
-                );
-            }
+        {
+            let field_ty = field.ty.clone();
+            return TypedExpr::new(
+                TypedExprKind::Field {
+                    object: Box::new(object),
+                    field: f.field.clone(),
+                    field_index: idx,
+                },
+                field_ty,
+            );
         }
 
-        if let Type::Tuple { fields } = base_ty {
-            if let Ok(idx) = f.field.parse::<usize>() {
-                if idx < fields.len() {
-                    return TypedExpr::new(
-                        TypedExprKind::Field {
-                            object: Box::new(object),
-                            field: f.field.clone(),
-                            field_index: idx,
-                        },
-                        fields[idx].clone(),
-                    );
-                }
-            }
+        if let Type::Tuple { fields } = base_ty
+            && let Ok(idx) = f.field.parse::<usize>()
+            && idx < fields.len()
+        {
+            return TypedExpr::new(
+                TypedExprKind::Field {
+                    object: Box::new(object),
+                    field: f.field.clone(),
+                    field_index: idx,
+                },
+                fields[idx].clone(),
+            );
         }
 
         self.error(format!("type `{}` has no field `{}`", object.ty, f.field));

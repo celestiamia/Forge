@@ -48,6 +48,7 @@ pub enum AssemblerError {
 
 /// Errors that can occur during code generation.
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum CodegenError {
     #[error("unhandled binary operation: {op:?}")]
     UnhandledBinOp { op: BinOp },
@@ -86,6 +87,7 @@ pub enum IRTypeError {
 
 /// Errors that can occur during object file writing.
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum ObjectWriteError {
     #[error("missing label offset for start label {label}")]
     MissingStartLabel { label: u32 },
@@ -145,6 +147,7 @@ pub(super) fn fmt_mem32(m: &Mem32) -> String {
 }
 
 /// Format a 64-bit JmpTarget for error messages.
+#[allow(dead_code)]
 pub(super) fn fmt_jmp_target64(t: &JmpTarget64) -> String {
     match t {
         JmpTarget64::Rel32(v) => format!("Rel32({})", v),
@@ -153,6 +156,7 @@ pub(super) fn fmt_jmp_target64(t: &JmpTarget64) -> String {
 }
 
 /// Format a 32-bit JmpTarget for error messages.
+#[allow(dead_code)]
 pub(super) fn fmt_jmp_target32(t: &JmpTarget32) -> String {
     match t {
         JmpTarget32::Rel32(v) => format!("Rel32({})", v),
@@ -161,6 +165,7 @@ pub(super) fn fmt_jmp_target32(t: &JmpTarget32) -> String {
 }
 
 /// Format a list of labels for unresolved labels error.
+#[allow(dead_code)]
 pub(super) fn fmt_labels(labels: &[Label64]) -> String {
     let mut s = String::new();
     s.push('[');

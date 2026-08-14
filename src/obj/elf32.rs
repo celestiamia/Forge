@@ -70,12 +70,14 @@ impl Elf32Writer {
     }
 
     /// Set the virtual base address. `0x08048000` is used by default.
+    #[allow(dead_code)]
     pub fn with_base_vaddr(mut self, base_vaddr: u32) -> Self {
         self.base_vaddr = base_vaddr;
         self
     }
 
     /// Set the dynamic linker path. When `None`, a static executable is produced.
+    #[allow(dead_code)]
     pub fn with_interp(mut self, interp: impl Into<String>) -> Self {
         self.interp = Some(interp.into());
         self
@@ -360,7 +362,7 @@ fn align_up(value: u32, align: u32) -> u32 {
     if align == 0 {
         return value;
     }
-    ((value + align - 1) / align) * align
+    value.div_ceil(align) * align
 }
 
 fn write_u16(out: &mut Vec<u8>, value: u16) {

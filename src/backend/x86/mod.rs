@@ -10,6 +10,7 @@ mod inst;
 mod reg;
 
 pub use asm::Assembler;
+#[allow(unused_imports)]
 pub use encode::encode_inst;
 pub use inst::{
     AluOp, Cond, Inst, IntoJmpTarget, IntoOp, JmpTarget, Label, Mem, Operand, Scale, ShiftOp,

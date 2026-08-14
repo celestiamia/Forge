@@ -173,7 +173,7 @@ fn encode_base_mem(
     // the displacement would otherwise be zero.
     let mod_bits = if disp == 0 && !base_is_rbp_r13 {
         0b00
-    } else if disp >= -128 && disp <= 127 {
+    } else if (-128..=127).contains(&disp) {
         0b01
     } else {
         0b10

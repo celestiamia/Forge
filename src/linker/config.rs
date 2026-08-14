@@ -66,6 +66,7 @@ impl Default for RuntimeConfig {
 
 /// A named, addressable memory region.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MemoryRegion {
     pub name: String,
     /// Read permission.
@@ -82,6 +83,7 @@ pub struct MemoryRegion {
 
 /// Maps a binary section (`.text`, `.rodata`, …) to a memory region.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct SectionMapping {
     pub section: String,
     pub region: String,
@@ -90,6 +92,7 @@ pub struct SectionMapping {
 /// Full target description.  Drives codegen backend selection, runtime
 /// emission, object-file layout, and entry-point handling.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct LinkerConfig {
     /// Codegen backend: `"x86_64"`, `"x86_32"`, or `"x86_16"`.
     pub arch: String,
@@ -100,12 +103,15 @@ pub struct LinkerConfig {
     /// Entry-point symbol name.  Overridable per-project with `@entry`.
     pub entry: String,
     /// Base virtual address for the ELF image / origin for flat binaries.
+    #[allow(dead_code)]
     pub base_address: u64,
     /// Heap size in bytes.  `0` means no heap.
     pub heap_size: u64,
     /// Named memory regions.
+    #[allow(dead_code)]
     pub regions: Vec<MemoryRegion>,
     /// Section-to-region mappings.
+    #[allow(dead_code)]
     pub sections: Vec<SectionMapping>,
     /// Runtime helper selection.
     pub runtime: RuntimeConfig,

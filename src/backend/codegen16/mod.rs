@@ -90,7 +90,7 @@ pub(super) fn type_size_16(ty: &Type) -> usize {
         Type::I16 | Type::U16 | Type::Ptr(_) => 2,
         Type::I32 | Type::U32 => 4,
         Type::I64 | Type::U64 => 8,
-        Type::Struct(name) => {
+        Type::Struct(_name) => {
             // For structs, sum up field sizes (simplified)
             2 // default to 2 for unsupported
         }
@@ -99,7 +99,7 @@ pub(super) fn type_size_16(ty: &Type) -> usize {
 }
 
 pub(super) fn align_up_u8(value: u8, align: u8) -> u8 {
-    if align == 0 || value % align == 0 {
+    if align == 0 || value.is_multiple_of(align) {
         value
     } else {
         value + align - value % align
@@ -138,7 +138,7 @@ pub(super) fn align_up_u16(value: u16, align: u16) -> u16 {
     if align == 0 {
         return value;
     }
-    ((value + align - 1) / align) * align
+    value.div_ceil(align) * align
 }
 
 pub(super) fn cond_for_cmp(op: BinOp, ty: &Type) -> Result<Cond> {

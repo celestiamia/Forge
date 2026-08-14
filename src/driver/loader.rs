@@ -187,15 +187,17 @@ fn collect_names(module: &Module) -> HashSet<String> {
     module.items.iter().flat_map(defined_names).collect()
 }
 
+#[allow(dead_code)]
 fn public_names(module: &Module) -> HashSet<String> {
     module
         .items
         .iter()
         .filter(|i| is_public(i))
-        .map(|i| item_name(i))
+        .map(item_name)
         .collect()
 }
 
+#[allow(dead_code)]
 fn is_public(item: &Item) -> bool {
     match item {
         Item::Function(f) => f.vis == Visibility::Public,

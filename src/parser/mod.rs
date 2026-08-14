@@ -13,11 +13,13 @@
 
 pub mod expr;
 pub mod items;
+#[allow(clippy::module_inception)]
 pub mod parser;
 pub mod stmt;
 pub mod r#type;
 
 pub use crate::ast::*;
+#[allow(unused_imports)]
 pub use parser::{ParseError, Parser, parse_module, parse_module_in_dir};
 
 #[cfg(test)]

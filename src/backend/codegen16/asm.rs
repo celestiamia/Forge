@@ -12,6 +12,7 @@ pub(crate) struct Encoder {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
+#[allow(dead_code)]
 pub(crate) enum Reg16 {
     Ax = 0,
     Cx = 1,
@@ -40,6 +41,7 @@ impl Reg16 {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
+#[allow(dead_code)]
 pub(crate) enum Reg8 {
     Al = 0,
     Cl = 1,
@@ -53,6 +55,7 @@ pub(crate) enum Reg8 {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
+#[allow(dead_code)]
 pub(crate) enum SegReg {
     Es = 0,
     Cs = 1,
@@ -75,6 +78,7 @@ pub(crate) enum Cond {
     Ge = 0xD,
 }
 
+#[allow(dead_code)]
 impl Encoder {
     pub(super) fn new() -> Self {
         Self {
@@ -106,7 +110,7 @@ impl Encoder {
                 .ok_or_else(|| anyhow!("undefined short jump label {}", lab))?;
             let pc = off + 1;
             let rel = target as i64 - pc as i64;
-            if rel < -128 || rel > 127 {
+            if !(-128..=127).contains(&rel) {
                 bail!(
                     "16-bit backend: short jump to label {} is out of range ({} bytes)",
                     lab,

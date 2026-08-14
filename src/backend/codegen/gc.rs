@@ -120,8 +120,8 @@ impl<'p> CodeGen<'p> {
     ///   * R8 = `heap_base` (block cursor initialised to the base)
     ///   * a standard `push rbp; mov rbp,rsp; sub rsp, N` frame with spill
     ///     slots [rbp-8]=size, [rbp-16]=payload, [rbp-24]=end available
-    /// `marks_done` is bound by the caller immediately after this method
-    /// returns; the pass jumps there once every block has been visited.
+    ///   * `marks_done` is bound by the caller immediately after this method
+    ///     returns; the pass jumps there once every block has been visited.
     fn emit_mark_pass(&mut self, marks_done: u32) -> Result<()> {
         let mark_walk = self.asm.new_label();
         let mark_next = self.asm.new_label();

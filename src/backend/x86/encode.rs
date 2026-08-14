@@ -96,7 +96,7 @@ fn encode_base_mem(
 
     let mod_bits = if disp == 0 && !base_is_ebp {
         0b00
-    } else if disp >= -128 && disp <= 127 {
+    } else if (-128..=127).contains(&disp) {
         0b01
     } else {
         0b10

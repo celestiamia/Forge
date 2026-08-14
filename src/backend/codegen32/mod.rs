@@ -32,6 +32,7 @@ pub(super) struct Slot {
 #[derive(Clone, Debug)]
 pub(super) struct StructLayout {
     size: usize,
+    #[allow(dead_code)]
     align: usize,
     offsets: Vec<usize>,
 }
@@ -178,7 +179,7 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
                 let val = if v { 1i8 } else { 0i8 };
                 val.to_le_bytes().to_vec()
             }
-            Literal::Char(v) => (v as u8).to_le_bytes().to_vec(),
+            Literal::Char(v) => v.to_le_bytes().to_vec(),
             Literal::String(s) => {
                 let s_lab = cg.string_label(&s);
                 cg.global_string_patches.push((lab, s_lab));
@@ -607,12 +608,12 @@ pub(super) fn align_up(v: usize, align: usize) -> usize {
     if align == 0 {
         return v;
     }
-    ((v + align - 1) / align) * align
+    v.div_ceil(align) * align
 }
 
 pub(super) fn align_up_u32(v: u32, align: u32) -> u32 {
     if align == 0 {
         return v;
     }
-    ((v + align - 1) / align) * align
+    v.div_ceil(align) * align
 }

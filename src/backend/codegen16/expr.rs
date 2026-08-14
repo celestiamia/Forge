@@ -71,7 +71,7 @@ impl<'p> CodeGen16<'p> {
             }
             ExprKind::OffsetOf { ty, field } => {
                 let off = match ty {
-                    Type::Struct(name) => self.field_offset(ty, *field)? as u16,
+                    Type::Struct(_name) => self.field_offset(ty, *field)?,
                     _ => bail!("offsetof on non-struct type"),
                 };
                 self.asm.mov16_imm(Reg16::Ax, off);

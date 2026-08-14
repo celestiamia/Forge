@@ -30,6 +30,7 @@ pub struct Assembler {
     next_label: Label,
 }
 
+#[allow(dead_code)]
 impl Assembler {
     pub fn new() -> Self {
         Self::default()

@@ -384,7 +384,7 @@ impl LowerCtx<'_> {
         }
         let output = a
             .outputs
-            .get(0)
+            .first()
             .map(|o| (ir::Type::Void, o.constraint.clone()));
         Ok(ir::Expr::new(
             ir::ExprKind::Asm {

@@ -85,6 +85,7 @@ pub fn compile(options: CompileOptions) -> Result<PathBuf> {
 }
 
 /// Convenience helper for tests.
+#[allow(dead_code)]
 pub fn compile_to_out(
     source: &Path,
     output: &Path,
@@ -103,7 +104,6 @@ pub fn compile_to_out(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use std::process::Command;
     use std::thread;
     use std::time::Duration;

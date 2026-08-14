@@ -21,6 +21,7 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(super) fn store_rdx_64(&mut self) -> Result<()> {
         self.asm.mov(Mem::base(Reg::Rdx), Reg::Rax)
     }

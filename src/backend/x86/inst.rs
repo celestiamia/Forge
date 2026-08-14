@@ -4,6 +4,7 @@ use crate::backend::x86::Reg;
 
 /// Scale factor for indexed memory addressing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Scale {
     One = 1,
     Two = 2,
@@ -24,6 +25,7 @@ impl Scale {
 
 /// Memory addressing modes for 32-bit x86.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Mem {
     /// `[disp32]` (absolute 32-bit displacement, no base/index).
     Disp32(i32),
@@ -37,6 +39,7 @@ pub enum Mem {
     BaseIndexScaleDisp(Reg, Reg, Scale, i32),
 }
 
+#[allow(dead_code)]
 impl Mem {
     pub fn disp32(disp: i32) -> Self {
         Mem::Disp32(disp)
@@ -122,6 +125,7 @@ impl IntoOp for u32 {
 
 /// Condition codes for Jcc and SETcc.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Cond {
     O,
     No,
@@ -211,6 +215,7 @@ pub enum ShiftOp {
 
 /// High-level instruction representation for 32-bit x86.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Inst {
     MovRM32Imm32 { dst: Operand, imm: i32 },
     MovRM32R32 { dst: Operand, src: Reg },

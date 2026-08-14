@@ -82,6 +82,7 @@ impl Type {
     }
 
     /// Convenience constructor for `Float`.
+    #[allow(dead_code)]
     pub fn float(width: u32) -> Self {
         Type::Float { width }
     }
@@ -143,6 +144,7 @@ impl Type {
     }
 
     /// Convenience constructor for `Generic`.
+    #[allow(dead_code)]
     pub fn generic(name: impl Into<String>) -> Self {
         Type::Generic { name: name.into() }
     }
@@ -171,11 +173,13 @@ impl Type {
     }
 
     /// Returns true for signed integer-like types.
+    #[allow(dead_code)]
     pub fn is_signed(&self) -> bool {
         matches!(self, Type::Int { signed: true, .. } | Type::ISize)
     }
 
     /// Returns the bit width for scalar types, if known.
+    #[allow(dead_code)]
     pub fn width(&self) -> Option<u32> {
         match self {
             Type::Int { width, .. } | Type::Float { width } => Some(*width),
@@ -191,6 +195,7 @@ impl Type {
     }
 
     /// Returns true for reference types (`Ref` or `RefMut`).
+    #[allow(dead_code)]
     pub fn is_reference(&self) -> bool {
         matches!(self, Type::Ref { .. } | Type::RefMut { .. })
     }
@@ -201,6 +206,7 @@ impl Type {
     }
 
     /// Returns the pointee type for pointer, owned, and reference types.
+    #[allow(dead_code)]
     pub fn pointee(&self) -> Option<&Type> {
         match self {
             Type::Pointer { pointee }
@@ -314,11 +320,13 @@ impl fmt::Display for Type {
 
 /// Interning context for types and name-to-type bindings.
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 pub struct TypeCtx {
     interner: HashSet<Type>,
     names: HashMap<String, Type>,
 }
 
+#[allow(dead_code)]
 impl TypeCtx {
     /// Create a new, empty type context.
     pub fn new() -> Self {

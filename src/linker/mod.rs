@@ -22,6 +22,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+#[allow(unused_imports)]
 pub use config::{
     LinkerConfig, MemoryRegion, OutputFormat, RuntimeConfig, SectionMapping, builtin_target,
 };

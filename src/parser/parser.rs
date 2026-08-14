@@ -32,6 +32,7 @@ impl From<LexError> for ParseError {
 ///
 /// Embedded-file paths (`embed NAME = "path"`) resolve relative to the current
 /// working directory.
+#[allow(dead_code)]
 pub fn parse_module(src: &str) -> Result<Module, ParseError> {
     parse_module_in_dir(src, std::path::Path::new("."))
 }
@@ -127,7 +128,6 @@ impl Parser {
     /// Peek at the first token ahead of the cursor, skipping any `Newline`
     /// tokens but without consuming them. Used to decide whether a postfix
     /// chain legitimately continues onto the next non-blank line.
-
     pub(super) fn peek_past_newlines(&self) -> Token {
         let mut i = self.pos;
         while i < self.tokens.len() && matches!(self.tokens[i].token, Token::Newline) {
@@ -148,7 +148,6 @@ impl Parser {
 
     /// Consume the next token if it is an identifier or a keyword that can be
     /// used as an attribute name (e.g. `@extern("c")`).
-
     pub(super) fn expect_ident_or_keyword(&mut self) -> Result<String, ParseError> {
         match self.advance() {
             Token::Ident(name) => Ok(name),

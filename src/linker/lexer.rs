@@ -17,9 +17,11 @@ pub enum Tk {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Token {
     pub kind: Tk,
     pub line: usize,
+    #[allow(dead_code)]
     pub col: usize,
 }
 

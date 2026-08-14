@@ -19,6 +19,7 @@ use std::collections::HashMap;
 ///   jmp label  (short)
 ///   je/jz label, jne/jnz label (short)
 ///   call label (near rel16)
+#[allow(dead_code)]
 pub fn assemble(source: &str) -> Result<Vec<u8>> {
     assemble_with_origin(source, 0)
 }
@@ -27,6 +28,7 @@ pub fn assemble(source: &str) -> Result<Vec<u8>> {
 ///
 /// This is used for boot sectors: the binary is loaded at physical 0x7C00,
 /// so referencing a label as an immediate address yields `origin + label_offset`.
+#[allow(dead_code)]
 pub fn assemble_with_origin(source: &str, origin: u16) -> Result<Vec<u8>> {
     let mut asm = AsmState::new(origin);
 
@@ -49,7 +51,7 @@ pub fn assemble_with_origin(source: &str, origin: u16) -> Result<Vec<u8>> {
             .ok_or_else(|| anyhow::anyhow!("undefined label: {}", label))?;
         let pc = offset + 1; // after the 1-byte disp field
         let rel = *target as i64 - pc as i64;
-        if rel < -128 || rel > 127 {
+        if !(-128..=127).contains(&rel) {
             bail!("short jump to {} out of range", label);
         }
         asm.bytes[offset] = rel as u8;
@@ -84,6 +86,7 @@ pub fn assemble_with_origin(source: &str, origin: u16) -> Result<Vec<u8>> {
     Ok(asm.bytes)
 }
 
+#[allow(dead_code)]
 struct AsmState {
     bytes: Vec<u8>,
     labels: HashMap<String, usize>,
@@ -93,6 +96,7 @@ struct AsmState {
     origin: u16,
 }
 
+#[allow(dead_code)]
 impl AsmState {
     fn new(origin: u16) -> Self {
         Self {
@@ -321,6 +325,7 @@ impl AsmState {
     }
 }
 
+#[allow(dead_code)]
 fn strip_commas(args: &[&str]) -> Vec<String> {
     args.iter()
         .flat_map(|s| s.split(','))
@@ -329,6 +334,7 @@ fn strip_commas(args: &[&str]) -> Vec<String> {
         .collect()
 }
 
+#[allow(dead_code)]
 fn parse_u8(s: &str) -> Result<u8> {
     let s = s.trim();
     if s.starts_with("0x") || s.starts_with("0X") {
@@ -339,6 +345,7 @@ fn parse_u8(s: &str) -> Result<u8> {
     }
 }
 
+#[allow(dead_code)]
 fn parse_u16(s: &str) -> Result<u16> {
     let s = s.trim();
     if s.starts_with("0x") || s.starts_with("0X") {
@@ -349,6 +356,7 @@ fn parse_u16(s: &str) -> Result<u16> {
     }
 }
 
+#[allow(dead_code)]
 fn parse_byte(s: &str) -> Result<u8> {
     parse_u8(s)
 }

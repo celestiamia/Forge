@@ -15,8 +15,11 @@ pub mod check;
 pub mod error;
 pub mod typed;
 
+#[allow(unused_imports)]
 pub use check::{check, check_with_file};
+#[allow(unused_imports)]
 pub use error::{Error, Loc};
+#[allow(unused_imports)]
 pub use typed::{
     MonoInstance, TypedBlock, TypedExpr, TypedExprKind, TypedFunction, TypedItem, TypedMatchCase,
     TypedModule, TypedPattern, TypedStmt,

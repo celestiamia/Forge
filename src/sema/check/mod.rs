@@ -13,6 +13,7 @@ use crate::ty::{Field as TyField, Type, Variant as TyVariant};
 use std::collections::{HashMap, HashSet};
 
 /// Analyze an AST module and produce a typed module.
+#[allow(dead_code)]
 pub fn check(module: ast::Module) -> TypedModule {
     check_with_file(module, None)
 }
@@ -46,6 +47,7 @@ struct FnSig {
     params: Vec<(String, Type)>,
     ret: Type,
     is_unsafe: bool,
+    #[allow(dead_code)]
     has_body: bool,
 }
 
@@ -60,6 +62,7 @@ enum AdtKind {
 struct AdtInfo {
     name: String,
     kind: AdtKind,
+    #[allow(dead_code)]
     generics: Vec<String>,
     fields: Vec<TyField>,
     variants: Vec<TyVariant>,
@@ -68,6 +71,7 @@ struct AdtInfo {
 #[derive(Debug, Clone)]
 struct StaticInfo {
     ty: Type,
+    #[allow(dead_code)]
     mutable: bool,
 }
 

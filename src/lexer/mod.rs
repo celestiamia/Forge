@@ -2,8 +2,10 @@
 //!
 //! The public API is [`Token`], [`Lexer`], [`LexError`], and [`tokenize`].
 
+#[allow(clippy::module_inception)]
 pub mod lexer;
 
+#[allow(unused_imports)]
 pub use lexer::{Lexer, TokenPos, tokenize, tokenize_with_pos};
 
 /// A lexical token produced by the Forge lexer.

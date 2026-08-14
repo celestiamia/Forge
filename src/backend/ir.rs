@@ -53,10 +53,12 @@ impl Type {
         matches!(self, Type::F32 | Type::F64)
     }
 
+    #[allow(dead_code)]
     pub fn is_numeric(&self) -> bool {
         self.is_integer() || self.is_float()
     }
 
+    #[allow(dead_code)]
     pub fn is_slice(&self) -> bool {
         matches!(self, Type::Slice(_))
     }
@@ -78,6 +80,7 @@ impl Type {
 
 #[derive(Clone, Debug)]
 pub struct Program {
+    #[allow(dead_code)]
     pub name: String,
     pub structs: Vec<StructDef>,
     pub globals: Vec<Global>,
@@ -96,6 +99,7 @@ pub struct Program {
 impl Program {
     /// Runtime helper selection from the linker config, falling back to
     /// sensible defaults when no config is present.
+    #[allow(dead_code)]
     pub fn runtime(&self) -> RuntimeConfig {
         match &self.config {
             Some(cfg) => cfg.runtime.clone(),
@@ -104,11 +108,13 @@ impl Program {
     }
 
     /// Whether the GC heap runtime should be emitted.
+    #[allow(dead_code)]
     pub fn needs_gc(&self) -> bool {
         self.config.as_ref().map(|c| c.runtime.gc).unwrap_or(false)
     }
 
     /// Whether the allocator (`_dev_alloc`/`_dev_free`) should be emitted.
+    #[allow(dead_code)]
     pub fn needs_alloc(&self) -> bool {
         self.config
             .as_ref()
@@ -124,9 +130,11 @@ pub struct StructDef {
 }
 
 impl StructDef {
+    #[allow(dead_code)]
     pub fn field_index(&self, name: &str) -> Option<usize> {
         self.fields.iter().position(|(n, _)| n == name)
     }
+    #[allow(dead_code)]
     pub fn field_type(&self, name: &str) -> Option<&Type> {
         self.fields.iter().find(|(n, _)| n == name).map(|(_, t)| t)
     }
@@ -142,8 +150,11 @@ pub struct Global {
 #[derive(Clone, Debug)]
 pub struct ExternFunc {
     pub name: String,
+    #[allow(dead_code)]
     pub params: Vec<(String, Type)>,
+    #[allow(dead_code)]
     pub ret: Type,
+    #[allow(dead_code)]
     pub varargs: bool,
 }
 
@@ -151,11 +162,13 @@ pub struct ExternFunc {
 pub struct Func {
     pub name: String,
     pub params: Vec<(String, Type)>,
+    #[allow(dead_code)]
     pub ret: Type,
     pub body: Vec<Stmt>,
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum Stmt {
     Let {
         name: String,
@@ -215,6 +228,7 @@ impl Expr {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum ExprKind {
     Lit(Literal),
     Var(String),

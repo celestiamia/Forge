@@ -64,6 +64,7 @@ pub enum Import {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum Item {
     Function(Function),
     Struct(Struct),
@@ -283,6 +284,7 @@ pub enum Pattern {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum Expr {
     Binary(BinaryExpr),
     Unary(UnaryExpr),
@@ -430,6 +432,7 @@ pub struct RefExpr {
     pub expr: Box<Expr>,
 }
 
+#[allow(dead_code)]
 pub type RefMutExpr = RefExpr;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -485,6 +488,7 @@ pub enum BinOp {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum UnOp {
     Neg,
     Not,

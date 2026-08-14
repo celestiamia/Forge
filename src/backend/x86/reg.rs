@@ -2,6 +2,7 @@
 
 /// A general-purpose 32-bit x86 register.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
 pub enum Reg {
     Eax,
     Ecx,
@@ -13,6 +14,7 @@ pub enum Reg {
     Edi,
 }
 
+#[allow(dead_code)]
 impl Reg {
     /// 3-bit register encoding used in ModR/M, SIB, and opcode register fields.
     pub fn enc(self) -> u8 {

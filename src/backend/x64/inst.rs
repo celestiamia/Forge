@@ -4,6 +4,7 @@ use crate::backend::x64::Reg;
 
 /// Scale factor for indexed memory addressing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Scale {
     One = 1,
     Two = 2,
@@ -24,6 +25,7 @@ impl Scale {
 
 /// Memory addressing modes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Mem {
     /// `[disp32]` (absolute 32-bit displacement, no base/index).
     Disp32(i32),
@@ -39,6 +41,7 @@ pub enum Mem {
     RipRel(i32),
 }
 
+#[allow(dead_code)]
 impl Mem {
     pub fn disp32(disp: i32) -> Self {
         Mem::Disp32(disp)
@@ -137,6 +140,7 @@ impl IntoOp for usize {
 
 /// Condition codes for Jcc and SETcc.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Cond {
     O,
     No,
@@ -227,6 +231,7 @@ pub enum ShiftOp {
 /// High-level instruction representation. This enum covers the operations
 /// required by the x64 backend; `encode::encode_inst` lowers it to bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum Inst {
     MovRM64Imm32 { dst: Operand, imm: i32 },
     MovRM64R64 { dst: Operand, src: Reg },

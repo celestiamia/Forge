@@ -19,6 +19,7 @@ pub struct Loc {
 
 impl Loc {
     /// Create a fully populated location.
+    #[allow(dead_code)]
     pub fn new(file: impl Into<String>, line: usize, col: usize) -> Self {
         Self {
             file: Some(file.into()),
