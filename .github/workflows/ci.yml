@@ -67,9 +67,9 @@ jobs:
       - name: Run integration tests (${{ matrix.name }})
         run: |
           if [ -n "${{ matrix.rust_target }}" ]; then
-            cargo test --test integration -- --target ${{ matrix.target }}
+            cargo test --test integration --target ${{ matrix.target }}
           else
-            cargo test --test integration -- --target ${{ matrix.target }}
+            cargo test --test integration
           fi
         env:
           RUST_BACKTRACE: 1
