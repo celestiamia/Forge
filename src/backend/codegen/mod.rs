@@ -100,10 +100,7 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         Some("flat") => compile_flat_program(prog, true),
         Some("raw") => compile_flat_program(prog, false),
         Some("elf") => compile_elf_program(prog),
-        other => bail!(
-            "unsupported output format `{}`",
-            other.unwrap_or("(none)")
-        ),
+        other => bail!("unsupported output format `{}`", other.unwrap_or("(none)")),
     }
 }
 
@@ -111,7 +108,10 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
 /// output must fit in 510 bytes and is padded to a 512-byte boot sector with
 /// the 0x55AA signature; otherwise the image is emitted as-is (used for
 /// multi-sector stage-2 kernels loaded by a boot sector).
-pub(super) fn compile_flat_program(prog: &Program, boot_sector: bool) -> Result<Box<dyn ObjectWriter>> {
+pub(super) fn compile_flat_program(
+    prog: &Program,
+    boot_sector: bool,
+) -> Result<Box<dyn ObjectWriter>> {
     if prog.arch.as_deref() != Some("x86_16") {
         bail!(
             "flat binary target {} is not supported",
@@ -132,7 +132,8 @@ pub(super) fn compile_flat_program(prog: &Program, boot_sector: bool) -> Result<
 }
 
 pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
-    let mut cg = CodeGen::new(prog);
+    let struct_layouts = compute_struct_layouts(&prog.structs)?;
+    let mut cg = CodeGen::new(prog, struct_layouts);
 
     for f in &prog.funcs {
         let lab = cg.asm.new_label();
@@ -394,13 +395,10 @@ mod gc;
 mod layout;
 mod runtime;
 
-impl<'p> CodeGen<'p> {
-    pub(super) fn new(prog: &'p Program) -> Self {
-        let mut layouts = HashMap::new();
-        for s in &prog.structs {
-            layouts.insert(s.name.clone(), layout_struct(s));
-        }
+use layout::compute_struct_layouts;
 
+impl<'p> CodeGen<'p> {
+    pub(super) fn new(prog: &'p Program, struct_layouts: HashMap<String, StructLayout>) -> Self {
         let mut global_labels = HashMap::new();
         for g in &prog.globals {
             let lab = global_labels.len() as u32 + 1000; // offset to avoid conflict
@@ -416,7 +414,7 @@ impl<'p> CodeGen<'p> {
             global_labels,
             locals: HashMap::new(),
             frame_size: 0,
-            struct_layouts: layouts,
+            struct_layouts,
             addr_tmp: 0,
             ret_label: 0,
             rand_seed_patch: None,
@@ -447,7 +445,9 @@ impl<'p> CodeGen<'p> {
     /// Reject floating-point codegen when the target config disables floats.
     pub(super) fn require_floats(&self) -> Result<()> {
         if self.prog.config.as_ref().is_some_and(|c| !c.runtime.float) {
-            bail!("floating-point is disabled by the target's linker config (RUNTIME float = false)");
+            bail!(
+                "floating-point is disabled by the target's linker config (RUNTIME float = false)"
+            );
         }
         Ok(())
     }
@@ -699,11 +699,14 @@ impl<'p> CodeGen<'p> {
         lab
     }
 }
-pub(super) fn layout_struct(s: &StructDef) -> StructLayout {
+pub(super) fn layout_struct(
+    s: &StructDef,
+    struct_layouts: &HashMap<String, StructLayout>,
+) -> StructLayout {
     let mut offset = 0usize;
     let mut offsets = Vec::with_capacity(s.fields.len());
     for (_name, ty) in &s.fields {
-        let size = type_size(ty);
+        let size = type_size(ty, struct_layouts);
         let align = type_align(ty);
         offset = align_up(offset, align);
         offsets.push(offset);
@@ -722,13 +725,13 @@ pub(super) fn layout_struct(s: &StructDef) -> StructLayout {
     }
 }
 
-pub(super) fn type_size(ty: &Type) -> usize {
+pub(super) fn type_size(ty: &Type, struct_layouts: &HashMap<String, StructLayout>) -> usize {
     match ty {
         Type::I8 | Type::U8 | Type::Char | Type::Bool => 1,
         Type::I16 | Type::U16 => 2,
         Type::I32 | Type::U32 | Type::F32 => 4,
         Type::I64 | Type::U64 | Type::F64 | Type::Ptr(_) => 8,
-        Type::Struct(name) => panic!("struct size for {} must come from layout table", name),
+        Type::Struct(name) => struct_layouts.get(name).map(|l| l.size).unwrap_or(8),
         Type::Slice(_) => 16, // ptr (8) + len (8)
         _ => 8,
     }
@@ -741,9 +744,9 @@ impl<'p> CodeGen<'p> {
                 .struct_layouts
                 .get(name)
                 .map(|l| l.size)
-                .unwrap_or_else(|| type_size(ty)),
+                .unwrap_or_else(|| type_size(ty, &self.struct_layouts)),
             Type::Slice(_) => 16,
-            _ => type_size(ty),
+            _ => type_size(ty, &self.struct_layouts),
         }
     }
 
@@ -758,16 +761,16 @@ impl<'p> CodeGen<'p> {
             Type::Slice(_) => return (16, 8),
             _ => {}
         }
-        let size = type_size(ty);
+        let size = type_size(ty, &self.struct_layouts);
         let align = type_align(ty);
         (size.max(8), align.max(8))
     }
-}
 
-pub(super) fn ptr_elem_size(ty: &Type) -> Option<usize> {
-    match ty {
-        Type::Ptr(inner) => Some(type_size(inner)),
-        _ => None,
+    pub(super) fn ptr_elem_size(&self, ty: &Type) -> Option<usize> {
+        match ty {
+            Type::Ptr(inner) => Some(self.type_size_bytes(inner)),
+            _ => None,
+        }
     }
 }
 

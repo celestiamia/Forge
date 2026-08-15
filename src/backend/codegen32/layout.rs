@@ -1,5 +1,50 @@
 use super::*;
 
+/// Compute the layout of every struct in the program, recursively laying out
+/// nested structs first.  Memoized; rejects by-value struct cycles and unknown
+/// struct references with clean errors instead of panicking.
+pub(super) fn compute_struct_layouts(
+    structs: &[StructDef],
+) -> Result<HashMap<String, StructLayout>> {
+    let by_name: HashMap<&str, &StructDef> = structs.iter().map(|s| (s.name.as_str(), s)).collect();
+    let mut layouts: HashMap<String, StructLayout> = HashMap::new();
+    let mut visiting: Vec<String> = Vec::new();
+    for s in structs {
+        compute_layout_recursive(s, &by_name, &mut layouts, &mut visiting)?;
+    }
+    Ok(layouts)
+}
+
+pub(super) fn compute_layout_recursive(
+    s: &StructDef,
+    by_name: &HashMap<&str, &StructDef>,
+    layouts: &mut HashMap<String, StructLayout>,
+    visiting: &mut Vec<String>,
+) -> Result<StructLayout> {
+    if let Some(l) = layouts.get(&s.name) {
+        return Ok(l.clone());
+    }
+    if visiting.iter().any(|n| n == &s.name) {
+        bail!(
+            "struct `{}` contains itself by value; recursive structs are not supported",
+            s.name
+        );
+    }
+    visiting.push(s.name.clone());
+    for (_, ty) in &s.fields {
+        if let Type::Struct(name) = ty {
+            let nested = by_name
+                .get(name.as_str())
+                .ok_or_else(|| anyhow::anyhow!("unknown struct: {}", name))?;
+            compute_layout_recursive(nested, by_name, layouts, visiting)?;
+        }
+    }
+    visiting.pop();
+    let layout = layout_struct(s, layouts);
+    layouts.insert(s.name.clone(), layout.clone());
+    Ok(layout)
+}
+
 impl<'p> CodeGen<'p> {
     pub(super) fn alloc_slot(&mut self, size: usize, align: usize) -> Slot {
         let aligned = align_up(self.frame_size, align);

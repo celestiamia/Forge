@@ -47,21 +47,33 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn lower_module(&mut self, module: &ast::Module) -> Result<ir::Program> {
-        self.collect_signatures(module);
+        self.collect_signatures(module)?;
         self.lower_function_bodies(module)
     }
 
-    fn collect_signatures(&mut self, module: &ast::Module) {
+    fn collect_signatures(&mut self, module: &ast::Module) -> Result<()> {
         // Structs first so function signatures can reference any struct
         // regardless of item order in the merged module.
         for item in &module.items {
             if let ast::Item::Struct(s) = item {
+                if !s.generics.is_empty() {
+                    bail!("generic struct `{}` is not supported yet", s.name);
+                }
+                // Register an empty skeleton first so a struct can reference
+                // itself by value; the cycle is then rejected cleanly during
+                // codegen layout instead of surfacing as an unknown type.
+                self.structs.insert(
+                    s.name.clone(),
+                    ir::StructDef {
+                        name: s.name.clone(),
+                        fields: Vec::new(),
+                    },
+                );
                 let fields = s
                     .fields
                     .iter()
                     .map(|f| Ok((f.name.clone(), self.lower_type(&f.ty)?)))
-                    .collect::<Result<Vec<_>>>()
-                    .expect("struct field type resolution");
+                    .collect::<Result<Vec<_>>>()?;
                 self.structs.insert(
                     s.name.clone(),
                     ir::StructDef {
@@ -75,18 +87,19 @@ impl<'a> LowerCtx<'a> {
             match item {
                 ast::Item::Struct(_) => {}
                 ast::Item::Function(f) => {
+                    if !f.generics.is_empty() {
+                        bail!("generic function `{}` is not supported yet", f.name);
+                    }
                     let params = f
                         .params
                         .iter()
                         .map(|p| Ok((p.name.clone(), self.lower_type(&p.ty)?)))
-                        .collect::<Result<Vec<_>>>()
-                        .expect("function param type resolution");
+                        .collect::<Result<Vec<_>>>()?;
                     let ret = f
                         .ret
                         .as_ref()
                         .map(|t| self.lower_type(t))
-                        .transpose()
-                        .expect("function return type resolution")
+                        .transpose()?
                         .unwrap_or(ir::Type::Void);
                     let name =
                         if self.hosted && f.name == "main" && f.vis == ast::Visibility::Public {
@@ -102,14 +115,12 @@ impl<'a> LowerCtx<'a> {
                         .params
                         .iter()
                         .map(|p| self.lower_type(&p.ty))
-                        .collect::<Result<Vec<_>>>()
-                        .expect("extern function param type resolution");
+                        .collect::<Result<Vec<_>>>()?;
                     let ret = e
                         .ret
                         .as_ref()
                         .map(|t| self.lower_type(t))
-                        .transpose()
-                        .expect("extern function return type resolution")
+                        .transpose()?
                         .unwrap_or(ir::Type::Void);
                     self.externs.insert(e.name.clone(), (params, ret));
                 }
@@ -117,8 +128,7 @@ impl<'a> LowerCtx<'a> {
                     let ty =
                         c.ty.as_ref()
                             .map(|t| self.lower_type(t))
-                            .transpose()
-                            .expect("const type resolution")
+                            .transpose()?
                             .unwrap_or(ir::Type::I64);
                     self.vars.insert(c.name.clone(), ty);
                     self.global_vars.insert(c.name.clone());
@@ -134,6 +144,7 @@ impl<'a> LowerCtx<'a> {
                 _ => {}
             }
         }
+        Ok(())
     }
 
     fn lower_function_bodies(&mut self, module: &ast::Module) -> Result<ir::Program> {
@@ -283,6 +294,9 @@ impl<'a> LowerCtx<'a> {
                 "u16" | "uint16" => Ok(ir::Type::U16),
                 "u32" | "uint32" | "uint" => Ok(ir::Type::U32),
                 "u64" | "uint64" => Ok(ir::Type::U64),
+                "i128" | "int128" | "u128" | "uint128" => {
+                    bail!("128-bit integers are not supported by any backend yet")
+                }
                 "f32" | "float32" => Ok(ir::Type::F32),
                 "f64" | "float64" | "float" => Ok(ir::Type::F64),
                 "char" => Ok(ir::Type::Char),

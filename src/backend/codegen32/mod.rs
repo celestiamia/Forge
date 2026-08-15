@@ -63,7 +63,8 @@ pub struct CodeGen<'p> {
 }
 
 pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
-    let mut cg = CodeGen::new(prog);
+    let struct_layouts = compute_struct_layouts(&prog.structs)?;
+    let mut cg = CodeGen::new(prog, struct_layouts);
 
     for f in &prog.funcs {
         let lab = cg.asm.new_label();
@@ -270,6 +271,8 @@ mod expr;
 mod layout;
 mod runtime;
 
+use layout::compute_struct_layouts;
+
 impl<'p> CodeGen<'p> {
     pub(super) fn type_size_bytes(&self, ty: &Type) -> usize {
         match ty {
@@ -277,17 +280,12 @@ impl<'p> CodeGen<'p> {
                 .struct_layouts
                 .get(name)
                 .map(|l| l.size)
-                .unwrap_or_else(|| type_size(ty)),
-            _ => type_size(ty),
+                .unwrap_or_else(|| type_size(ty, &self.struct_layouts)),
+            _ => type_size(ty, &self.struct_layouts),
         }
     }
 
-    pub(super) fn new(prog: &'p Program) -> Self {
-        let mut layouts = HashMap::new();
-        for s in &prog.structs {
-            layouts.insert(s.name.clone(), layout_struct(s));
-        }
-
+    pub(super) fn new(prog: &'p Program, struct_layouts: HashMap<String, StructLayout>) -> Self {
         Self {
             prog,
             asm: Assembler::new(),
@@ -297,7 +295,7 @@ impl<'p> CodeGen<'p> {
             global_labels: HashMap::new(),
             locals: HashMap::new(),
             frame_size: 0,
-            struct_layouts: layouts,
+            struct_layouts,
             addr_tmp: 0,
             ret_label: 0,
             string_patches: Vec::new(),
@@ -504,11 +502,14 @@ impl<'p> CodeGen<'p> {
         lab
     }
 }
-pub(super) fn layout_struct(s: &StructDef) -> StructLayout {
+pub(super) fn layout_struct(
+    s: &StructDef,
+    struct_layouts: &HashMap<String, StructLayout>,
+) -> StructLayout {
     let mut offset = 0usize;
     let mut offsets = Vec::with_capacity(s.fields.len());
     for (_name, ty) in &s.fields {
-        let size = type_size(ty);
+        let size = type_size(ty, struct_layouts);
         let align = type_align(ty);
         offset = align_up(offset, align);
         offsets.push(offset);
@@ -527,21 +528,24 @@ pub(super) fn layout_struct(s: &StructDef) -> StructLayout {
     }
 }
 
-pub(super) fn type_size(ty: &Type) -> usize {
+pub(super) fn type_size(ty: &Type, struct_layouts: &HashMap<String, StructLayout>) -> usize {
     match ty {
         Type::I8 | Type::U8 | Type::Char | Type::Bool => 1,
         Type::I16 | Type::U16 => 2,
         Type::I32 | Type::U32 | Type::F32 => 4,
         Type::I64 | Type::U64 | Type::F64 | Type::Ptr(_) => 4,
-        Type::Struct(name) => panic!("struct size for {} must come from layout table", name),
+        Type::Struct(name) => struct_layouts.get(name).map(|l| l.size).unwrap_or(4),
+        Type::Slice(_) => 4,
         _ => 4,
     }
 }
 
-pub(super) fn ptr_elem_size(ty: &Type) -> Option<usize> {
-    match ty {
-        Type::Ptr(inner) => Some(type_size(inner)),
-        _ => None,
+impl<'p> CodeGen<'p> {
+    pub(super) fn ptr_elem_size(&self, ty: &Type) -> Option<usize> {
+        match ty {
+            Type::Ptr(inner) => Some(self.type_size_bytes(inner)),
+            _ => None,
+        }
     }
 }
 

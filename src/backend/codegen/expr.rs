@@ -142,13 +142,15 @@ impl<'p> CodeGen<'p> {
                     // pointer and the other an integer, scale the integer by
                     // the pointee size before adding.  All scalar sizes are
                     // powers of two, so the scaling is a shift.
-                    if let (Some(elem), true) = (ptr_elem_size(&left.ty), right.ty.is_integer()) {
+                    if let (Some(elem), true) =
+                        (self.ptr_elem_size(&left.ty), right.ty.is_integer())
+                    {
                         if elem > 1 {
                             self.asm.shl(Reg::Rax, elem.trailing_zeros() as i8)?;
                         }
                         self.asm.add(Reg::Rax, Reg::R10)?;
                     } else if let (Some(elem), true) =
-                        (ptr_elem_size(&right.ty), left.ty.is_integer())
+                        (self.ptr_elem_size(&right.ty), left.ty.is_integer())
                     {
                         if elem > 1 {
                             self.asm.mov(Reg::R11, Reg::R10)?;
@@ -163,7 +165,8 @@ impl<'p> CodeGen<'p> {
                 }
                 BinOp::Sub => {
                     self.asm.mov(Reg::Rdx, Reg::Rax)?; // right
-                    if let (Some(elem), true) = (ptr_elem_size(&left.ty), right.ty.is_integer())
+                    if let (Some(elem), true) =
+                        (self.ptr_elem_size(&left.ty), right.ty.is_integer())
                         && elem > 1
                     {
                         self.asm.shl(Reg::Rdx, elem.trailing_zeros() as i8)?;
