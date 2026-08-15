@@ -362,11 +362,13 @@ impl Parser {
         loop {
             if matches!(self.peek(), Token::Newline) {
                 let ahead = self.peek_past_newlines();
-                let continues = matches!(
-                    ahead,
-                    Token::LParen | Token::LBracket | Token::Dot | Token::As
-                ) || (matches!(ahead, Token::LBrace)
-                    && matches!(expr, Expr::Ident(_)));
+                // Only `.` and `as` may continue an expression onto the next
+                // line: a following statement may itself start with `(`, `[`,
+                // or `{`, so those must never be absorbed into the previous
+                // expression (e.g. `var x = y as int32` followed by
+                // `(p)[0] = i` used to merge into one bogus chain).
+                let continues = matches!(ahead, Token::Dot | Token::As)
+                    || (matches!(ahead, Token::LBrace) && matches!(expr, Expr::Ident(_)));
                 if !continues {
                     break;
                 }

@@ -322,4 +322,57 @@ def main() -> int32:
             parse_ok(&src);
         }
     }
+
+    // Regression: an expression ending with an `as` cast must not absorb a
+    // following statement that starts with `(` (e.g. `(p)[0] = i`), `[`, or
+    // `{`.  Those tokens can legitimately begin a new statement.
+    #[test]
+    fn cast_does_not_absorb_paren_statement() {
+        let src = "package test\n\ndef f():\n    var x: int64 = i as int64\n    (p)[0] = i\n";
+        let m = parse_ok(src);
+        let Item::Function(ref f) = m.items[0] else {
+            panic!("expected function");
+        };
+        let body = f.body.as_ref().expect("function body");
+        assert_eq!(body.stmts.len(), 2, "expected two statements");
+        assert!(
+            matches!(body.stmts[0], Stmt::Var(_)),
+            "first stmt should be a var"
+        );
+        let Stmt::Assign(ref a) = body.stmts[1] else {
+            panic!("expected an assignment, got {:?}", body.stmts[1]);
+        };
+        assert!(
+            matches!(a.target, Expr::Index(_)),
+            "second stmt must be an index assignment, got {:?}",
+            a.target
+        );
+    }
+
+    #[test]
+    fn cast_does_not_absorb_array_statement() {
+        let src = "package test\n\ndef f():\n    var x: int64 = i as int64\n    [1, 2, 3]\n";
+        let m = parse_ok(src);
+        let Item::Function(ref f) = m.items[0] else {
+            panic!("expected function");
+        };
+        let body = f.body.as_ref().expect("function body");
+        assert_eq!(body.stmts.len(), 2, "expected two statements");
+    }
+
+    // A line starting with `.` or `as` after an expression is an intentional
+    // multi-line continuation (at the same indentation) and must still work.
+    #[test]
+    fn dot_and_as_continuations_still_work() {
+        let m = parse_ok(
+            "package test\n\ndef f():\n    x = foo.bar\n    .baz()\n    y = i\n    as int64\n",
+        );
+        let Item::Function(ref f) = m.items[0] else {
+            panic!("expected function");
+        };
+        let body = f.body.as_ref().expect("function body");
+        assert_eq!(body.stmts.len(), 2, "expected two statements");
+        assert!(matches!(body.stmts[0], Stmt::Assign(_)));
+        assert!(matches!(body.stmts[1], Stmt::Assign(_)));
+    }
 }
