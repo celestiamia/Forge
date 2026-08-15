@@ -1,9 +1,0 @@
-{
-  "arch": "x86_64",
-  "os": "linux",
-  "env": "gnu",
-  "vendor": "unknown",
-  "obj_format": "elf",
-  "linker": "ld",
-  "freestanding": false
-}
