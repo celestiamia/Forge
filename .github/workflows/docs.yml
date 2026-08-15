@@ -37,7 +37,9 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/book
+          # book.toml sets build-dir = "../target/doc" (relative to docs/),
+          # so the generated site lives at the repo root under target/doc.
+          path: target/doc
 
   deploy:
     environment:
