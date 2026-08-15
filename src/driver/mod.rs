@@ -268,4 +268,180 @@ pub def main() -> int32:
             msg
         );
     }
+
+    #[test]
+    fn generic_function_is_a_clean_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = r#"
+package test
+
+def identity[T](x: T) -> T:
+    return x
+"#;
+        let source = write_temp_dev(&dir, "generic", src);
+        let output = dir.path().join("out");
+        let err = compile(CompileOptions {
+            source,
+            output,
+            target: Some("x86_64-unknown-linux-gnu".to_string()),
+            freestanding: false,
+            linker: None,
+        });
+        assert!(
+            err.is_err(),
+            "generic function should be rejected, not panic"
+        );
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("generic function `identity` is not supported yet"),
+            "expected clean generic error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn int128_is_a_clean_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = r#"
+package test
+
+pub def main() -> int32:
+    var x: int128 = 5
+    return 0
+"#;
+        let source = write_temp_dev(&dir, "int128", src);
+        let output = dir.path().join("out");
+        let err = compile(CompileOptions {
+            source,
+            output,
+            target: Some("x86_64-unknown-linux-gnu".to_string()),
+            freestanding: false,
+            linker: None,
+        });
+        assert!(err.is_err(), "int128 should be rejected, not panic");
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("128-bit integers are not supported"),
+            "expected clean int128 error, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn impl_block_compiles_without_panicking() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = r#"
+package test
+
+struct Point:
+    x: int32
+    y: int32
+
+impl Point:
+    def magnitude(self: Point) -> int32:
+        return self.x + self.y
+
+pub def main() -> int32:
+    var p: Point
+    p.x = 3
+    p.y = 4
+    return 0
+"#;
+        let source = write_temp_dev(&dir, "impl", src);
+        let output = dir.path().join("out");
+        let out = compile(CompileOptions {
+            source,
+            output,
+            target: Some("x86_64-unknown-linux-gnu".to_string()),
+            freestanding: false,
+            linker: None,
+        })
+        .expect("impl block should compile cleanly");
+        // Small delay to ensure the file is fully written and permissions
+        // applied before execution (prevents "Text file busy" in parallel runs).
+        thread::sleep(Duration::from_millis(10));
+        let status = Command::new(&out).status().unwrap();
+        assert!(status.success(), "impl program should exit 0");
+    }
+
+    #[test]
+    fn nested_struct_fields_compile_and_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = r#"
+package test
+
+struct Inner:
+    a: int32
+    b: int32
+
+struct Outer:
+    inner: Inner
+    tag: int32
+
+pub def main() -> int32:
+    var o: Outer
+    o.inner.a = 7
+    o.inner.b = 8
+    o.tag = 1
+    var x: Inner = o.inner
+    if x.a + x.b != 15:
+        return 1
+    if o.inner.b != 8:
+        return 2
+    return 0
+"#;
+        let source = write_temp_dev(&dir, "nested", src);
+        let output = dir.path().join("out");
+        let out = compile(CompileOptions {
+            source,
+            output,
+            target: Some("x86_64-unknown-linux-gnu".to_string()),
+            freestanding: false,
+            linker: None,
+        })
+        .expect("nested structs should compile cleanly");
+        // Small delay to ensure the file is fully written and permissions
+        // applied before execution (prevents "Text file busy" in parallel runs).
+        thread::sleep(Duration::from_millis(10));
+        let status = Command::new(&out).status().unwrap();
+        assert_eq!(
+            status.code(),
+            Some(0),
+            "nested struct program should exit 0"
+        );
+    }
+
+    #[test]
+    fn recursive_struct_by_value_is_a_clean_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = r#"
+package test
+
+struct A:
+    a: A
+
+pub def main() -> int32:
+    var x: A
+    return 0
+"#;
+        let source = write_temp_dev(&dir, "recursive", src);
+        let output = dir.path().join("out");
+        let err = compile(CompileOptions {
+            source,
+            output,
+            target: Some("x86_64-unknown-linux-gnu".to_string()),
+            freestanding: false,
+            linker: None,
+        });
+        assert!(
+            err.is_err(),
+            "recursive struct should be rejected, not crash"
+        );
+        let msg = err.unwrap_err().to_string();
+        assert!(
+            msg.contains("contains itself by value"),
+            "expected recursive-struct error, got: {}",
+            msg
+        );
+    }
 }
