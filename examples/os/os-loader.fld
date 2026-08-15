@@ -1,0 +1,7 @@
+# ForgeOS stage-2 loader descriptor: x86_16 raw image loaded at 0x9000.
+# See docs/targets/fld-format.md.
+ARCH x86_16
+FORMAT raw
+HOSTED false
+ENTRY _start
+LOAD 0x9000

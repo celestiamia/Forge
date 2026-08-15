@@ -7,7 +7,8 @@
 //! ## Heap layout
 //!
 //! The heap is a single contiguous, zero-initialised region in `.bss` of size
-//! `HEAP_ARENA_SIZE` (4 MiB).  The first allocation lazily initialises it as one
+//! `HEAP_ARENA_SIZE` (4 MiB) by default, overridable via the linker script
+//! `HEAP size` directive.  The first allocation lazily initialises it as one
 //! big free block; the free-list head, live-byte counter and statistics all live
 //! in the `gc_state` block that the compiler patches into each helper.
 //!
@@ -230,16 +231,17 @@ impl<'p> CodeGen<'p> {
         let after_init = self.asm.new_label();
         self.asm.test(Reg::Rcx, Reg::Rcx)?;
         self.asm.jne(after_init)?; // already initialised
-        // heap_base was pre-patched to `arena_base`; limit = base + HEAP_ARENA_SIZE.
+        // heap_base was pre-patched to `arena_base`; limit = base + heap size.
         self.asm
             .mov(Reg::Rdi, Mem::base_disp(Reg::Rsi, GC_HEAP_BASE as i32))?; // base
-        self.asm.mov(Reg::Rcx, HEAP_ARENA_SIZE as i32)?;
+        let heap_size = self.heap_size();
+        self.asm.mov(Reg::Rcx, heap_size as i32)?;
         self.asm.add(Reg::Rcx, Reg::Rdi)?;
         self.asm
             .mov(Mem::base_disp(Reg::Rsi, GC_HEAP_LIMIT as i32), Reg::Rcx)?; // limit
         // Whole arena = one free block: header at base, size = arena - hdr.
         self.asm
-            .mov(Reg::Rcx, (HEAP_ARENA_SIZE as i32) - H_HDR_SIZE as i32)?;
+            .mov(Reg::Rcx, (heap_size as i32) - H_HDR_SIZE as i32)?;
         self.asm.mov(Mem::base(Reg::Rdi), Reg::Rcx)?; // *(base) = size_flag (free)
         self.asm.lea(Reg::Rcx, Mem::base_disp(Reg::Rdi, 8))?;
         self.asm

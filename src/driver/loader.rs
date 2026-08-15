@@ -100,7 +100,12 @@ pub fn merge_modules(graph: ModuleGraph) -> Result<Module> {
     // Track names already defined in the merged module to report conflicts.
     let mut defined: HashSet<String> = collect_names(&graph.entry);
 
-    for (path, dep) in &graph.modules {
+    // Iterate dependencies in a deterministic order (module path) so that the
+    // merged item layout — and thus generated code — is reproducible.  The
+    // load graph itself is a HashMap, whose iteration order is randomized.
+    let mut deps: Vec<(&Vec<String>, &Module)> = graph.modules.iter().collect();
+    deps.sort_by(|a, b| a.0.cmp(b.0));
+    for (path, dep) in deps {
         for item in &dep.items {
             let names = defined_names(item);
             for name in &names {

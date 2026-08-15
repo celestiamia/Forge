@@ -1,15 +1,21 @@
 # Forge Documentation
 
-Welcome to the official documentation for **Forge** — a systems programming language with a self-hosting compiler (`forgec`) that compiles `.dev` source files directly to native machine code.
+Welcome to the official documentation for **Forge** — a systems programming
+language with a self-contained compiler (`forgec`) that compiles `.dev` source
+files directly to native machine code, with no external toolchain.
 
 ## What is Forge?
 
-Forge is a systems programming language designed for direct compilation to native code without external toolchains (no LLVM, clang, NASM, ld, etc.). The compiler `forgec` is a single binary that:
+Forge is a systems programming language designed for direct compilation to
+native code. The compiler `forgec` is a single binary that:
 
 - Parses `.dev` source files with Python-like indentation syntax
 - Performs type checking and semantic analysis
 - Emits native machine code directly (x86-64, x86-32, x86-16)
 - Writes ELF64, ELF32, or flat binary (boot sector) executables
+
+There is no LLVM, clang, NASM, or ld involved — `forgec` is written in Rust and
+does everything itself.
 
 ## Key Features
 
@@ -18,9 +24,9 @@ Forge is a systems programming language designed for direct compilation to nativ
 | **Self-contained compiler** | No external toolchain dependencies |
 | **Multiple targets** | x86_64 (ELF64), x86_32 (ELF32), x86_16 (flat 512-byte boot sector) |
 | **Python-like syntax** | Indentation-based, `def`/`let`/`var`, `if`/`elif`/`else`, `match`/`case` |
-| **Type safety** | Static typing with inference, generics, sum types |
-| **Memory control** | Pointers, `unsafe`, manual alloc/free, optional GC |
-| **Bare metal** | 512-byte boot sector from pure Forge code |
+| **Static typing** | Explicit type annotations with inference for literals |
+| **Memory control** | Raw pointers, `unsafe`, heap `alloc`/`free`, optional GC on x86_64 |
+| **Bare metal** | 512-byte boot sector written entirely in Forge |
 
 ## Quick Links
 
@@ -29,6 +35,7 @@ Forge is a systems programming language designed for direct compilation to nativ
 - [Language Syntax](language/syntax.md) — Complete syntax reference
 - [Standard Library](stdlib/README.md) — `std.io`, `std.mem`, `std.string`, etc.
 - [Targets](targets/README.md) — x86_64, x86_32, x86_16 details
+- [Known Issues & Limitations](language/known-issues.md) — What doesn't work yet
 
 ## Example: Hello World
 

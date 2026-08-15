@@ -218,17 +218,35 @@ Each test gets isolated temp directory:
 
 Automatic on drop (tempfile crate).
 
-### QEMU Tests (Boot Sector)
+### QEMU Tests (x86_16)
+
+Three integration tests boot real images under QEMU
+(`qemu-system-x86_64` must be on PATH):
 
 ```rust
 #[test]
 fn bootloader_dev_compiles_and_runs() {
-    let bin = compile_example("bootloader");
-    // ... spawn QEMU, capture output, verify "Hello, Forge bootloader"
+    // compile examples/bootloader.dev with --target x86_16-boot, boot it,
+    // verify "Hello, Forge bootloader"
+}
+
+#[test]
+fn kernel_dev_compiles_and_runs() {
+    // compile examples/kernel.dev with --target x86_16-boot, boot it,
+    // verify "Forge kernel 0.1" and the conventional-memory report
+}
+
+#[test]
+fn os_dev_boots_shell_and_calc() {
+    // build all three ForgeOS stages (examples/os/), assemble os.img,
+    // boot with an IDE drive + monitor socket, type `calc 42` via socat,
+    // verify "sq(0x002A) = 0x06E4"
 }
 ```
 
-Requires `qemu-system-x86_64` installed.
+The OS test additionally requires `socat` (it drives the QEMU monitor with
+`sendkey`).  See the [ForgeOS example](../examples/os.md) for the full
+host-side key injection recipe.
 
 ## CI Test Matrix
 

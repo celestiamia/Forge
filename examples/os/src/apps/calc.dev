@@ -1,0 +1,33 @@
+package apps.calc
+
+# Tiny hexadecimal calculator: `calc <number>` prints the square.
+# Parsing lives in helper functions so loops never need `as` casts
+# (see the parser gotchas in AGENTS.md).
+
+def app_calc(buf: ptr[char]) -> void:
+    var n: u16 = parse_u16(buf)
+    puts("sq(0x")
+    put_hex16(n)
+    puts(") = 0x")
+    put_hex16(n * n)
+    puts("\n")
+
+def digit_of(c: char) -> u16:
+    return (c as u16) - 48
+
+def parse_u16(s: ptr[char]) -> u16:
+    var acc: u16 = 0
+    var i: u16 = 0
+    var d: u16 = 0
+    var c: char = 0
+    unsafe:
+        c = *(s + i)
+        while c != 0 && (c < 48 || c > 57):
+            i = i + 1
+            c = *(s + i)
+        while c != 0:
+            d = digit_of(c)
+            acc = (acc * 10) + d
+            i = i + 1
+            c = *(s + i)
+    return acc

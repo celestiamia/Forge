@@ -1,143 +1,78 @@
 # std.alloc
 
-Heap memory allocation with bump allocator (and optional GC on x86_64).
+Heap memory allocation.
+
+```dev
+from std.alloc import alloc, free
+```
 
 ## Functions
 
 ### alloc
 
 ```dev
-def alloc(size: usize) -> mut ptr[byte]
+def alloc(size: uint64) -> ptr[char]
 ```
 
-Allocate `size` bytes. Returns pointer to allocated memory. Aborts on OOM.
+Allocate `size` bytes. Returns a `ptr[char]`. Aborts on OOM.
 
 ```dev
-from std.alloc import alloc, free
+let buf: ptr[char] = alloc(1024)
+unsafe:
+    *buf = (65 as char)
+free(buf)
+```
 
-let buf = alloc(1024) as mut ptr[int32]
-buf[0] = 42
-# ... use buf ...
-free(buf as mut ptr[byte])
+Cast the result to other pointer types when needed:
+
+```dev
+let p = alloc(64) as ptr[int32]
 ```
 
 ### free
 
 ```dev
-def free(ptr: mut ptr[byte]) -> void
+def free(p: ptr[char]) -> void
 ```
 
-Free previously allocated memory. For bump allocator, this is a no-op (entire arena freed at once).
+Free a previously allocated block.
 
-```dev
-let ptr = alloc(100)
-# ... use ...
-free(ptr)
-```
+- **x86_64**: prepends the block to the free list; memory is reused by future
+  allocations
+- **x86_32**: no-op (bump allocator — the whole arena is released at exit)
 
-### bump_alloc (Internal)
+## Allocator Behavior
 
-```dev
-def bump_alloc(size: usize) -> mut ptr[byte]
-```
+| Target | Allocator | `free` behavior |
+|--------|-----------|-----------------|
+| x86_64 | First-fit free list with splitting, 8-byte header per block (bit 0 = used, bit 1 = mark, rest = size) | Block returned to free list |
+| x86_32 | Bump allocator | No-op |
+| x86_16 | Not available | — |
 
-Internal bump allocator. Returns pointer or aborts.
+On x86_64 the heap is a 4 MiB `.bss` region. When the free list is exhausted,
+a conservative mark-and-sweep collection runs automatically and the allocation
+retries once before aborting. See [std.gc](gc.md).
 
-## Allocator Types
-
-### Bump Allocator (Default)
-
-- Single 64 KiB arena
-- Fast allocation (pointer bump)
-- No individual free (arena freed at once)
-- Suitable for short-lived allocations
-- Available on all targets
-
-### GC Allocator (x86_64 only)
-
-```dev
-from std.gc import gc_alloc, gc_free, gc_collect
-```
-
-- Conservative mark-and-sweep
-- Individual free supported
-- Automatic collection on exhaustion
-- 4 MiB heap
-
-## Usage Patterns
-
-### Temporary Buffers
+## Example
 
 ```dev
 from std.alloc import alloc, free
 from std.io import puts
 
-pub def process_data() -> int32:
-    let buf = alloc(4096) as mut ptr[byte]
-    # ... process ...
+pub def main() -> int32:
+    let buf: ptr[char] = alloc(16)
+    unsafe:
+        *buf = (72 as char)          # 'H'
+        *(buf + 1) = (105 as char)   # 'i'
+        *(buf + 2) = (0 as char)     # null terminator
+    puts(buf)
     free(buf)
     return 0
 ```
 
-### Arena Pattern
-
-```dev
-from std.alloc import alloc
-
-def build_structure() -> ptr[Node]:
-    let arena = alloc(64 * 1024)  # 64 KiB arena
-    let mut offset = 0
-    
-    def allocate(size: usize) -> mut ptr[byte]:
-        let ptr = (arena + offset) as mut ptr[byte]
-        offset = offset + size
-        return ptr
-    
-    # ... build using allocate ...
-    return root_node  # Arena freed when function returns (if using bump)
-```
-
-## Target Differences
-
-| Target | Allocator | Free Behavior |
-|--------|-----------|---------------|
-| x86_64 | Bump (64 KiB) / GC (4 MiB) | No-op (bump) / Actual free (GC) |
-| x86_32 | Bump (64 KiB) | No-op |
-| x86_16 | Not available | N/A |
-
 ## Safety
 
-- Returns null on OOM (aborts in current implementation)
-- Pointer must be from `alloc` to pass to `free`
-- Double-free is undefined behavior
-- Use-after-free is undefined behavior
-- No bounds checking
-
-## Example: Dynamic Array
-
-```dev
-from std.alloc import alloc, free
-from std.mem import copy_bytes
-
-struct DynArray:
-    data: mut ptr[int32]
-    len: usize
-    cap: usize
-
-impl DynArray:
-    pub def new() -> DynArray:
-        return DynArray { data: 0 as mut ptr[int32], len: 0, cap: 0 }
-    
-    pub def push(refmut self, value: int32):
-        if self.len == self.cap:
-            let new_cap = if self.cap == 0 { 4 } else { self.cap * 2 }
-            let new_data = alloc(new_cap * 4) as mut ptr[int32]
-            if self.len > 0:
-                copy_bytes(new_data, self.data, self.len * 4)
-            free(self.data)
-            self.data = new_data
-            self.cap = new_cap
-        
-        self.data[self.len] = value
-        self.len = self.len + 1
-```
+- Aborts on OOM (does not return null)
+- No bounds checking — writes past the requested size corrupt the heap
+- Double-free and use-after-free are undefined behavior
+- Pass only `alloc`-returned pointers to `free`

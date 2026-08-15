@@ -7,15 +7,14 @@ Forge uses Python-like indentation-based syntax with static typing.
 ```dev
 package <name>                    # Optional package declaration
 
-from <module> import <items>      # Imports
-import <module>                   # Import all public items
+from <module> import <items>      # Import specific items
+import <module>                   # Import a module (all items merged)
 
 pub def <name>(<params>) -> <ret>: # Function definitions
     <body>
 
 struct <Name>:                    # Struct definitions
     <field>: <type>
-    ...
 ```
 
 ## Lexical Elements
@@ -25,10 +24,10 @@ struct <Name>:                    # Struct definitions
 ```dev
 my_var          # snake_case for variables/functions
 MyStruct        # PascalCase for types
-CONSTANT        # SCREAMING_SNAKE for constants
 ```
 
-Rules: Start with letter/underscore, followed by letters/digits/underscores. Unicode not supported.
+Rules: start with a letter or underscore, followed by letters, digits, or
+underscores. Unicode is not supported.
 
 ### Keywords
 
@@ -37,40 +36,37 @@ def      let      var      if       elif     else
 for      while    loop     match    case     break
 continue return   import   from     as       pub
 extern   unsafe   struct   enum     union    const
-package  true     false    void     int8     int16
-int32    int64    uint8    uint16   uint32   uint64
-float32  float64  char     bool     ptr      own
-ref      refmut
+package  true     false    void     asm
 ```
 
 ### Literals
 
 ```dev
 42              # int32 (default)
-42i8            # typed integer
-42u32           # unsigned
+42i8            # typed integer suffix
 3.14            # float64 (default)
-3.14f32         # float32
+3.14f32         # float32 suffix
+0x1A            # hexadecimal
+0b1010          # binary
 'a'             # char (single quotes)
-"hello"         # string (double quotes)
+"hello"         # string literal (ptr[char], null-terminated)
 true / false    # bool
-b"bytes"        # byte array
 ```
 
 ### Comments
 
 ```dev
 # Single line comment
-
-# No multi-line comment syntax yet
 ```
+
+There is no multi-line comment syntax.
 
 ## Indentation Rules
 
 - **4 spaces per level** (tabs forbidden)
 - Consistent indentation required
-- Blank lines allowed within blocks
-- Dedent closes block
+- Blank lines are allowed within blocks
+- A dedent closes the block
 
 ```dev
 def foo() -> int32:
@@ -79,22 +75,20 @@ def foo() -> int32:
         puts("positive")
     else:
         puts("non-positive")
-# dedent here ends function
+# dedent here ends the function
 ```
 
 ## Operators
 
 ### Arithmetic
 
-| Operator | Description | Types |
-|----------|-------------|-------|
-| `+` | Addition | int, float |
-| `-` | Subtraction | int, float |
-| `*` | Multiplication | int, float |
+| Operator | Description | Operands |
+|----------|-------------|----------|
+| `+` `-` `*` | Addition, subtraction, multiplication | int, float |
 | `/` | Division (truncating for int) | int, float |
-| `//` | Floor division (toward -∞) | int |
+| `//` | Floor division (toward -infinity) | int |
 | `%` | Modulo | int |
-| `**` | Power (int only) | int |
+| `**` | Power (integer only) | int |
 
 ### Comparison
 
@@ -124,7 +118,8 @@ def foo() -> int32:
 | Operator | Description |
 |----------|-------------|
 | `=` | Assignment |
-| `+=` `-=` `*=` `/=` `%=` | Compound assignment |
+
+Compound assignment (`+=`, `-=`, etc.) is **not** supported — write `x = x + 1`.
 
 ### Other
 
@@ -132,22 +127,10 @@ def foo() -> int32:
 |----------|-------------|
 | `.` | Field access |
 | `[]` | Index access |
-| `as` | Cast: `x as int32` |
+| `as` | Postfix cast: `x as int32` |
 | `:` | Type annotation |
 | `->` | Return type |
-| `::` | Path separator (imports) |
-
-## Precedence (Highest to Lowest)
-
-1. `()` `[]` `.` `as` (postfix)
-2. `**` (right-associative)
-3. `!` `~` `-` (unary)
-4. `*` `/` `//` `%` `<<` `>>` `&` `^` `|`
-5. `+` `-`
-6. `==` `!=` `<` `<=` `>` `>=`
-7. `&&`
-7. `\|\|`
-8. `=` `+=` `-=` `*=` `/=` `%=` (right-associative)
+| `&` | Address-of (produces a reference to a local) |
 
 ## Expressions
 
@@ -163,7 +146,6 @@ let z: int32 = 5     # Explicit type
 
 ```dev
 puts("hello")
-max(10, 20)
 foo(1, bar(2))
 ```
 
@@ -177,27 +159,23 @@ let y: int32 = x as int32
 ### Field Access
 
 ```dev
-struct Point: x: int32, y: int32
+struct Point:
+    x: int32
+    y: int32
+
 let p = Point { x: 1, y: 2 }
 let x = p.x
 ```
+
+Field access on a `ptr[Struct]` parameter dereferences automatically.
 
 ### Indexing
 
 ```dev
 let arr = [1, 2, 3]
 let x = arr[0]
-arr[1] = 5
-```
-
-### Blocks
-
-```dev
-let result = {
-    let x = 1
-    let y = 2
-    x + y  # Last expression is value
-}
+var a = [1, 2, 3]
+a[1] = 5
 ```
 
 ## Statements
@@ -225,8 +203,12 @@ while i < 10:
 ### For Loop
 
 ```dev
-# Range-based (inclusive..exclusive)
+# Range-based: start..end (exclusive end)
 for i in 0..10:
+    puts(i)
+
+# Inclusive end
+for i in 0..=10:
     puts(i)
 ```
 
@@ -240,6 +222,8 @@ loop:
         continue
 ```
 
+`break` and `continue` also work in `while` and `for` loops.
+
 ### Match Expression
 
 ```dev
@@ -248,6 +232,9 @@ match x:
     case 1: puts("one")
     case _: puts("other")  # Wildcard
 ```
+
+Match cases compare against integer/char literal values; the `_` wildcard
+catches everything else. Cases are evaluated top-to-bottom.
 
 ### Return
 
@@ -260,9 +247,11 @@ return          # void return
 
 ```dev
 unsafe:
-    let ptr = 0x1000 as ptr[int32]
-    *ptr = 42
+    let p = 0x1000 as ptr[int32]
+    *p = 42
 ```
+
+Raw pointer dereference and pointer arithmetic must live inside `unsafe`.
 
 ## Items
 
@@ -279,10 +268,6 @@ pub def main() -> int32:
 
 # Extern (foreign function)
 extern def puts(s: ptr[char]) -> int32
-
-# Generic
-pub def identity<T>(x: T) -> T:
-    return x
 ```
 
 ### Structs
@@ -291,51 +276,36 @@ pub def identity<T>(x: T) -> T:
 struct Point:
     x: int32
     y: int32
+```
 
-# With methods
-impl Point:
-    pub def new(x: int32, y: int32) -> Point:
-        return Point { x: x, y: y }
+Struct fields are laid out sequentially without padding.
 
-    pub def distance(self) -> float64:
-        return sqrt((self.x * self.x + self.y * self.y) as float64)
+### Constants
+
+```dev
+const MAX_SIZE: int32 = 1024
 ```
 
 ### Enums
 
 ```dev
-enum Option<T>:
-    Some(T)
-    None
-
-# Pattern matching
-match opt:
-    case Some(v): puts("got value")
-    case None: puts("empty")
+enum Color:
+    Red
+    Green
+    Blue
 ```
 
-### Constants
+Enums are currently **declaration-only**: variants cannot be referenced or
+matched yet (see [Known Issues](known-issues.md)).
+
+### Attributes
 
 ```dev
-const PI: float64 = 3.14159265359
-const MAX_SIZE: int32 = 1024
-```
-
-### Packages
-
-```dev
-package mylib
-
-# Items in this file belong to `mylib` namespace
-```
-
-## Attributes
-
-```dev
-@freestanding          # No stdlib, custom entry point
-@extern("c")           # C calling convention
-@export                # Export symbol
-@inline                # Hint to inline
+@freestanding          # No hosted runtime; custom entry point
+@packed                # Accepted; no layout effect yet
+@align(8)              # Accepted; no layout effect yet
+@c_enum                # Accepted; no effect yet
+@extern("c")           # ABI annotation on extern functions
 ```
 
 ## Module Resolution
@@ -347,31 +317,16 @@ from std.io import puts
 # Relative to entry file
 import utils
 from mylib import helper
-
-# Package-qualified
-from mypkg.sub import foo
 ```
 
-Resolution: Walk up from entry file's directory looking for `.dev` files.
+All imported modules are merged into a **single flat namespace**. See
+[Modules & Imports](modules.md).
 
 ## Type Annotations
 
 ```dev
-# Basic
 let x: int32 = 42
-
-# Pointer
 let p: ptr[int32] = &x
-
-# Array
-let arr: [int32; 10] = [0; 10]
-
-# Slice
-let s: slice[int32] = &arr[..]
-
-# Function
-let f: fn(int32) -> int32 = add
-
-# Tuple
-let t: (int32, float64) = (1, 2.0)
 ```
+
+See [Type System](types.md) for the full type list.

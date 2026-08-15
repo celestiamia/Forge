@@ -15,7 +15,6 @@ impl Context {
             Expr::Field(f) => self.check_field(f),
             Expr::Index(i) => self.check_index(i),
             Expr::Cast(c) => self.check_cast(c),
-            Expr::Asm(a) => self.check_asm(a),
             Expr::SizeOf(s) => {
                 let ty = self.resolve_type_expr(&s.ty);
                 TypedExpr::new(TypedExprKind::SizeOf(ty), Type::USize)
@@ -840,37 +839,6 @@ impl Context {
                 ty: to.clone(),
             },
             to,
-        )
-    }
-
-    pub(super) fn check_asm(&mut self, a: &ast::AsmExpr) -> TypedExpr {
-        if !self.in_unsafe {
-            self.error("inline assembly requires `unsafe`".to_string());
-        }
-        let inputs: Vec<TypedAsmOperand> = a
-            .inputs
-            .iter()
-            .map(|op| TypedAsmOperand {
-                constraint: op.constraint.clone(),
-                expr: self.check_expr(&op.expr, None),
-            })
-            .collect();
-        let outputs: Vec<TypedAsmOperand> = a
-            .outputs
-            .iter()
-            .map(|op| TypedAsmOperand {
-                constraint: op.constraint.clone(),
-                expr: self.check_expr(&op.expr, None),
-            })
-            .collect();
-        TypedExpr::new(
-            TypedExprKind::Asm(TypedAsmExpr {
-                template: a.template.clone(),
-                inputs,
-                outputs,
-                clobbers: a.clobbers.clone(),
-            }),
-            Type::Void,
         )
     }
 

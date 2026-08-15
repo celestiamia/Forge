@@ -95,9 +95,10 @@ forgec --freestanding <input>    # No stdlib, custom entry point
 | Problem | Solution |
 |---------|----------|
 | `command not found: forgec` | [Install forgec](installation.md) or add to PATH |
-| `error: unresolved import` | Check `std.*` module name, ensure `core/` exists |
-| `error: expected 4-space indent` | Use 4 spaces (not tabs) for indentation |
-| Linker error on x86_32 | Install `gcc-multilib` and `libc6-dev-i386` |
+| `Error: parse error in ...: unknown identifier ...` | Check module imports — the namespace is flat; every name must be imported or defined |
+| `Error: parse error in ...: expected X, found Y` | Check indentation (4 spaces, no tabs) and syntax |
+| `type checking failed: ...` | Type mismatch — use explicit `as` casts (no implicit conversions) |
+| Compilation fails on x86_32 with float errors | The x86_32 target does not support `float32`/`float64` — avoid them and modules that use them |
 
 ## Next Steps
 

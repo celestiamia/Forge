@@ -5,7 +5,7 @@ Building for different targets from a single host.
 ## Host Requirements
 
 - Linux x86_64 (tested on Ubuntu 20.04+, Fedora 35+)
-- Rust 1.70+
+- Rust 1.85+ (edition 2024)
 - Target-specific dependencies
 
 ## Target Matrix

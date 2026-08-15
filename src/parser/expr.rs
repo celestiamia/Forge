@@ -455,7 +455,6 @@ impl Parser {
         match self.peek() {
             Token::Sizeof => self.parse_sizeof(),
             Token::Offsetof => self.parse_offsetof(),
-            Token::Asm => self.parse_asm(),
             Token::If => self.parse_if_expr(),
             Token::Match => {
                 let m = self.parse_match_expr()?;
@@ -552,72 +551,6 @@ impl Parser {
             ty,
             field,
         }))
-    }
-
-    pub(super) fn parse_asm(&mut self) -> Result<Expr, ParseError> {
-        self.expect(Token::Asm)?;
-        self.expect(Token::LParen)?;
-        let template = self.expect_string()?;
-        let mut inputs = Vec::new();
-        let mut outputs = Vec::new();
-        let mut clobbers = Vec::new();
-        self.skip_newlines();
-        if self.eat(&Token::Comma) {
-            self.skip_newlines();
-            if !self.eat(&Token::RParen) {
-                loop {
-                    let kind = self.parse_asm_kind()?;
-                    let constraint = self.expect_string()?;
-                    match kind.as_str() {
-                        "in" => {
-                            let expr = self.parse_expr()?;
-                            inputs.push(AsmOperand {
-                                constraint,
-                                expr: Box::new(expr),
-                            });
-                        }
-                        "out" => {
-                            let expr = self.parse_expr()?;
-                            outputs.push(AsmOperand {
-                                constraint,
-                                expr: Box::new(expr),
-                            });
-                        }
-                        "clobber" => {
-                            clobbers.push(constraint);
-                        }
-                        _ => return Err(self.error(format!("unknown asm operand {}", kind))),
-                    }
-                    self.skip_newlines();
-                    if !self.eat(&Token::Comma) {
-                        break;
-                    }
-                    self.skip_newlines();
-                    if self.eat(&Token::RParen) {
-                        break;
-                    }
-                }
-                self.expect(Token::RParen)?;
-            }
-        } else {
-            self.expect(Token::RParen)?;
-        }
-        Ok(Expr::Asm(AsmExpr {
-            span: self.current_span(),
-            template,
-            inputs,
-            outputs,
-            clobbers,
-        }))
-    }
-
-    pub(super) fn parse_asm_kind(&mut self) -> Result<String, ParseError> {
-        if self.peek() == &Token::In {
-            self.advance();
-            Ok("in".to_string())
-        } else {
-            self.expect_ident()
-        }
     }
 
     pub(super) fn parse_if_expr(&mut self) -> Result<Expr, ParseError> {
@@ -727,7 +660,6 @@ impl Parser {
                 | Token::Plus
                 | Token::Sizeof
                 | Token::Offsetof
-                | Token::Asm
                 | Token::Unsafe
                 | Token::If
                 | Token::Match

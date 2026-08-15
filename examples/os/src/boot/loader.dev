@@ -1,0 +1,63 @@
+package os.loader
+
+# ForgeOS stage-2 loader, pure Forge.
+#
+# The stage-1 boot sector loads this image to 0:0x9000 and far-jumps to it
+# (see os-loader.fld: `LOAD 0x9000` makes the compiler emit absolute string
+# addresses against 0x9000).  This loader reads the kernel - image sectors
+# 3-10, i.e. CHS sector 4-11, 8 x 512 bytes, at most 4096 bytes - into
+# 0x7C00 and far-jumps there.
+#
+# Because it runs at 0x9000 it never overlaps the kernel image at
+# 0x7C00..0x8C00, and its stack (top at 0x7C00, growing down) never collides
+# with the load target either.
+
+extern def _dev_bios_teletype(c: char) -> void
+extern def _dev_load_char(p: ptr[char]) -> char
+extern def _dev_halt() -> void
+extern def _dev_bios_disk_read(drive: u16, cyl: u16, head: u16, sector: u16, count: u16, buf: ptr[char]) -> u16
+extern def _dev_jump(addr: u16) -> void
+
+@freestanding
+pub def _start() -> void:
+    var buf: ptr[char] = 0x7C00 as ptr[char]
+    var tries: u16 = 3
+    var status: u16 = 0
+    puts("ForgeOS: loading kernel")
+    while tries != 0:
+        status = _dev_bios_disk_read(0x80, 0, 0, 4, 8, buf)
+        if status == 0:
+            tries = 0
+        else:
+            tries = tries - 1
+    if status != 0:
+        puts(": disk error ")
+        put_hex16(status)
+        _dev_halt()
+    puts(": ok\n")
+    _dev_jump(0x7C00)
+
+def put_hex_digit(d: u16) -> void:
+    if d < 10:
+        _dev_bios_teletype(((48 as u16) + d) as char)
+    else:
+        _dev_bios_teletype(((55 as u16) + d) as char)
+
+def put_hex16(v: u16) -> void:
+    var place: u16 = 4096
+    var i: u16 = 0
+    while i < 4:
+        var digit: u16 = v / place
+        put_hex_digit(digit)
+        v = v % place
+        place = place / 16
+        i = i + 1
+
+def puts(msg: ptr[char]) -> void:
+    unsafe:
+        var p: ptr[char] = msg
+        var c: char = _dev_load_char(p)
+        while c != 0:
+            _dev_bios_teletype(c)
+            p = p + 1
+            c = _dev_load_char(p)

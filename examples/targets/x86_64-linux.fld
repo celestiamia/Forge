@@ -1,0 +1,29 @@
+# x86_64 Linux hosted ELF64 target (mirrors the `x86_64-unknown-linux-gnu` preset).
+#
+# Usage: forgec hello.dev -o hello --linker examples/targets/x86_64-linux.fld
+
+ARCH x86_64
+FORMAT elf
+HOSTED true
+ENTRY _forge_main
+HEAP size = 4M
+
+MEMORY {
+    ram (rwx) : origin = 0x400000, length = 512M
+}
+
+SECTIONS {
+    .text > ram
+    .rodata > ram
+    .data > ram
+    .bss > ram
+}
+
+RUNTIME {
+    syscalls = true
+    gc = false
+    alloc = false
+    float = true
+    sockets = false
+    files = false
+}

@@ -4,10 +4,14 @@ use std::collections::HashMap;
 pub(crate) struct Encoder {
     bytes: Vec<u8>,
     labels: HashMap<u32, usize>,
-    short_fixups: Vec<(u32, usize)>,
+    /// (label, offset of the displacement byte, opcode).
+    short_fixups: Vec<(u32, usize, u8)>,
     rel16_fixups: Vec<(u32, usize)>,
     imm16_fixups: Vec<(u32, usize)>,
     next_label: u32,
+    /// Memory address the image is loaded at; absolute addresses (strings,
+    /// data) are computed against this base.
+    load_base: u16,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -80,7 +84,7 @@ pub(crate) enum Cond {
 
 #[allow(dead_code)]
 impl Encoder {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(load_base: u16) -> Self {
         Self {
             bytes: Vec::new(),
             labels: HashMap::new(),
@@ -88,6 +92,7 @@ impl Encoder {
             rel16_fixups: Vec::new(),
             imm16_fixups: Vec::new(),
             next_label: 1,
+            load_base,
         }
     }
 
@@ -102,41 +107,125 @@ impl Encoder {
     }
 
     pub(super) fn into_bytes(self) -> Result<Vec<u8>> {
-        let mut bytes = self.bytes;
-        for (lab, off) in self.short_fixups {
+        // Short jumps that cannot reach their target are widened by inserting
+        // bytes, which shifts every later offset:
+        //   - `jcc` -> inverted `jcc +3` over a near `jmp rel16` (5 bytes)
+        //   - `jmp` -> plain near `jmp rel16` (3 bytes)
+        //
+        // Widening a jump only pushes later targets further away, so the set
+        // of widened jumps only grows; iterate until it is stable.
+        let delta_before = |x: usize, widened: &[(usize, usize)]| {
+            widened
+                .iter()
+                .filter(|(w, _)| *w < x)
+                .map(|(_, d)| *d)
+                .sum::<usize>()
+        };
+        let mut widened: Vec<(usize, usize)> = Vec::new(); // (opcode pos, delta)
+        loop {
+            let mut grew = false;
+            for &(lab, off, _op) in &self.short_fixups {
+                let o = off - 1;
+                if widened.iter().any(|(w, _)| *w == o) {
+                    continue;
+                }
+                let target = *self
+                    .labels
+                    .get(&lab)
+                    .ok_or_else(|| anyhow!("undefined short jump label {}", lab))?;
+                let target_off = target + delta_before(target, &widened);
+                let pc = off + delta_before(off, &widened) + 1;
+                let rel = target_off as i64 - pc as i64;
+                if !(-128..=127).contains(&rel) {
+                    let op = self
+                        .short_fixups
+                        .iter()
+                        .find(|(l, f_off, _)| *l == lab && *f_off == off)
+                        .map(|(_, _, op)| *op)
+                        .unwrap();
+                    widened.push((o, if op == 0xEB { 1 } else { 3 }));
+                    grew = true;
+                }
+            }
+            if !grew {
+                break;
+            }
+        }
+
+        // Rebuild the buffer, inserting each widened patch in place of its
+        // 2-byte original.  Patch bodies need the shifted target offsets.
+        let mut out: Vec<u8> = Vec::with_capacity(
+            self.bytes.len() + widened.iter().map(|(_, d)| *d).sum::<usize>(),
+        );
+        {
+            let mut sites: Vec<(usize, usize)> = widened.clone();
+            sites.sort_unstable();
+            let mut pos = 0usize;
+            for (o, _d) in &sites {
+                out.extend_from_slice(&self.bytes[pos..*o]);
+                let (lab, _, op) = *self
+                    .short_fixups
+                    .iter()
+                    .find(|(_, f_off, _)| *f_off == *o + 1)
+                    .expect("widened site must have a fixup");
+                let target = *self
+                    .labels
+                    .get(&lab)
+                    .ok_or_else(|| anyhow!("undefined short jump label {}", lab))?;
+                let target_off = target + delta_before(target, &widened);
+                let shifted = *o + delta_before(*o, &widened);
+                if op == 0xEB {
+                    let rel16 = (target_off as i64 - (shifted + 3) as i64) as i16;
+                    out.push(0xE9);
+                    out.extend_from_slice(&rel16.to_le_bytes());
+                } else {
+                    let rel16 = (target_off as i64 - (shifted + 5) as i64) as i16;
+                    out.push(op ^ 0x01);
+                    out.push(3);
+                    out.push(0xE9);
+                    out.extend_from_slice(&rel16.to_le_bytes());
+                }
+                pos = *o + 2;
+            }
+            out.extend_from_slice(&self.bytes[pos..]);
+        }
+
+        // Patch every fixup at its shifted position.
+        for &(lab, off, _) in &self.short_fixups {
+            let o = off - 1;
             let target = *self
                 .labels
                 .get(&lab)
                 .ok_or_else(|| anyhow!("undefined short jump label {}", lab))?;
-            let pc = off + 1;
-            let rel = target as i64 - pc as i64;
-            if !(-128..=127).contains(&rel) {
-                bail!(
-                    "16-bit backend: short jump to label {} is out of range ({} bytes)",
-                    lab,
-                    rel
-                );
+            if widened.iter().any(|(w, _)| *w == o) {
+                continue; // already emitted as a widened patch
             }
-            bytes[off] = rel as u8;
+            let target_off = target + delta_before(target, &widened);
+            let p = off + delta_before(off, &widened);
+            let pc = p + 1;
+            let rel = (target_off as i64 - pc as i64) as u8;
+            out[p] = rel;
         }
-        for (lab, off) in self.rel16_fixups {
+        for (lab, off) in &self.rel16_fixups {
             let target = *self
                 .labels
-                .get(&lab)
+                .get(lab)
                 .ok_or_else(|| anyhow!("undefined rel16 label {}", lab))?;
-            let pc = off + 2;
-            let rel = (target as i64 - pc as i64) as i16;
-            bytes[off..off + 2].copy_from_slice(&rel.to_le_bytes());
+            let p = off + delta_before(*off, &widened);
+            let rel = ((target + delta_before(target, &widened)) as i64 - (p + 2) as i64) as i16;
+            out[p..p + 2].copy_from_slice(&rel.to_le_bytes());
         }
-        for (lab, off) in self.imm16_fixups {
+        for (lab, off) in &self.imm16_fixups {
             let target = *self
                 .labels
-                .get(&lab)
+                .get(lab)
                 .ok_or_else(|| anyhow!("undefined imm16 label {}", lab))?;
-            let addr = (0x7C00u32 + target as u32) as u16;
-            bytes[off..off + 2].copy_from_slice(&addr.to_le_bytes());
+            let addr = (u32::from(self.load_base) + (target + delta_before(target, &widened)) as u32) as u16;
+            let p = off + delta_before(*off, &widened);
+            out[p..p + 2].copy_from_slice(&addr.to_le_bytes());
         }
-        Ok(bytes)
+
+        Ok(out)
     }
 
     pub(super) fn emit(&mut self, b: u8) {
@@ -386,10 +475,7 @@ impl Encoder {
     }
 
     pub(super) fn jmp_short_lab(&mut self, lab: u32) {
-        self.emit(0xEB);
-        let off = self.bytes.len();
-        self.emit(0);
-        self.short_fixups.push((lab, off));
+        self.jcc_short_lab(0xEB, lab);
     }
 
     pub(super) fn je_short_lab(&mut self, lab: u32) {
@@ -404,7 +490,7 @@ impl Encoder {
         self.emit(opcode);
         let off = self.bytes.len();
         self.emit(0);
-        self.short_fixups.push((lab, off));
+        self.short_fixups.push((lab, off, opcode));
     }
 
     pub(super) fn call_near_lab(&mut self, lab: u32) {

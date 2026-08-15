@@ -1,58 +1,51 @@
 # CLI Reference
 
-Complete reference for the `forgec` command-line interface.
+Reference for the `forgec` command-line interface.
 
 ## Usage
 
 ```bash
-forgec [OPTIONS] <SOURCE> [-o <OUTPUT>] [--target <TARGET>]
+forgec [OPTIONS] <SOURCE>
 ```
 
 ## Arguments
 
 | Argument | Description |
 |----------|-------------|
-| `<SOURCE>` | Path to `.dev` source file (required) |
+| `<SOURCE>` | Path to the `.dev` source file (required) |
 
 ## Options
 
-### Output
-
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
-| `-o`, `--output` | `-o` | Output file path | `<source>` without extension |
+| `--target <TRIPLE>` | `-t` | Target triple | `x86_64-unknown-linux-gnu` |
+| `--output <PATH>` | `-o` | Output file path | `<source>` with extension stripped |
+| `--freestanding` | | No hosted runtime; custom entry point (`_start`) | off |
+| `--linker <PATH>` | | Custom target config (`.fld` linker descriptor) instead of a built-in target | built-in |
+| `--help` | `-h` | Print help | |
+| `--version` | `-V` | Print version | |
 
-### Target
+### Supported Targets
 
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--target <TRIPLE>` | Target triple | Host native |
+| Target triple | Description |
+|---------------|-------------|
+| `x86_64-unknown-linux-gnu` | 64-bit Linux (ELF64) — also `native` |
+| `x86_32-unknown-linux-gnu` | 32-bit Linux (ELF32) |
+| `x86_16-boot` | 16-bit real-mode boot sector (flat 512-byte binary) |
 
-**Supported Targets:**
-- `x86_64-unknown-linux-gnu` - 64-bit Linux (ELF64)
-- `x86_32-unknown-linux-gnu` - 32-bit Linux (ELF32)
-- `x86_16-boot` - 16-bit boot sector (flat binary)
-
-### Mode
-
-| Option | Description |
-|--------|-------------|
-| `--freestanding` | No runtime, custom entry point (`_start`) |
-
-### Other
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--help` | `-h` | Show help message |
-| `--version` | `-V` | Show version |
-| `--emit-asm` | | Emit assembly instead of object |
+`--linker` accepts a custom target described by a `.fld` (Forge Linker
+Descriptor) file — see the [`.fld` format reference](../targets/fld-format.md)
+and the ready-made scripts in `examples/targets/`.  The three triples above are
+the built-in presets.  On x86_16, a `.fld` can also select `FORMAT raw` for
+bare multi-stage images (no boot signature) and set the stage's `LOAD`
+address — see the [ForgeOS example](../examples/os.md).
 
 ## Examples
 
 ### Basic Compilation
 
 ```bash
-# Compile hello world (native x86_64)
+# Compile hello world (default x86_64)
 forgec hello.dev -o hello
 
 # Explicit target
@@ -68,49 +61,30 @@ forgec bootloader.dev -o boot.bin --target x86_16-boot
 ### Freestanding Mode
 
 ```bash
-# No runtime, custom _start entry
-forgec kernel.dev -o kernel --freestanding --target x86_64-unknown-linux-gnu
+# No hosted runtime, custom _start entry
+forgec kernel.dev -o kernel.bin --freestanding --target x86_16-boot
 ```
+
+`x86_16-boot` is implicitly freestanding (boot-sector format with a
+`_start` entry); `--freestanding` is only needed to run bare-metal code
+on a hosted target (e.g. `--target x86_64-unknown-linux-gnu`).
 
 ### Version & Help
 
 ```bash
 forgec --version
-# forgec 0.1.0 (abc1234)
+# forgec 0.1.0
 
 forgec --help
 ```
-
-## Exit Codes
-
-| Code | Meaning |
-|------|---------|
-| 0 | Success |
-| 1 | Compilation error |
-| 2 | Invalid arguments |
-| 3 | I/O error |
-
-## Environment Variables
-
-| Variable | Description |
-|----------|-------------|
-| `RUST_BACKTRACE` | Enable backtraces on panic (1=short, full=full) |
-| `FORGEC_CACHE` | Cache directory (default: `~/.cache/forgec`) |
-
-## File Extensions
-
-| Extension | Description |
-|-----------|-------------|
-| `.dev` | Forge source file |
-| `.fld` | Forge Linker Descriptor |
 
 ## Output Files
 
 | Target | Output | Description |
 |--------|--------|-------------|
-| x86_64 | `.o` / executable | ELF64 |
-| x86_32 | `.o` / executable | ELF32 |
-| x86_16 | `.bin` | Flat binary (512 bytes) |
+| x86_64 | executable | ELF64, statically linked |
+| x86_32 | executable | ELF32, statically linked |
+| x86_16 | `.bin` | Flat binary, 512 bytes, 0x55AA signature |
 
 ## Compiler Phases
 
@@ -123,45 +97,41 @@ forgec input.dev -o output
 ├──────────────────┤
 │ 2. Parsing       │  AST (abstract syntax tree)
 ├──────────────────┤
-│ 3. Semantic      │  Typed AST + type checking
+│ 3. Imports       │  Recursive module loading + merge
 ├──────────────────┤
-│ 4. Lowering      │  IR (intermediate representation)
+│ 4. Type checking │  Typed AST + semantic analysis
 ├──────────────────┤
-│ 5. Codegen       │  Machine code (per target)
+│ 5. Lowering      │  AST → IR
 ├──────────────────┤
-│ 6. Encoding      │  Machine code → bytes
+│ 6. Codegen       │  Machine code (per target)
 ├──────────────────┤
-│ 7. Object Write  │  ELF / Flat binary
+│ 7. Object write  │  ELF64 / ELF32 / flat binary
 └──────────────────┘
 ```
 
 ## Diagnostics
 
-Errors include:
-- File, line, column
-- Error code (E001, E002, ...)
-- Human-readable message
-- Source snippet with caret
+Errors are reported as plain text with file, line, and column:
 
-```bash
-$ forgec bad.dev
-error[E0308]: mismatched types
- --> bad.dev:5:12
-  |
-5 |     let x: int32 = "hello"
-  |            ^^^^^^^ expected int32, found ptr[char]
+```text
+Error: parse error in bad.dev: 5:12: expected expression, found Something
+
+type checking failed:
+  bad.dev: expected `i32`, found `ptr[char]`
 ```
+
+See [Diagnostics](diagnostics.md).
+
+## Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Compilation error |
+
+A Rust panic in the compiler (see [Known Issues](../language/known-issues.md))
+aborts with a non-zero exit and a backtrace if `RUST_BACKTRACE=1` is set.
 
 ## Configuration
 
-No configuration files - all options via CLI.
-
-## Cache
-
-Compiler caches:
-- Parsed stdlib modules (`~/.cache/forgec/stdlib/`)
-- Incremental compilation not yet implemented
-
-## Shell Completion
-
-Not yet implemented. Planned for bash/zsh/fish.
+No configuration files — all options are passed on the command line.

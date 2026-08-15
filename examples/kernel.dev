@@ -1,11 +1,59 @@
-# Forge can now emit a flat 512-byte x86 real-mode boot sector via the
-# `x86_16-boot` target (see examples/bootloader.dev).  A full freestanding
-# kernel with its own page tables, GDT, and long-mode switch is a larger
-# follow-up project, so this file remains a documented placeholder.
-
 package kernel
 
+# A real-mode kernel for the x86_16-boot target.
+#
+# Probes the BIOS Data Area (conventional-memory size at 0x413), reads the
+# first IVT entry at 0x0, and halts.  Everything runs in 16-bit real mode
+# with no OS underneath, and the whole kernel must fit in the 510 bytes of
+# a boot sector.
+#
+# Build with:
+#   ./target/release/forgec examples/kernel.dev -o kernel.bin --target x86_16-boot
+# Run with QEMU and see the output on the emulated display:
+#   qemu-system-x86_64 -fda kernel.bin -nographic
+
+extern def _dev_bios_teletype(c: char) -> void
+extern def _dev_load_char(p: ptr[char]) -> char
+extern def _dev_halt() -> void
+
 @freestanding
-pub extern def _start() -> void:
-    # kernel entry will go here
-    pass
+pub def _start() -> void:
+    puts("Forge kernel 0.1")
+    puts("conv mem: ")
+    print_hex16(mem_size_kb())
+    puts(" reset vec: ")
+    print_hex16(reset_vec())
+    _dev_halt()
+
+def mem_size_kb() -> u16:
+    unsafe:
+        return *(0x413 as ptr[u16])
+
+def reset_vec() -> u16:
+    unsafe:
+        return *(0x0 as ptr[u16])
+
+def print_hex16(v: u16) -> void:
+    var place: u16 = 4096
+    var i: u16 = 0
+    while i < 4:
+        var digit: u16 = v / place
+        put_hex_digit(digit)
+        v = v % place
+        place = place / 16
+        i = i + 1
+
+def put_hex_digit(d: u16) -> void:
+    if d < 10:
+        _dev_bios_teletype(((48 as u16) + d) as char)
+    else:
+        _dev_bios_teletype(((55 as u16) + d) as char)
+
+def puts(msg: ptr[char]) -> void:
+    unsafe:
+        var p: ptr[char] = msg
+        var c: char = _dev_load_char(p)
+        while c != 0:
+            _dev_bios_teletype(c)
+            p = p + 1
+            c = _dev_load_char(p)

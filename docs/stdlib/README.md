@@ -1,39 +1,34 @@
 # Standard Library
 
-Forge's standard library provides essential modules for systems programming.
+Forge's standard library lives in `core/` and is imported as `std.*`.
+Modules are written in Forge itself and wrap compiler-emitted runtime helpers
+or direct Linux syscalls.
 
 ## Module Overview
 
 | Module | Description | Key Functions |
 |--------|-------------|---------------|
-| [`std.io`](io.md) | Input/Output | `puts`, `putchar`, `getchar`, `rand` |
-| [`std.mem`](mem.md) | Memory operations | `copy_bytes`, `zero_bytes`, `compare_bytes` |
-| [`std.string`](string.md) | String manipulation | `strlen`, `strcmp`, `strncmp` |
-| [`std.math`](math.md) | Mathematical functions | `abs_i32`, `min_i32`, `max_i32`, `clamp_i32` |
-| [`std.alloc`](alloc.md) | Heap allocation | `alloc`, `free`, `bump_alloc` |
-| [`std.fmt`](fmt.md) | Formatting | `format_i32` |
-| [`std.volatile`](volatile.md) | Volatile memory | `volatile_load`, `volatile_store`, barriers |
-| [`std.gc`](gc.md) | Garbage collection | `gc_alloc`, `gc_free`, `gc_collect` |
+| [`std.io`](io.md) | Input/output + syscalls | `puts`, `putchar`, `getchar`, `rand`, `exit`, `open`, `read`, `write`, `socket`, ... |
+| [`std.mem`](mem.md) | Memory operations | `copy_bytes`, `set_bytes`, `zero_bytes`, `compare_bytes` |
+| [`std.string`](string.md) | String manipulation | `strlen`, `strcmp`, `strncmp`, `strstr`, `strchr`, `strcat`, `strncpy` |
+| [`std.math`](math.md) | Integer math | `abs_i32`, `min_i32`, `max_i32`, `clamp_i32` |
+| [`std.alloc`](alloc.md) | Heap allocation | `alloc`, `free` |
+| [`std.fmt`](fmt.md) | Formatting | `format_i32`, `format_f64` |
+| [`std.volatile`](volatile.md) | Volatile memory | `load_u8`...`load_u64`, `store_u8`...`store_i64`, barriers |
+| [`std.gc`](gc.md) | Garbage collection (x86_64) | `collect`, `leak_check`, `alloc_count`, `heap_live`, ... |
 | `std.runtime` | Runtime | `abort`, `exit` |
 
 ## Usage
 
 ```dev
-# Import specific functions
-from std.io import puts, getchar
+from std.io import puts
 from std.mem import copy_bytes
 
-# Or import module (not all modules support this)
-import std.io
-std.io.puts("hello")
+puts("hello")
 ```
 
-## Design Principles
-
-- **Minimal**: Only essential functionality
-- **No runtime**: Most functions compile to direct syscalls or inline code
-- **Zero-cost abstractions**: No overhead vs manual implementation
-- **Target-aware**: Some modules only on specific targets (e.g., `std.gc` x86_64 only)
+Imports merge into a flat namespace — imported names are used directly (no
+`std.io.puts(...)` qualified calls).
 
 ## Target Availability
 
@@ -49,41 +44,28 @@ std.io.puts("hello")
 | `std.gc` | ✅ | ❌ | ❌ |
 | `std.runtime` | ✅ | ✅ | ❌ |
 
-## Importing
-
-```dev
-# Recommended: specific imports
-from std.io import puts, putchar
-from std.mem import copy_bytes, zero_bytes
-
-# Module import (limited support)
-import std.io
-std.io.puts("hello")
-```
-
-## Naming Conventions
-
-- Functions: `snake_case` (`puts`, `copy_bytes`)
-- Types: `PascalCase` (in type definitions)
-- Constants: `SCREAMING_SNAKE` (rare in stdlib)
+> Importing a `std.*` module compiles the **entire** module file. On x86_32,
+> avoid modules that use `float64` (e.g. importing `std.gc`'s helpers or any
+> future float-using module) — floats are unsupported on that target.
 
 ## Error Handling
 
-Most stdlib functions don't return errors - they abort on failure:
+Most functions do not return errors — they abort on failure:
 
 ```dev
-# These abort on failure:
-puts("hello")        # Never fails (writes to stdout)
-alloc(size)          # Aborts if OOM
-gc_alloc(size)       # Aborts if OOM
+puts("hello")     # Never fails (writes to stdout)
+alloc(size)       # Aborts on OOM
+```
 
-# These return error codes:
+A few return status codes:
+
+```dev
 getchar() -> int32   # Returns -1 on EOF
 ```
 
 ## Extending
 
-Add new modules to `core/` directory:
+Add new modules to `core/`:
 
 ```
 core/
@@ -92,4 +74,4 @@ core/
 └── mymodule.dev    # New module
 ```
 
-Then import: `from std.mymodule import ...`
+Then import with `from std.mymodule import ...`.

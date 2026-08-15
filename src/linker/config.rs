@@ -105,6 +105,10 @@ pub struct LinkerConfig {
     /// Base virtual address for the ELF image / origin for flat binaries.
     #[allow(dead_code)]
     pub base_address: u64,
+    /// Load origin for x86_16 flat/raw stages (default 0x7C00, the BIOS
+    /// boot-sector address; the `LOAD` fld directive overrides it for
+    /// multi-stage boots).
+    pub load_base: u16,
     /// Heap size in bytes.  `0` means no heap.
     pub heap_size: u64,
     /// Named memory regions.
@@ -120,6 +124,43 @@ pub struct LinkerConfig {
 impl LinkerConfig {
     /// Validate internal consistency.  Returns `Ok(())` or an explanatory error.
     pub fn validate(&self) -> Result<()> {
+        match self.arch.as_str() {
+            "x86_64" | "x86_32" | "x86_16" => {}
+            other => anyhow::bail!(
+                "unsupported ARCH `{}` (expected x86_64, x86_32, or x86_16)",
+                other
+            ),
+        }
+        if matches!(self.format, OutputFormat::Raw) && self.arch != "x86_16" {
+            anyhow::bail!("FORMAT raw is only supported for ARCH x86_16");
+        }
+        let expected = match self.arch.as_str() {
+            "x86_64" => Some("elf"),
+            "x86_32" => Some("elf32"),
+            "x86_16" => None, // flat (boot sector) or raw (plain image)
+            _ => None,
+        };
+        if let Some(expected) = expected
+            && self.format.as_str() != expected
+        {
+            anyhow::bail!(
+                "ARCH {} requires FORMAT {} (got {})",
+                self.arch,
+                expected,
+                self.format.as_str()
+            );
+        }
+        if self.arch == "x86_16"
+            && !matches!(self.format, OutputFormat::Flat | OutputFormat::Raw)
+        {
+            anyhow::bail!(
+                "ARCH x86_16 requires FORMAT flat or raw (got {})",
+                self.format.as_str()
+            );
+        }
+        if matches!(self.format, OutputFormat::Flat) && self.hosted {
+            anyhow::bail!("FORMAT {} cannot be hosted", self.format.as_str());
+        }
         if self.runtime.gc && !self.runtime.alloc {
             anyhow::bail!("RUNTIME gc=true requires alloc=true");
         }
@@ -128,9 +169,6 @@ impl LinkerConfig {
         }
         if self.runtime.gc && self.heap_size == 0 {
             anyhow::bail!("RUNTIME gc=true requires HEAP size > 0");
-        }
-        if matches!(self.format, OutputFormat::Flat | OutputFormat::Raw) && self.hosted {
-            anyhow::bail!("FORMAT {} cannot be hosted", self.format.as_str());
         }
         if self.hosted && self.entry.is_empty() {
             anyhow::bail!("hosted=true requires ENTRY to be set");
@@ -152,6 +190,7 @@ pub fn builtin_x86_64_linux() -> LinkerConfig {
         hosted: true,
         entry: "_forge_main".to_string(),
         base_address: 0x400000,
+        load_base: 0x7C00,
         heap_size: 4 * 1024 * 1024,
         regions: vec![MemoryRegion {
             name: "ram".to_string(),
@@ -198,6 +237,7 @@ pub fn builtin_x86_32_linux() -> LinkerConfig {
         hosted: true,
         entry: "_forge_main".to_string(),
         base_address: 0x08048000,
+        load_base: 0x7C00,
         heap_size: 0,
         regions: vec![MemoryRegion {
             name: "ram".to_string(),
@@ -244,6 +284,7 @@ pub fn builtin_x86_16_boot() -> LinkerConfig {
         hosted: false,
         entry: "_start".to_string(),
         base_address: 0x7C00,
+        load_base: 0x7C00,
         heap_size: 0,
         regions: vec![MemoryRegion {
             name: "ram".to_string(),
@@ -335,5 +376,29 @@ mod tests {
         let mut c = builtin_x86_16_boot();
         c.hosted = true;
         assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn unknown_arch_fails() {
+        let mut c = builtin_x86_64_linux();
+        c.arch = "riscv64".to_string();
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn arch_format_mismatch_fails() {
+        let mut c = builtin_x86_16_boot();
+        c.format = OutputFormat::Elf;
+        assert!(c.validate().is_err());
+    }
+
+    #[test]
+    fn raw_format_is_x86_16_only() {
+        let mut c = builtin_x86_16_boot();
+        c.format = OutputFormat::Raw;
+        assert!(c.validate().is_ok(), "raw should be valid on x86_16");
+        let mut c64 = builtin_x86_64_linux();
+        c64.format = OutputFormat::Raw;
+        assert!(c64.validate().is_err(), "raw should fail on x86_64");
     }
 }

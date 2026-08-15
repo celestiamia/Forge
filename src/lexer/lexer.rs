@@ -309,7 +309,6 @@ impl<'src> Lexer<'src> {
             "never" => Token::Never,
             "sizeof" => Token::Sizeof,
             "offsetof" => Token::Offsetof,
-            "asm" => Token::Asm,
             "loop" => Token::Loop,
             "break" => Token::Break,
             "continue" => Token::Continue,

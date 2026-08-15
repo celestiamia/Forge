@@ -25,9 +25,15 @@ No formatter, linter, or typechecker config exists. No pre-commit hooks.
 # 16-bit real-mode boot sector (512 bytes, 0x55AA signature)
 ./target/release/forgec examples/bootloader.dev -o boot.bin --target x86_16-boot
 qemu-system-x86_64 -fda boot.bin -nographic
+
+# Custom target via a .fld linker descriptor (see docs/targets/fld-format.md;
+# ready-made scripts in examples/targets/)
+./target/release/forgec examples/hello.dev -o hello --linker examples/targets/x86_64-linux.fld
 ```
 
 `-o` defaults to `<source>` with extension stripped. `--freestanding` flag available.
+
+`.fld` (Forge Linker Descriptor): `ARCH`/`FORMAT`/`HOSTED`/`ENTRY`/`LOAD`/`HEAP`/`MEMORY`/`SECTIONS`/`RUNTIME` in `src/linker/`. Honored: ARCH, FORMAT (elf/elf32/flat/raw; flat = 512-byte boot sector with 0x55AA, raw = bare image for multi-stage loads), HOSTED, ENTRY, LOAD (x86_16 load address, default 0x7C00, drives imm16 string fixups), HEAP (GC arena size), RUNTIME float gate. MEMORY/SECTIONS are parsed but not yet applied to layout. Helper emission stays reference-driven (importing a `_dev_*` symbol emits it), not flag-driven.
 
 ## Architecture
 
@@ -49,7 +55,7 @@ Single Rust crate (`forgec`), edition 2024, source in `src/`.
 
 **Type system:** `src/ty/mod.rs` defines the `Type` enum (no `ty/prims.rs` exists). Sema (`src/sema/check/typing.rs`) maps dual-spelled names to it. `src/backend/ir.rs` defines a parallel IR `Type` enum with `is_integer()`, `is_float()`, `is_signed()`.
 
-**Target classification** in `src/driver/mod.rs:79`:
+**Target classification** in `src/linker/config.rs` (`builtin_target`), resolved in `src/driver/mod.rs:57`:
 - `x86_64-unknown-linux-gnu` / `native` → hosted, x86_64, ELF64
 - `x86_32-unknown-linux-gnu` → hosted, x86_32, ELF32 (no float support)
 - `x86_16-boot` → freestanding, x86_16, flat
@@ -73,10 +79,13 @@ Single Rust crate (`forgec`), edition 2024, source in `src/`.
 
 Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `gc`, `fmt`. (All except `gc` are cross-target; `gc` is x86_64-only.)
 
+Compilation is deterministic: `merge_modules` in `src/driver/loader.rs` merges transitive imports in sorted module-path order (the load graph is a `HashMap`, whose iteration order is randomized).
+
 ## Testing quirks
 
 - Integration tests compile examples to temp dirs, run the native binaries, and check stdout/exit code
-- Bootloader test spawns QEMU (`qemu-system-x86_64` must be on PATH), sleeps 2s, then kills it
+- Bootloader/kernel/OS tests spawn QEMU (`qemu-system-x86_64` must be on PATH), sleep, then kill it
+- `os_dev_boots_shell_and_calc` additionally needs `socat` (drives the QEMU monitor to type `calc 42` into the ForgeOS shell); boots the full three-stage OS image built from `examples/os/`
 - `getchar` and `guess` tests write to stdin
 - `tests/lexer_tests.rs` and `tests/parser_tests.rs` contain only placeholder tests
 - Importing any `std.*` module compiles the **entire** module file — x86_32 tests fail if the stdlib uses `float64` (not supported on x86_32)
@@ -93,6 +102,12 @@ Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `
 - Float values are stored as 64-bit integer bit patterns in 64-bit slots/RAX
 - Integer-to-float and float-to-integer casts use **XMM7** (scratch), not XMM0 — XMM0 is used by `eval_float_bin` for binary operations and will be clobbered
 - Parser `parse_type` and `parse_type_atom` call `skip_newlines()` internally; use `parse_type_noskip()` from the `as` handler in `parse_postfix` to avoid consuming newlines that the postfix loop needs to see
+
+## Codegen16 notes (x86_16 flat/raw images)
+
+- Arguments are pushed left-to-right by the caller, so `emit_func` reads param *i* at `4 + (n-1-i)*2` (deepest-first) on the frame.
+- Short jumps are widened to near form when their target falls out of ±128 bytes: `EB` becomes `E9 <rel16>`, conditional jumps become `op^1, 3, E9 <rel16>` (jump over the E9). `into_bytes` fixes displacement by iterating until fixpoint — every patched displacement (short, rel16, imm16) must be computed at the **shifted** position (`offset + delta_before(offset, &widened)`); anchoring at the pre-widening offset lands every jump `delta_before(site)` bytes past its target.
+- `LOAD` (default `0x7C00`) is the base added to absolute string addresses (imm16 fixups); stages loaded elsewhere must declare it in their `.fld`.
 
 ## GC heap (x86_64 hosted target only)
 

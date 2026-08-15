@@ -88,9 +88,6 @@ impl<'p> CodeGen<'p> {
                 }
                 self.eval_expr(trailing)?;
             }
-            ExprKind::Asm { .. } => {
-                bail!("inline assembly is not implemented in the x86_32 backend")
-            }
             ExprKind::SizeOf(ty) => {
                 let size = self.type_size_bytes(ty);
                 self.asm.mov(Reg::Eax, size as i32)?;

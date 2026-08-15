@@ -54,8 +54,15 @@ pub fn compile(options: CompileOptions) -> Result<PathBuf> {
         .target
         .as_deref()
         .unwrap_or("x86_64-unknown-linux-gnu");
-    let config = resolve_config(options.target.as_deref(), options.linker.as_deref())?;
+    let mut config = resolve_config(options.target.as_deref(), options.linker.as_deref())?;
     let hosted = config.hosted && !options.freestanding;
+    if !hosted && options.linker.is_none() {
+        // A built-in hosted preset (x86_64/x86_32) names `_forge_main` as its
+        // entry; that is the hosted `main` mangling and is meaningless in
+        // freestanding mode, which enters at `_start`.  Custom `.fld` scripts
+        // keep their `ENTRY` directive verbatim.
+        config.entry = "_start".to_string();
+    }
 
     let mut program = lower(&module, hosted)?;
     program.target = Some(target_name.to_string());

@@ -1,117 +1,93 @@
 # std.mem
 
-Low-level memory operations: copy, zero, set, compare.
+Low-level memory operations: copy, set, zero, compare.
 
 ## Functions
+
+All functions take `ptr[uint8]` arguments and a `uint64` byte count. `byte`
+is an alias for `uint8`.
 
 ### copy_bytes
 
 ```dev
-def copy_bytes(dst: mut ptr[byte], src: ptr[byte], n: usize) -> void
+def copy_bytes(dest: ptr[uint8], src: ptr[uint8], n: uint64) -> void
 ```
 
-Copy `n` bytes from `src` to `dst`. Regions may overlap.
+Copy `n` bytes from `src` to `dest`. Regions may overlap (memmove semantics).
 
 ```dev
 from std.mem import copy_bytes
+from std.alloc import alloc
 
-let src = [1, 2, 3, 4, 5]
-let mut dst = [0, 0, 0, 0, 0]
-copy_bytes(&mut dst[0], &src[0], 5 * 4)
-# dst = [1, 2, 3, 4, 5]
+let src: ptr[char] = "hello"
+let dst: ptr[char] = alloc(16)
+copy_bytes(dst, src, 6)   # copy 5 chars + null terminator
 ```
-
-Equivalent to `memmove`.
 
 ### set_bytes
 
 ```dev
-def set_bytes(dst: mut ptr[byte], value: byte, n: usize) -> void
+def set_bytes(p: ptr[uint8], v: uint8, n: uint64) -> void
 ```
 
-Fill `n` bytes starting at `dst` with `value`.
+Fill `n` bytes starting at `p` with the value `v` (memset).
 
 ```dev
 from std.mem import set_bytes
 
-let mut buf = [0; 100]
-set_bytes(&mut buf[0], 0xFF, 100)
-# buf = [0xFF; 100]
+let buf: ptr[char] = alloc(100)
+set_bytes(buf, 0xFF, 100)
 ```
-
-Equivalent to `memset`.
 
 ### zero_bytes
 
 ```dev
-def zero_bytes(dst: mut ptr[byte], n: usize) -> void
+def zero_bytes(p: ptr[uint8], n: uint64) -> void
 ```
 
-Zero `n` bytes starting at `dst`. Optimized for security (not optimized away).
+Zero `n` bytes starting at `p`. Not optimized away (safe for clearing
+secrets).
 
 ```dev
 from std.mem import zero_bytes
 
-let mut secret = [0; 64]
-# ... use secret ...
-zero_bytes(&mut secret[0], 64)  # Securely clear
+zero_bytes(buf, 64)
 ```
 
 ### compare_bytes
 
 ```dev
-def compare_bytes(a: ptr[byte], b: ptr[byte], n: usize) -> int32
+def compare_bytes(a: ptr[uint8], b: ptr[uint8], n: uint64) -> int32
 ```
 
-Lexicographically compare `n` bytes. Returns:
-- `< 0` if `a < b`
-- `0` if equal
-- `> 0` if `a > b`
+Lexicographically compare `n` bytes (memcmp). Returns `< 0`, `0`, or `> 0`.
 
 ```dev
 from std.mem import compare_bytes
 
-let a = [1, 2, 3]
-let b = [1, 2, 4]
-let cmp = compare_bytes(&a[0], &b[0], 3)
-# cmp < 0 (a < b)
+if compare_bytes(a, b, 100) == 0:
+    puts("equal")
 ```
-
-Equivalent to `memcmp`.
-
-## Implementation Notes
-
-- Highly optimized inline assembly for x86_64/x86_32
-- `zero_bytes` uses volatile writes to prevent compiler optimization
-- No alignment requirements (handles unaligned)
-- Handles overlapping regions correctly (copy_bytes)
 
 ## Example: Buffer Operations
 
 ```dev
 from std.mem import copy_bytes, set_bytes, zero_bytes, compare_bytes
 from std.alloc import alloc, free
+from std.io import puts
 
 pub def main() -> int32:
-    let size = 1024
-    let buf1 = alloc(size) as mut ptr[byte]
-    let buf2 = alloc(size) as mut ptr[byte]
-    
-    # Fill with pattern
-    for i in 0..size:
-        (buf1 + i) = (i % 256) as byte
-    
-    # Copy
-    copy_bytes(buf2, buf1, size)
-    
-    # Verify
-    if compare_bytes(buf1, buf2, size) != 0:
+    let buf1: ptr[char] = alloc(1024)
+    let buf2: ptr[char] = alloc(1024)
+
+set_bytes(buf1, 0x41 as uint8, 1024)   # Fill with 'A'
+    copy_bytes(buf2, buf1, 1024)         # Copy
+
+    if compare_bytes(buf1, buf2, 1024) != 0:
         puts("Mismatch!\n")
         return 1
-    
-    # Clear
-    zero_bytes(buf1, size)
-    
+
+    zero_bytes(buf1, 1024)               # Clear
     free(buf1)
     free(buf2)
     return 0
@@ -121,13 +97,12 @@ pub def main() -> int32:
 
 | Target | Implementation |
 |--------|----------------|
-| x86_64 | Optimized REP MOVSB/STOSB |
-| x86_32 | Optimized REP MOVSB/STOSB |
-| x86_16 | Byte-by-byte loop |
+| x86_64 | Compiler-emitted helpers |
+| x86_32 | Compiler-emitted helpers |
+| x86_16 | Available (byte loops) |
 
 ## Safety
 
-All functions require valid pointers and valid lengths. No bounds checking - caller must ensure:
-- Pointers are valid for `n` bytes
-- Regions don't wrap around address space
-- No concurrent mutation during operation
+- No bounds checking — the caller must ensure pointers are valid for `n` bytes
+- No alignment requirements
+- `copy_bytes` handles overlapping regions; `compare_bytes` does not

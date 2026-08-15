@@ -1,0 +1,7 @@
+package apps.about
+
+def app_about() -> void:
+    put_line("ForgeOS 0.1 - a tiny 16-bit OS written in pure Forge")
+    puts("CPU: x86 real mode, 16-bit\n")
+    puts("Kernel: stage-2 image at 0x7C00, loaded by stage-1 boot\n")
+    puts("No inline assembly anywhere in this project\n")

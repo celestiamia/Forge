@@ -64,7 +64,6 @@ impl<'p> CodeGen16<'p> {
                 }
                 self.eval_expr(trailing)?;
             }
-            ExprKind::Asm { .. } => bail!("inline assembly is not supported by the 16-bit backend"),
             ExprKind::SizeOf(ty) => {
                 let size = type_size_16(ty);
                 self.asm.mov16_imm(Reg16::Ax, size as u16);
@@ -109,6 +108,9 @@ impl<'p> CodeGen16<'p> {
                     self.asm.imul_r16(Reg16::Bx);
                 }
                 BinOp::Div | BinOp::Mod => {
+                    self.asm.push(Reg16::Ax); // save right (divisor)
+                    self.asm.mov16_rr(Reg16::Ax, Reg16::Bx); // dividend = left
+                    self.asm.pop(Reg16::Bx); // divisor = right
                     if left.ty.is_signed() {
                         self.asm.cwd();
                         self.asm.idiv_r16(Reg16::Bx);
@@ -162,6 +164,9 @@ impl<'p> CodeGen16<'p> {
             .func_labels
             .get(func)
             .ok_or_else(|| anyhow!("unknown function: {}", func))?;
+        if BUILTIN_FUNCS.contains(&func) {
+            self.referenced.insert(func.to_string());
+        }
         for a in args {
             self.eval_expr(a)?;
             self.asm.push(Reg16::Ax);

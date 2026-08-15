@@ -205,7 +205,7 @@ Machine code encoding:
 ### Linker Scripts (`src/linker/`)
 
 Extensible target specification:
-- `.fld` files describe targets
+- `.fld` files describe targets (see [`../targets/fld-format.md`](../targets/fld-format.md))
 - Memory regions, sections, runtime
 - Replaces hardcoded target triples
 
@@ -245,8 +245,8 @@ Object File (ELF/Flat Writer)
 
 | Target | Allocator | GC |
 |--------|-----------|-----|
-| x86_64 | Bump (64 KiB) + Mark-Sweep | ✅ |
-| x86_32 | Bump (64 KiB) | ❌ |
+| x86_64 | First-fit free list (4 MiB heap) | ✅ Mark-and-sweep |
+| x86_32 | Bump | ❌ |
 | x86_16 | None | ❌ |
 
 ## Error Handling

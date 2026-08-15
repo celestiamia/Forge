@@ -1,0 +1,30 @@
+# x86_32 Linux hosted ELF32 target (mirrors the `x86_32-unknown-linux-gnu` preset).
+#
+# Usage: forgec hello.dev -o hello32 --linker examples/targets/x86_32-linux.fld
+#
+# Note: the 32-bit backend has no float support, so `float` is false.
+
+ARCH x86_32
+FORMAT elf32
+HOSTED true
+ENTRY _forge_main
+
+MEMORY {
+    ram (rwx) : origin = 0x08048000, length = 512M
+}
+
+SECTIONS {
+    .text > ram
+    .rodata > ram
+    .data > ram
+    .bss > ram
+}
+
+RUNTIME {
+    syscalls = true
+    gc = false
+    alloc = false
+    float = false
+    sockets = false
+    files = false
+}

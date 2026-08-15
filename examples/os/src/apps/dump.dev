@@ -1,0 +1,21 @@
+package apps.dump
+
+# Hex dump of the first 32 bytes of conventional memory (IVT area).
+
+def app_dump() -> void:
+    var off: u16 = 0
+    var col: u16 = 0
+    var row: u16 = 0
+    var b: u8 = 0
+    while row < 4:
+        put_hex16(off)
+        puts(": ")
+        col = 0
+        while col < 8:
+            b = read_u8(off)
+            put_byte(b)
+            puts(" ")
+            col = col + 1
+            off = off + 1
+        put_line("")
+        row = row + 1

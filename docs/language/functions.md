@@ -1,6 +1,6 @@
 # Functions
 
-Functions are first-class in Forge with support for generics, methods, and extern declarations.
+Forge functions use Python-like definitions with static parameter types.
 
 ## Function Definition
 
@@ -14,30 +14,43 @@ def add(a: int32, b: int32) -> int32:
     return a + b
 ```
 
+- Parameters must be annotated
+- Return type is optional; omitted means `void`
+- Nested function definitions are **not** supported
+- Functions cannot be overloaded — each name must be unique
+
 ### Visibility
 
 ```dev
-def private_fn() -> int32:    # Module-private
+def private_fn() -> int32:    # No pub
     return 0
 
-pub def public_fn() -> int32: # Public (exported)
+pub def public_fn() -> int32: # pub
     return 0
 ```
+
+`pub` marks an item as public. Note that the module loader currently merges
+**all** items from imported modules — private and public alike — so visibility
+is informational only and is not enforced at import time.
 
 ### Parameters
 
 ```dev
 # By value (copy)
 def by_value(x: int32) -> int32:
+    return x
 
-# By pointer (mutable)
-def by_ptr(x: ptr[int32]):
+# By pointer (mutable access via unsafe)
+def by_ptr(x: ptr[int32]) -> int32:
+    unsafe:
+        return *x
+```
 
-# By reference (immutable borrow)
-def by_ref(x: ref[int32]):
+Pass a local's address with `&x` — it coerces to `ptr[T]` at the call site:
 
-# By mutable reference (exclusive borrow)
-def by_mut(x: refmut[int32]):
+```dev
+var n = 42
+let v = by_ptr(&n)   # v == 42
 ```
 
 ### Return Types
@@ -46,132 +59,40 @@ def by_mut(x: refmut[int32]):
 def returns_int() -> int32:
     return 42
 
-def returns_void() -> void:    # or omit
+def returns_void() -> void:
     return
-
-def returns_tuple() -> (int32, int32):
-    return (1, 2)
 ```
 
-### Generic Functions
+## Main Function
 
 ```dev
-pub def identity<T>(x: T) -> T:
-    return x
-
-pub def first<T>(a: T, b: T) -> T:
-    return a
-
-# Usage
-let x = identity(42)      # T = int32
-let y = identity(3.14)    # T = float64
+# Hosted (default)
+pub def main() -> int32:
+    return 0
 ```
 
-Multiple type parameters:
+In hosted targets the runtime `_start` calls `main` and uses its return value
+as the process exit code.
+
+Freestanding targets use a custom entry point with no runtime:
 
 ```dev
-pub def pair<A, B>(a: A, b: B) -> (A, B):
-    return (a, b)
+@freestanding
+pub def _start() -> void:
+    ...
 ```
-
-## Methods
-
-Methods are defined in `impl` blocks:
-
-```dev
-struct Point:
-    x: int32
-    y: int32
-
-impl Point:
-    # Constructor
-    pub def new(x: int32, y: int32) -> Point:
-        return Point { x: x, y: y }
-
-    # Method with self by value
-    pub def distance(self) -> float64:
-        return sqrt((self.x * self.x + self.y * self.y) as float64)
-
-    # Method with self by reference
-    pub def translate(ref self, dx: int32, dy: int32):
-        self.x = self.x + dx
-        self.y = self.y + dy
-```
-
-### Method Receivers
-
-| Receiver | Description |
-|----------|-------------|
-| `self` | By value (consumes) |
-| `ref self` | Immutable borrow |
-| `refmut self` | Mutable borrow |
 
 ## Extern Functions
 
-Declare foreign functions (C ABI by default):
+Declare foreign functions. The `extern def` declaration has no body and maps
+to a symbol the runtime (or the linker) provides:
 
 ```dev
+extern def _dev_halt() -> void
 extern def puts(s: ptr[char]) -> int32
-
-@extern("c")
-extern def malloc(size: usize) -> ptr[void]
-
-@extern("c")
-extern def free(ptr: ptr[void]) -> void
 ```
 
-### Calling Convention
-
-```dev
-@extern("c")      # C calling convention (default)
-@extern("sysv64") # System V AMD64 ABI
-```
-
-### Variadic Functions
-
-```dev
-extern def printf(fmt: ptr[char], ...) -> int32
-```
-
-## Higher-Order Functions
-
-Function types: `fn(Args) -> Return`
-
-```dev
-let add: fn(int32, int32) -> int32 = add
-let f: fn(int32) -> int32 = |x| x + 1  # closure not yet supported
-```
-
-Passing functions:
-
-```dev
-def apply(f: fn(int32) -> int32, x: int32) -> int32:
-    return f(x)
-
-def add_one(x: int32) -> int32:
-    return x + 1
-
-let result = apply(add_one, 5)  # 6
-```
-
-## Function Attributes
-
-```dev
-@inline          # Hint to inline
-@export          # Force export symbol
-@noreturn        # Function never returns
-@naked           # No prologue/epilogue (asm)
-```
-
-```dev
-@inline
-pub def small_fn() -> int32:
-    return 1
-
-@export
-pub fn c_compatible() -> int32:
-    return 0
-```
+`@extern(abi)` sets the ABI annotation; `@extern("c")` is the default.
 
 ## Recursion
 
@@ -182,84 +103,18 @@ def factorial(n: int32) -> int32:
     return n * factorial(n - 1)
 ```
 
-Tail recursion not optimized (may stack overflow).
+Tail recursion is not optimized — deep recursion may overflow the stack.
 
-## Variadic Functions (Forge-side)
+## Not Yet Supported
 
-Not yet supported for user-defined functions. Only `extern`.
+The following are **not** available in this milestone (see
+[Known Issues](known-issues.md)):
 
-## Closures / Lambdas
-
-Not yet implemented. Planned syntax:
-
-```dev
-let add = |a, b| a + b
-let closure = |x| x + captured_var
-```
-
-## Function Pointers
-
-```dev
-let ptr: fn(int32) -> int32 = add
-ptr(42)
-
-# From extern
-extern def callback(cb: fn(int32) -> int32):
-    ...
-```
-
-## Main Function
-
-```dev
-# Hosted (default)
-pub def main() -> int32:
-    return 0
-
-# Freestanding (boot sector)
-@freestanding
-pub def _start() -> void:
-    ...
-```
-
-Hosted mode: `main` called by runtime `_start` with argc/argv.
-
-## Variadic Arguments
-
-Not supported for user functions. Use slices:
-
-```dev
-def sum(values: slice[int32]) -> int32:
-    var total = 0
-    for v in values:
-        total = total + v
-    return total
-```
-
-## Inlining
-
-`@inline` is a hint. Compiler may ignore.
-
-```dev
-@inline
-pub def hot_path() -> int32:
-    return 1
-```
-
-## No Overloading
-
-Functions cannot be overloaded by parameter types. Use different names or generics.
-
-## Default Parameters
-
-Not supported. Use option types or builder pattern:
-
-```dev
-enum Option<T>:
-    Some(T)
-    None
-
-def foo(x: int32, y: Option<int32>) -> int32:
-    match y:
-        case Some(v): return x + v
-        case None: return x
-```
+- **Generics** — `def identity[T](x: T) -> T` parses but panics the compiler at lowering
+- **Methods / `impl` blocks** — `impl` panics the compiler; there is no `obj.method()` call syntax
+- **Function types** — `fn(int32) -> int32` annotations fail to parse
+- **Function pointers** — passing functions as values
+- **Closures / lambdas** — `|x| x + 1`
+- **Variadic functions** — `extern def printf(fmt, ...)`
+- **Default parameters**
+- **Tuples as return types** — `-> (int32, int32)` fails at lowering

@@ -1,0 +1,6 @@
+# ForgeOS linker descriptor: plain x86_16 raw image (stage-2 kernel).
+# See docs/targets/fld-format.md.
+ARCH x86_16
+FORMAT raw
+HOSTED false
+ENTRY _start

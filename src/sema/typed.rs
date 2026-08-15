@@ -204,7 +204,6 @@ pub enum TypedExprKind {
         expr: Box<TypedExpr>,
         ty: Type,
     },
-    Asm(TypedAsmExpr),
     SizeOf(Type),
     OffsetOf {
         ty: Type,
@@ -252,18 +251,4 @@ pub enum TypedPattern {
     Literal(ast::Literal),
     Ident(String),
     Tuple(Vec<TypedPattern>),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TypedAsmExpr {
-    pub template: String,
-    pub inputs: Vec<TypedAsmOperand>,
-    pub outputs: Vec<TypedAsmOperand>,
-    pub clobbers: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TypedAsmOperand {
-    pub constraint: String,
-    pub expr: TypedExpr,
 }

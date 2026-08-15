@@ -1,0 +1,30 @@
+package kernel
+
+# ForgeOS kernel: stage-2 entry point.
+#
+# The stage-1 bootloader (src/boot/boot.dev) relocates itself to 0x9000 and
+# loads this image to 0x7C00, then far-jumps here.  This kernel initializes
+# the screen and drops into the shell.  Everything, including the shell and
+# the apps, is merged into this single image at compile time.
+
+import kernel.io
+import kernel.mem
+import shell.shell
+import shell.commands
+import apps.help
+import apps.hello
+import apps.about
+import apps.mem
+import apps.calc
+import apps.dump
+import apps.reboot
+
+@freestanding
+pub def _start() -> void:
+    _dev_bios_clear()
+    put_line("ForgeOS 0.1")
+    puts("conventional memory: ")
+    put_hex16(mem_size_kb())
+    puts(" KB\n")
+    put_line("type `help` for the command list")
+    shell_main()

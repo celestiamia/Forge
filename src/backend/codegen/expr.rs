@@ -97,7 +97,6 @@ impl<'p> CodeGen<'p> {
                 }
                 self.eval_expr(trailing)?;
             }
-            ExprKind::Asm { .. } => bail!("inline assembly is not implemented in the x64 backend"),
             ExprKind::SizeOf(ty) => {
                 let size = self.type_size_bytes(ty);
                 self.asm.mov(Reg::Rax, size as i32)?;
@@ -126,6 +125,7 @@ impl<'p> CodeGen<'p> {
 
         // Floating-point arithmetic: route through SSE
         if left.ty.is_float() && (op.is_arithmetic() || op.is_comparison()) {
+            self.require_floats()?;
             return self.eval_float_bin(op, left, right);
         }
 
@@ -360,6 +360,9 @@ impl<'p> CodeGen<'p> {
         self.eval_expr(expr)?;
         if &expr.ty == to {
             return Ok(());
+        }
+        if expr.ty.is_float() || to.is_float() {
+            self.require_floats()?;
         }
         match (expr.ty.clone(), to.clone()) {
             (Type::Ptr(_), _) if to.is_integer() => {}

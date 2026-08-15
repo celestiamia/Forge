@@ -90,8 +90,6 @@ pub enum Token {
     Sizeof,
     /// `offsetof`
     Offsetof,
-    /// `asm`
-    Asm,
     /// `loop`
     Loop,
     /// `break`

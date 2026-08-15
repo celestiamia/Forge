@@ -317,10 +317,16 @@ impl<'p> CodeGen<'p> {
         }
 
         self.bind_label(start_label);
+        let main_name = self
+            .prog
+            .config
+            .as_ref()
+            .map(|c| c.entry.as_str())
+            .unwrap_or("_forge_main");
         let main_lab = *self
             .func_labels
-            .get("_forge_main")
-            .ok_or_else(|| anyhow::anyhow!("hosted mode requires a main function"))?;
+            .get(main_name)
+            .ok_or_else(|| anyhow::anyhow!("hosted mode requires a {} function", main_name))?;
         // cdecl startup: the kernel leaves argc at [esp] and the argv array at
         // [esp+4].  Load argc, take the address of the argv array, push argv
         // then argc, so main receives (argc, argv); a `pub def main()` with no

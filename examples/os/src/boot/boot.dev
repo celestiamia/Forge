@@ -1,0 +1,36 @@
+package os.boot
+
+# ForgeOS stage-1 bootloader (512-byte boot sector, pure Forge).
+#
+# The BIOS loads this file at 0:0x7C00 and jumps to its first byte.  It is
+# deliberately tiny - everything after the first sector has no 510-byte
+# limit - so it does exactly two things: read the stage-2 loader (image
+# sectors 1-2, i.e. CHS sector 2-3) into 0x9000 via `_dev_bios_disk_read`
+# (INT 13h AH=2), then far-jump to 0x9000 with `_dev_jump`.  The stage-2
+# loader loads the kernel; nothing ever relocates itself and no inline
+# assembly is used anywhere.
+
+extern def _dev_bios_teletype(c: char) -> void
+extern def _dev_load_char(p: ptr[char]) -> char
+extern def _dev_halt() -> void
+extern def _dev_bios_disk_read(drive: u16, cyl: u16, head: u16, sector: u16, count: u16, buf: ptr[char]) -> u16
+extern def _dev_jump(addr: u16) -> void
+
+@freestanding
+pub def _start() -> void:
+    var buf: ptr[char] = 0x9000 as ptr[char]
+    var status: u16 = 0
+    status = _dev_bios_disk_read(0x80, 0, 0, 2, 2, buf)
+    if status != 0:
+        puts(" err")
+        _dev_halt()
+    _dev_jump(0x9000)
+
+def puts(msg: ptr[char]) -> void:
+    unsafe:
+        var p: ptr[char] = msg
+        var c: char = _dev_load_char(p)
+        while c != 0:
+            _dev_bios_teletype(c)
+            p = p + 1
+            c = _dev_load_char(p)

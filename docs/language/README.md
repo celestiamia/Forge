@@ -6,3 +6,4 @@
 * [Functions](functions.md)
 * [Modules & Imports](modules.md)
 * [Memory Model](memory.md)
+* [Known Issues & Limitations](known-issues.md)

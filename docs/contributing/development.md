@@ -273,7 +273,7 @@ kcachegrind callgrind.out.*
 1. `src/linker/config.rs` - Target config
 2. `src/backend/codegen*/` - Codegen backend
 3. `src/obj/` - Object writer
-4. `src/linker/builtin.rs` - Builtin config
+4. `src/linker/config.rs` - Builtin config
 
 ## Resources
 

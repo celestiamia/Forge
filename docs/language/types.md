@@ -1,119 +1,68 @@
 # Type System
 
-Forge has a static type system with type inference.
+Forge has a static type system with explicit annotations and inference for
+literals.
 
 ## Primitive Types
 
 ### Integers
 
-| Type | Size | Range |
-|------|------|-------|
-| `int8` / `i8` | 8-bit signed | -128 to 127 |
-| `int16` / `i16` | 16-bit signed | -32,768 to 32,767 |
-| `int32` / `i32` / `int` | 32-bit signed | -2^31 to 2^31-1 |
-| `int64` / `i64` | 64-bit signed | -2^63 to 2^63-1 |
-| `uint8` / `u8` / `byte` | 8-bit unsigned | 0 to 255 |
-| `uint16` / `u16` | 16-bit unsigned | 0 to 65,535 |
-| `uint32` / `u32` / `uint` | 32-bit unsigned | 0 to 2^32-1 |
-| `uint64` / `u64` | 64-bit unsigned | 0 to 2^64-1 |
-| `isize` | Pointer-sized signed | Platform-dependent |
-| `usize` | Pointer-sized unsigned | Platform-dependent |
+| Type | Aliases | Size | Range |
+|------|---------|------|-------|
+| `int8` | `i8` | 8-bit signed | -128 to 127 |
+| `int16` | `i16` | 16-bit signed | -32,768 to 32,767 |
+| `int32` | `i32`, `int` | 32-bit signed | -2^31 to 2^31-1 |
+| `int64` | `i64` | 64-bit signed | -2^63 to 2^63-1 |
+| `uint8` | `u8`, `byte` | 8-bit unsigned | 0 to 255 |
+| `uint16` | `u16` | 16-bit unsigned | 0 to 65,535 |
+| `uint32` | `u32`, `uint` | 32-bit unsigned | 0 to 2^32-1 |
+| `uint64` | `u64` | 64-bit unsigned | 0 to 2^64-1 |
+| `usize` | — | pointer-sized unsigned (maps to `uint64`) | platform-dependent |
+| `isize` | — | pointer-sized signed (maps to `int64`) | platform-dependent |
+
+> `int128` / `uint128` are accepted by the type checker but unsupported by all
+> backends — compilation fails at codegen. See [Known Issues](known-issues.md).
 
 ### Floats
 
-| Type | Size | Standard |
-|------|------|----------|
-| `float32` / `f32` | 32-bit | IEEE 754 single |
-| `float64` / `f64` / `float` | 64-bit | IEEE 754 double |
+| Type | Aliases | Size | Notes |
+|------|---------|------|-------|
+| `float32` | `f32` | 32-bit | IEEE 754 single; x86_64 only |
+| `float64` | `f64`, `float` | 64-bit | IEEE 754 double; x86_64 only |
+
+> Floats are **not supported on the x86_32 target**. On x86_64, float values
+> are stored as 64-bit integer bit patterns in registers.
 
 ### Other Primitives
 
 | Type | Description |
 |------|-------------|
 | `bool` | `true` or `false` |
-| `char` | Unicode code point (32-bit) |
-| `void` | No value (unit type) |
+| `char` | 8-bit character (like a byte) |
+| `void` | No value (function return type only) |
 
-## Type Aliases
-
-| Alias | Canonical Type |
-|-------|----------------|
-| `int` | `int32` |
-| `uint` | `uint32` |
-| `byte` | `uint8` |
-| `float` | `float64` |
-
-## Composite Types
-
-### Pointers
+## Pointer Types
 
 ```dev
-ptr[T]       # Immutable pointer to T
-mut ptr[T]   # Mutable pointer to T
+ptr[T]       # Pointer to T
 ```
 
 ```dev
 let x: int32 = 42
-let p: ptr[int32] = &x        # Immutable pointer
-let mp: mut ptr[int32] = &mut x  # Mutable pointer
+let p: ptr[int32] = &x        # Address of a local
+let q = 0x1000 as ptr[int32]  # Integer literal as pointer
 ```
 
-### References
+Pointers:
+- Can be created with `&local`, integer casts, `alloc()`, or string literals (`ptr[char]`)
+- Dereferencing (`*p`) and pointer arithmetic (`p + n`) require `unsafe`
+- `&x` is implicitly coerced to `ptr[T]` when passed as a function argument
+- Can be cast to/from integers with `as`
 
-```dev
-ref[T]       # Immutable reference (borrow)
-refmut[T]    # Mutable reference (exclusive borrow)
-```
+There is no separate `mut ptr[T]` spelling — mutability is expressed with
+`var` bindings and enforced by the `unsafe` rules.
 
-```dev
-let x = 42
-let r: ref[int32] = &x
-let mr: refmut[int32] = &mut x
-```
-
-### Own Pointers
-
-```dev
-own[T]       # Unique ownership (like Box<T>)
-```
-
-```dev
-let o: own[int32] = own(42)
-```
-
-### Arrays
-
-```dev
-[T; N]       # Fixed-size array of N elements
-```
-
-```dev
-let arr: [int32; 5] = [1, 2, 3, 4, 5]
-let zeroed: [int32; 10] = [0; 10]
-```
-
-### Slices
-
-```dev
-slice[T]     # Fat pointer: (ptr, len)
-```
-
-```dev
-let arr: [int32; 5] = [1, 2, 3, 4, 5]
-let s: slice[int32] = &arr[..]  # Full slice
-let s2 = &arr[1..3]             # Subslice
-```
-
-### Tuples
-
-```dev
-(T1, T2, ...)  # Fixed-size heterogeneous collection
-```
-
-```dev
-let t: (int32, float64, char) = (42, 3.14, 'a')
-let (x, y, z) = t  # Destructuring
-```
+## Composite Types
 
 ### Structs
 
@@ -121,72 +70,35 @@ let (x, y, z) = t  # Destructuring
 struct Point:
     x: int32
     y: int32
-
-# With methods
-impl Point:
-    pub def new(x: int32, y: int32) -> Point:
-        return Point { x: x, y: y }
 ```
 
-### Enums
+- Constructed with a struct literal: `Point { x: 1, y: 2 }`
+- Fields are laid out sequentially **without padding**
+- Field access on a pointer parameter auto-dereferences: `p.x` where `p: ptr[Point]`
+- Nested structs are not yet supported (see [Known Issues](known-issues.md))
+
+### Arrays
 
 ```dev
-enum Result<T, E>:
-    Ok(T)
-    Err(E)
-
-# Pattern matching
-match result:
-    case Ok(v): puts("success")
-    case Err(e): puts("error")
+let arr = [1, 2, 3]   # Array literal
+let x = arr[0]
 ```
 
-### Unions
+Array literals and indexing work. Fixed-size type annotations
+(`[int32; 5]`) and repeat literals (`[0; 3]`) are **not** supported yet.
+
+### Enums & Unions
 
 ```dev
-union IntOrFloat:
-    i: int32
-    f: float64
-
-# Requires unsafe to access
-unsafe:
-    let u = IntOrFloat { i: 42 }
-    puts(u.i)
+enum Color:
+    Red
+    Green
+    Blue
 ```
 
-### Function Types
-
-```dev
-fn(T1, T2) -> T3
-```
-
-```dev
-let f: fn(int32, int32) -> int32 = add
-```
-
-## Type Constructors
-
-```dev
-# Pointer
-let p = &x as ptr[int32]
-
-# Cast
-let y = x as int64
-
-# Array literal
-let a = [1, 2, 3]
-let a: [int32; 3] = [1, 2, 3]
-
-# Struct literal
-let p = Point { x: 1, y: 2 }
-
-# Tuple
-let t = (1, 2.0)
-
-# Slice
-let s = &arr[..]
-let s = &arr[1..3]
-```
+`enum` and `union` declarations are accepted by the parser and type checker,
+but enum variants cannot be referenced and unions cannot be constructed —
+neither has codegen support. See [Known Issues](known-issues.md).
 
 ## Type Inference
 
@@ -199,49 +111,43 @@ let z = true      # bool
 let s = "hello"   # ptr[char] (string literal)
 ```
 
-Explicit annotation when needed:
+Explicit annotation is used when needed:
 
 ```dev
 let x: int64 = 42
-let f: fn(int32) -> int32 = add
+let f: float64 = 1.5
 ```
 
-## Subtyping & Variance
+## Casts
 
-- Pointers are invariant
-- References are covariant in lifetime
-- Function types: contravariant in args, covariant in return
-
-## Size & Alignment
-
-| Type | Size | Alignment |
-|------|------|-----------|
-| `int8` / `uint8` | 1 | 1 |
-| `int16` / `uint16` | 2 | 2 |
-| `int32` / `uint32` / `float32` | 4 | 4 |
-| `int64` / `uint64` / `float64` | 8 | 8 |
-| `ptr[T]` | 8 (64-bit) / 4 (32-bit) | pointer size |
-| `slice[T]` | 16 / 8 | pointer size |
-
-## Type Compatibility
-
-- No implicit numeric conversions
-- Explicit casts required: `x as int64`
-- Pointer to integer: `p as usize`
-- Integer to pointer: `x as ptr[T]`
-
-## Generics
+There are no implicit numeric conversions — explicit `as` casts are required:
 
 ```dev
-pub def identity<T>(x: T) -> T:
-    return x
-
-pub def first<T>(a: T, b: T) -> T:
-    return a
-
-# Monomorphized at call sites
-let x = identity(42)      # T = int32
-let y = identity(3.14)    # T = float64
+let y = x as int64      # Integer widening/narrowing
+let f = 42 as float64   # Integer to float
+let i = 3.7 as int32    # Float to integer (truncating)
+let p = 0x1000 as ptr[int32]  # Integer to pointer
+let addr = p as int64   # Pointer to integer
 ```
 
-Constraints not yet supported (planned: `where T: Add`).
+## sizeof / offsetof
+
+```dev
+let size = sizeof(u32)         # Size of a type in bytes
+let size2 = sizeof(MyStruct)
+let off = offsetof(Point, y)   # Byte offset of a field
+```
+
+Both return `usize`-typed values and work on primitives and struct types.
+
+## Unsupported Types
+
+The following type forms parse but are not functional yet — see
+[Known Issues](known-issues.md):
+
+- `ref[T]` / `refmut[T]` — references (only `ref[T]` annotation + deref work)
+- `own[T]` — owned pointers (declaration only; no constructor)
+- `(T1, T2, ...)` — tuples (fail at lowering)
+- `[T; N]` — fixed-size array annotations
+- `slice[T]` — slices
+- `fn(T) -> T` — function types

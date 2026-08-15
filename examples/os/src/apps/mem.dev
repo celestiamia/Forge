@@ -1,0 +1,6 @@
+package apps.mem
+
+def app_mem() -> void:
+    puts("conventional memory: ")
+    put_hex16(mem_size_kb())
+    puts(" KB\n")

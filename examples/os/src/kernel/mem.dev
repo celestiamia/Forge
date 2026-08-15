@@ -1,0 +1,12 @@
+package kernel.mem
+
+# Direct memory probes for ForgeOS.
+
+def mem_size_kb() -> u16:
+    # Conventional memory size in kilobytes, from the BIOS Data Area at 0x413.
+    unsafe:
+        return *(0x413 as ptr[u16])
+
+def read_u8(addr: u16) -> u8:
+    unsafe:
+        return *(addr as ptr[u8])

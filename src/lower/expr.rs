@@ -75,7 +75,6 @@ impl LowerCtx<'_> {
             ast::Expr::Cast(c) => self.lower_cast(c),
             ast::Expr::Field(f) => self.lower_field(f),
             ast::Expr::Index(i) => self.lower_index(i),
-            ast::Expr::Asm(a) => self.lower_asm(a),
             ast::Expr::Match(m) => self.lower_match_expr(m),
             ast::Expr::SizeOf(s) => {
                 let ty = self.lower_type(&s.ty)?;
@@ -371,31 +370,6 @@ impl LowerCtx<'_> {
             object_ty,
         );
         Ok(ir::Expr::new(ir::ExprKind::Load(Box::new(ptr)), elem_ty))
-    }
-
-    fn lower_asm(&mut self, a: &ast::AsmExpr) -> Result<ir::Expr> {
-        let mut inputs = Vec::new();
-        for op in &a.inputs {
-            let expr = self.lower_expr(&op.expr)?;
-            inputs.push((expr, op.constraint.clone()));
-        }
-        if a.outputs.len() > 1 {
-            bail!("inline assembly with multiple outputs is not supported");
-        }
-        let output = a
-            .outputs
-            .first()
-            .map(|o| (ir::Type::Void, o.constraint.clone()));
-        Ok(ir::Expr::new(
-            ir::ExprKind::Asm {
-                template: a.template.clone(),
-                constraints: String::new(),
-                inputs,
-                output,
-                clobbers: a.clobbers.clone(),
-            },
-            ir::Type::Void,
-        ))
     }
 
     pub(super) fn lower_literal(&self, lit: &ast::Literal) -> Result<ir::Literal> {

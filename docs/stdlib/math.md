@@ -1,8 +1,8 @@
 # std.math
 
-Mathematical functions for integers and floats.
+Integer math helpers.
 
-## Integer Functions
+## Functions
 
 ### abs_i32
 
@@ -10,14 +10,14 @@ Mathematical functions for integers and floats.
 def abs_i32(x: int32) -> int32
 ```
 
-Absolute value. Returns `INT32_MIN` for `INT32_MIN` (overflow).
+Absolute value. Returns `INT32_MIN` for `INT32_MIN` (overflow, two's
+complement).
 
 ```dev
 from std.math import abs_i32
 
 abs_i32(-42)   # 42
 abs_i32(42)    # 42
-abs_i32(0)     # 0
 ```
 
 ### min_i32 / max_i32
@@ -27,7 +27,7 @@ def min_i32(a: int32, b: int32) -> int32
 def max_i32(a: int32, b: int32) -> int32
 ```
 
-Return minimum/maximum of two values.
+Return the minimum/maximum of two values.
 
 ```dev
 from std.math import min_i32, max_i32
@@ -42,7 +42,7 @@ max_i32(10, 20)   # 20
 def clamp_i32(v: int32, lo: int32, hi: int32) -> int32
 ```
 
-Clamp value to range `[lo, hi]`. Requires `lo <= hi`.
+Clamp `v` to the range `[lo, hi]`. Assumes `lo <= hi`.
 
 ```dev
 from std.math import clamp_i32
@@ -52,37 +52,13 @@ clamp_i32(-5, 0, 10)   # 0
 clamp_i32(15, 0, 10)   # 10
 ```
 
-## Float Functions (x86_64 only)
+## Float Functions
 
-Not yet implemented. Planned:
-- `abs_f32`, `abs_f64`
-- `sqrt_f32`, `sqrt_f64`
-- `sin_f32`, `cos_f32`, `tan_f32`
-- `floor_f32`, `ceil_f32`
-- `pow_f32`, `log_f32`
+Not yet implemented. Planned: `abs_f64`, `sqrt_f64`, `sin_f64`, `cos_f64`,
+`floor_f64`, `pow_f64`, etc. Floating-point arithmetic itself works on x86_64
+via the language operators.
 
 ## Implementation Notes
 
-- Integer functions are pure and inlineable
-- No runtime dependencies
-- `abs_i32` handles `INT32_MIN` by returning `INT32_MIN` (two's complement)
-- `clamp_i32` assumes `lo <= hi` (undefined behavior otherwise)
-
-## Example
-
-```dev
-from std.math import abs_i32, min_i32, max_i32, clamp_i32
-from std.io import puts
-from std.fmt import format_i32
-
-pub def main() -> int32:
-    let x = -42
-    puts("abs: ")
-    puts(format_i32(abs_i32(x)))
-    puts("\n")
-    
-    puts("clamp: ")
-    puts(format_i32(clamp_i32(15, 0, 10)))
-    puts("\n")
-    return 0
-```
+- Pure functions, no runtime dependencies
+- `clamp_i32` assumes `lo <= hi` (behavior is otherwise undefined)

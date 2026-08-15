@@ -11,7 +11,6 @@ create-missing = false
 use-default-preprocessors = true
 
 [output.html]
-theme = "gitbook"
 smart-punctuation = true
 mathjax-support = false
 additional-css = ["custom.css"]

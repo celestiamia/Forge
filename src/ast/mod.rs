@@ -294,7 +294,6 @@ pub enum Expr {
     Field(FieldExpr),
     Index(IndexExpr),
     Cast(CastExpr),
-    Asm(AsmExpr),
     SizeOf(SizeOfExpr),
     OffsetOf(OffsetOfExpr),
     Deref(DerefExpr),
@@ -326,7 +325,6 @@ impl Expr {
             Expr::Field(e) => Some(e.span),
             Expr::Index(e) => Some(e.span),
             Expr::Cast(e) => Some(e.span),
-            Expr::Asm(e) => Some(e.span),
             Expr::SizeOf(e) => Some(e.span),
             Expr::OffsetOf(e) => Some(e.span),
             Expr::Deref(e) => Some(e.span),
@@ -390,21 +388,6 @@ pub struct CastExpr {
     pub span: Span,
     pub expr: Box<Expr>,
     pub ty: Box<TypeExpr>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct AsmExpr {
-    pub span: Span,
-    pub template: String,
-    pub inputs: Vec<AsmOperand>,
-    pub outputs: Vec<AsmOperand>,
-    pub clobbers: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct AsmOperand {
-    pub constraint: String,
-    pub expr: Box<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -1,0 +1,62 @@
+package shell.commands
+
+# Command dispatch for the ForgeOS shell.
+#
+# The IR has no function pointers, so dispatch is an if/elif chain comparing
+# the typed line against each command name.  Every app is its own module,
+# merged into the single kernel image; all function names must be unique
+# across modules.
+
+import kernel.io
+import kernel.mem
+import apps.help
+import apps.hello
+import apps.about
+import apps.mem
+import apps.calc
+import apps.dump
+import apps.reboot
+
+def str_eq(a: ptr[char], b: ptr[char]) -> bool:
+    var i: u16 = 0
+    unsafe:
+        while true:
+            var ca: char = *(a + i)
+            var cb: char = *(b + i)
+            if ca != cb:
+                return false
+            if ca == 0:
+                return true
+            i = i + 1
+
+def cmd_is(buf: ptr[char], name: ptr[char]) -> bool:
+    var i: u16 = 0
+    unsafe:
+        while true:
+            var cn: char = *(name + i)
+            var cb: char = *(buf + i)
+            if cn == 0:
+                return cb == 0 || cb == 32
+            if cn != cb:
+                return false
+            i = i + 1
+
+def run_command(buf: ptr[char]) -> void:
+    if str_eq(buf, "help"):
+        app_help()
+    elif str_eq(buf, "hello"):
+        app_hello()
+    elif str_eq(buf, "about"):
+        app_about()
+    elif str_eq(buf, "mem"):
+        app_mem()
+    elif cmd_is(buf, "calc"):
+        app_calc(buf)
+    elif str_eq(buf, "dump"):
+        app_dump()
+    elif str_eq(buf, "clear"):
+        _dev_bios_clear()
+    elif str_eq(buf, "reboot"):
+        app_reboot()
+    else:
+        put_line("unknown command - try `help`")

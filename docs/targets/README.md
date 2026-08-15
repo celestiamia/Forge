@@ -8,7 +8,7 @@ Forge supports multiple compilation targets with different capabilities.
 |---------------|--------------|--------|--------|----------|
 | `x86_64-unknown-linux-gnu` | x86_64 | ELF64 | ✅ | Native Linux apps |
 | `x86_32-unknown-linux-gnu` | i686 | ELF32 | ✅ | 32-bit Linux apps |
-| `x86_16-boot` | 8086 | Flat (512B) | ❌ | Boot sectors |
+| `x86_16-boot` | 8086 | Flat (512B) / raw stage images | ❌ | Boot sectors, multi-stage OSes |
 
 ## Common Flags
 
@@ -18,9 +18,10 @@ forgec input.dev -o output --target <triple>
 
 | Flag | Description |
 |------|-------------|
-| `--target <triple>` | Target triple (default: native) |
+| `--target <triple>` | Target triple (default: `x86_64-unknown-linux-gnu`) |
 | `-o <file>` | Output file (default: input name) |
-| `--freestanding` | No runtime, custom entry point |
+| `--freestanding` | No hosted runtime, custom entry point |
+| `--linker <path>` | Custom target config (`.fld` linker descriptor) |
 | `--help` | Show all options |
 
 ## x86_64 Linux
@@ -99,25 +100,31 @@ cargo build --release --target i686-unknown-linux-gnu
 | `std.volatile` | ✅ |
 | `std.gc` | ❌ |
 
-## x86_16 Boot Sector
+## x86_16 Real Mode
 
 **Target**: `x86_16-boot`
 - **Architecture**: 8086/8088 (real mode)
-- **Format**: Flat binary (512 bytes, 0x55AA signature)
+- **Format**: Flat boot sector (512 bytes, `0x55AA` signature) or bare `raw`
+  stage images via a `.fld` descriptor
 - **Mode**: Freestanding (no OS)
 - **Pointer**: 16-bit (segmented)
-- **Origin**: 0x7C00 (BIOS load address)
+- **Origin**: `0x7C00` (BIOS load address; override per-stage with the
+  `.fld` `LOAD` directive)
 
 ```bash
 # Build boot sector
 ./target/release/forgec examples/bootloader.dev -o boot.bin --target x86_16-boot
+
+# Build a stage-2 image loaded elsewhere (LOAD 0x9000)
+./target/release/forgec src/boot/loader.dev -o loader.raw --linker examples/os/os-loader.fld
 
 # Run in QEMU
 qemu-system-x86_64 -fda boot.bin -nographic
 ```
 
 ### Constraints
-- **512 bytes total** (including 0x55AA signature)
+- **`flat` images: 512 bytes total** (including 0x55AA signature); `raw`
+  images are limited only by what the loading stage can read
 - **16-bit real mode** (no protection, no paging)
 - **Segmented memory** (segment:offset)
 - **BIOS interrupts** for I/O
@@ -173,10 +180,14 @@ extern def _dev_halt() -> void
 
 ### Build Process
 
-1. Forge compiles to x86-16 assembly
-2. Internal 16-bit assembler produces flat binary
-3. Pads to 510 bytes + adds `0x55AA` signature
-4. Output is raw `.bin` file
+1. Forge compiles to x86-16 machine code via the internal 16-bit assembler
+2. `FORMAT flat`: pads to 510 bytes + adds `0x55AA` signature
+3. `FORMAT raw`: emits the image as-is, string addresses fixed up against
+   the stage's `LOAD` address
+
+The [ForgeOS example](../examples/os.md) shows all of it in one project: a
+`flat` boot sector loading a `raw` loader at `0x9000`, which loads a `raw`
+kernel at `0x7C00` — no inline assembly anywhere.
 
 ### Testing
 

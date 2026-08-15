@@ -2,16 +2,23 @@
 
 There are several ways to install `forgec`:
 
-## From GitHub Releases (Recommended)
+## From GitHub Releases
 
-Download prebuilt binaries from the [releases page](https://github.com/celestiamia/Forge/releases).
+`forgec` is distributed as **nightly prereleases** — one per day, tagged
+`nightly-<version>-nightly-<date>-<commit>`, e.g.
+`nightly-0.1.0-nightly-20260815-584718c`.
+
+Browse the [releases page](https://github.com/celestiamia/Forge/releases) and
+filter by *Pre-release*, or download a specific build:
+
+```bash
+# Example: download the nightly from 2026-08-15
+wget https://github.com/celestiamia/Forge/releases/download/nightly-0.1.0-nightly-20260815-584718c/forgec-x86_64-linux
+```
 
 ### Linux x86_64
 
 ```bash
-# Download latest release
-wget https://github.com/celestiamia/Forge/releases/latest/download/forgec-x86_64-linux
-
 # Make executable and install
 chmod +x forgec-x86_64-linux
 sudo mv forgec-x86_64-linux /usr/local/bin/forgec
@@ -23,7 +30,7 @@ forgec --version
 ### Linux x86_32 (i686)
 
 ```bash
-wget https://github.com/celestiamia/Forge/releases/latest/download/forgec-i686-linux
+# From the same release page: forgec-i686-linux
 chmod +x forgec-i686-linux
 sudo mv forgec-i686-linux /usr/local/bin/forgec
 ```
@@ -31,14 +38,17 @@ sudo mv forgec-i686-linux /usr/local/bin/forgec
 ### Boot Sector Binary
 
 ```bash
-wget https://github.com/celestiamia/Forge/releases/latest/download/forgec-x86_16-boot.bin
-# This is a 512-byte boot sector, not an executable
+# forgec-x86_16-boot.bin is a 512-byte boot sector, not an executable
 # Use with: qemu-system-x86_64 -fda forgec-x86_16-boot.bin -nographic
 ```
 
+> There is no stable release yet — `releases/latest` is not populated until
+> the first non-prerelease tag. Use a specific nightly tag (above) or build
+> from source.
+
 ## From Source
 
-Requires Rust 1.70+.
+Requires Rust 1.85+ (edition 2024).
 
 ```bash
 # Clone and build
@@ -69,24 +79,13 @@ cargo build --release --target i686-unknown-linux-gnu
 ./target/release/forgec examples/bootloader.dev -o boot.bin --target x86_16-boot
 ```
 
-## Nightly Builds
-
-Automated nightly builds are available from the [nightly releases](https://github.com/celestiamia/Forge/releases?q=nightly&expanded=true).
-
-```bash
-# Latest nightly x86_64
-wget https://github.com/celestiamia/Forge/releases/download/nightly-latest/forgec-x86_64-linux
-```
-
 ## Verification
 
-All releases include SHA256 checksums:
+All releases include SHA256 checksums. To verify a downloaded binary, open
+the release page's `SHA256SUMS` asset or fetch it for a specific tag:
 
 ```bash
-# Download checksums
-wget https://github.com/celestiamia/Forge/releases/latest/download/SHA256SUMS
-
-# Verify
+wget https://github.com/celestiamia/Forge/releases/download/nightly-0.1.0-nightly-20260815-584718c/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 

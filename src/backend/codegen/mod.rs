@@ -25,9 +25,10 @@ pub(super) const BASE_VADDR: u64 = 0x400000;
 pub(super) const EHDR_SIZE: u64 = 64;
 pub(super) const PHDR_SIZE: u64 = 56;
 
-// Size of the garbage-collected heap, reserved as zero-initialized `.bss`.  The
-// heap is a single contiguous region managed by a free-list allocator with
-// conservative mark-and-sweep collection.
+// Default size of the garbage-collected heap, reserved as zero-initialized
+// `.bss`.  The heap is a single contiguous region managed by a free-list
+// allocator with conservative mark-and-sweep collection.  Overridden by the
+// `HEAP size = ...` directive in a linker script.
 pub(super) const HEAP_ARENA_SIZE: u64 = 4 * 1024 * 1024; // 4 MiB
 
 // `gc_state` block (lives in `.data`, right after the rand seed).  All offsets
@@ -95,15 +96,22 @@ pub struct CodeGen<'p> {
 }
 
 pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
-    let is_flat = prog.obj_format.as_deref() == Some("flat");
-    if is_flat {
-        compile_flat_program(prog)
-    } else {
-        compile_elf_program(prog)
+    match prog.obj_format.as_deref() {
+        Some("flat") => compile_flat_program(prog, true),
+        Some("raw") => compile_flat_program(prog, false),
+        Some("elf") => compile_elf_program(prog),
+        other => bail!(
+            "unsupported output format `{}`",
+            other.unwrap_or("(none)")
+        ),
     }
 }
 
-pub(super) fn compile_flat_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
+/// Compile a 16-bit real-mode flat image.  When `boot_sector` is true the
+/// output must fit in 510 bytes and is padded to a 512-byte boot sector with
+/// the 0x55AA signature; otherwise the image is emitted as-is (used for
+/// multi-sector stage-2 kernels loaded by a boot sector).
+pub(super) fn compile_flat_program(prog: &Program, boot_sector: bool) -> Result<Box<dyn ObjectWriter>> {
     if prog.arch.as_deref() != Some("x86_16") {
         bail!(
             "flat binary target {} is not supported",
@@ -113,14 +121,14 @@ pub(super) fn compile_flat_program(prog: &Program) -> Result<Box<dyn ObjectWrite
 
     let code = codegen16::compile_program(prog)?;
 
-    if code.len() > 510 {
+    if boot_sector && code.len() > 510 {
         bail!(
             "boot sector code is {} bytes, exceeding the 510-byte limit",
             code.len()
         );
     }
 
-    Ok(Box::new(FlatWriter::new(code, true)))
+    Ok(Box::new(FlatWriter::new(code, boot_sector)))
 }
 
 pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
@@ -222,9 +230,16 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         cg.func_labels.insert("__forge_pow".to_string(), pow);
         l
     } else {
-        *cg.func_labels
-            .get("_start")
-            .ok_or_else(|| anyhow::anyhow!("freestanding mode requires a _start function"))?
+        // Freestanding entry: the `ENTRY` directive from a linker script,
+        // falling back to the conventional `_start`.
+        let entry_name = prog
+            .config
+            .as_ref()
+            .map(|c| c.entry.as_str())
+            .unwrap_or("_start");
+        *cg.func_labels.get(entry_name).ok_or_else(|| {
+            anyhow::anyhow!("freestanding mode requires a {} function", entry_name)
+        })?
     };
 
     for f in &prog.funcs {
@@ -299,6 +314,7 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         cg.asm.push_byte(0);
     }
 
+    let heap_size = cg.heap_size();
     let bytes = cg.asm.into_bytes()?;
     let split = *cg.label_offsets.get(&rodata_start).unwrap_or(&bytes.len());
     let mut code = bytes[..split].to_vec();
@@ -341,7 +357,7 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
             code[p..p + 8].copy_from_slice(&state_vaddr.to_le_bytes());
         }
         // The heap lives in `.bss`, immediately after `.data`.
-        bss_size = HEAP_ARENA_SIZE;
+        bss_size = heap_size;
         let arena_base = data_vaddr + data.len() as u64;
         data[state_off + GC_HEAP_BASE as usize..state_off + (GC_HEAP_BASE as usize) + 8]
             .copy_from_slice(&arena_base.to_le_bytes());
@@ -415,6 +431,25 @@ impl<'p> CodeGen<'p> {
         let off = self.asm.len();
         self.asm.bind(lab);
         self.label_offsets.insert(lab, off);
+    }
+
+    /// GC heap arena size in bytes, from the linker script `HEAP` directive
+    /// (falling back to the 4 MiB default when absent).
+    pub(super) fn heap_size(&self) -> u64 {
+        self.prog
+            .config
+            .as_ref()
+            .map(|c| c.heap_size)
+            .filter(|&h| h > 0)
+            .unwrap_or(HEAP_ARENA_SIZE)
+    }
+
+    /// Reject floating-point codegen when the target config disables floats.
+    pub(super) fn require_floats(&self) -> Result<()> {
+        if self.prog.config.as_ref().is_some_and(|c| !c.runtime.float) {
+            bail!("floating-point is disabled by the target's linker config (RUNTIME float = false)");
+        }
+        Ok(())
     }
 
     pub(super) fn emit_func(&mut self, f: &Func) -> Result<()> {

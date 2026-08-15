@@ -134,9 +134,16 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         }
         l
     } else {
-        *cg.func_labels
-            .get("_start")
-            .ok_or_else(|| anyhow::anyhow!("freestanding mode requires a _start function"))?
+        // Freestanding entry: the `ENTRY` directive from a linker script,
+        // falling back to the conventional `_start`.
+        let entry_name = prog
+            .config
+            .as_ref()
+            .map(|c| c.entry.as_str())
+            .unwrap_or("_start");
+        *cg.func_labels.get(entry_name).ok_or_else(|| {
+            anyhow::anyhow!("freestanding mode requires a {} function", entry_name)
+        })?
     };
 
     for f in &prog.funcs {

@@ -501,6 +501,185 @@ fn bootloader_dev_compiles_and_runs() {
 }
 
 #[test]
+fn kernel_dev_compiles_and_runs() {
+    // Only run this test if qemu-system-x86_64 is available
+    if std::process::Command::new("qemu-system-x86_64")
+        .arg("-version")
+        .output()
+        .is_err()
+    {
+        eprintln!("Skipping kernel test: qemu-system-x86_64 not found");
+        return;
+    }
+
+    let out_dir =
+        std::env::temp_dir().join(format!("forge_kernel_test_{}", std::process::id()));
+    let _ = fs::create_dir_all(&out_dir);
+    let bin = out_dir.join("kernel");
+
+    let mut cmd = Command::cargo_bin("forgec").unwrap();
+    cmd.arg("examples/kernel.dev")
+        .arg("-o")
+        .arg(&bin)
+        .arg("--target")
+        .arg("x86_16-boot");
+    cmd.assert().success();
+
+    let bytes = fs::read(&bin).expect("failed to read boot sector");
+    assert_eq!(bytes.len(), 512, "boot sector must be 512 bytes");
+    assert_eq!(
+        &bytes[510..512],
+        &[0x55, 0xAA],
+        "missing boot signature 0x55 0xAA"
+    );
+
+    let mut qemu = std::process::Command::new("qemu-system-x86_64");
+    qemu.arg("-fda")
+        .arg(&bin)
+        .arg("-nographic")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    let mut child = qemu.spawn().expect("failed to spawn qemu-system-x86_64");
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    let _ = child.kill();
+
+    // The kernel prints its probe results via BIOS int 0x10, mixed with
+    // SeaBIOS boot messages.  This also exercises 16-bit division, which
+    // the hex printer relies on.
+    let output = child
+        .wait_with_output()
+        .expect("failed to read qemu output");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Forge kernel 0.1"),
+        "kernel did not print expected message; qemu stdout: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("conv mem: "),
+        "kernel did not report conventional memory; qemu stdout: {:?}",
+        stdout
+    );
+}
+
+#[test]
+fn os_dev_boots_shell_and_calc() {
+    // Full ForgeOS boot test: stage-1 boot, stage-2 loader, stage-3 kernel,
+    // then drive the shell over the QEMU monitor and check `calc 42`.
+    if std::process::Command::new("qemu-system-x86_64")
+        .arg("-version")
+        .output()
+        .is_err()
+    {
+        eprintln!("Skipping OS test: qemu-system-x86_64 not found");
+        return;
+    }
+    if std::process::Command::new("socat").arg("-V").output().is_err() {
+        eprintln!("Skipping OS test: socat not found");
+        return;
+    }
+
+    let out_dir = std::env::temp_dir().join(format!("forge_os_test_{}", std::process::id()));
+    let _ = fs::create_dir_all(&out_dir);
+    let img = out_dir.join("os.img");
+    let mon = format!("/tmp/forge_os_mon_{}.sock", std::process::id());
+
+    let compile = |src: &str, out: &str, extra: &[&str]| {
+        let mut cmd = Command::cargo_bin("forgec").unwrap();
+        cmd.arg(src).arg("-o").arg(out).args(extra);
+        cmd.assert().success();
+    };
+    compile(
+        "examples/os/src/boot/boot.dev",
+        &out_dir.join("boot.bin").to_string_lossy(),
+        &["--target", "x86_16-boot"],
+    );
+    compile(
+        "examples/os/src/boot/loader.dev",
+        &out_dir.join("loader.raw").to_string_lossy(),
+        &["--linker", "examples/os/os-loader.fld"],
+    );
+    compile(
+        "examples/os/src/kernel/kernel.dev",
+        &out_dir.join("kernel.raw").to_string_lossy(),
+        &["--linker", "examples/os/os.fld"],
+    );
+
+    let write_img = |img: &std::path::Path, file: &std::path::Path, seek: u64| {
+        std::process::Command::new("dd")
+            .arg(format!("if={}", file.display()))
+            .arg(format!("of={}", img.display()))
+            .arg("bs=512")
+            .arg(format!("seek={}", seek))
+            .arg("conv=notrunc")
+            .arg("status=none")
+            .status()
+            .expect("failed to run dd");
+    };
+    fs::write(&img, vec![0u8; 1_474_560]).expect("failed to create os.img");
+    write_img(&img, &out_dir.join("boot.bin"), 0);
+    write_img(&img, &out_dir.join("loader.raw"), 1);
+    write_img(&img, &out_dir.join("kernel.raw"), 3);
+
+    let mut qemu = std::process::Command::new("qemu-system-x86_64");
+    qemu.arg("-accel")
+        .arg("tcg,thread=multi")
+        .arg("-drive")
+        .arg(format!("file={},format=raw,if=ide", img.display()))
+        .arg("-nographic")
+        .arg("-monitor")
+        .arg(format!("unix:{},server,nowait", mon))
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    let mut child = qemu.spawn().expect("failed to spawn qemu-system-x86_64");
+    let send_keys = |keys: &str| {
+        for _ in 0..40 {
+            if std::path::Path::new(&mon).exists() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+        std::process::Command::new("socat")
+            .arg("-")
+            .arg(format!("UNIX-CONNECT:{}", mon))
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut p| {
+                use std::io::Write;
+                p.stdin
+                    .as_mut()
+                    .unwrap()
+                    .write_all(keys.as_bytes())
+                    .unwrap();
+                p.wait()
+            })
+            .expect("failed to drive qemu monitor");
+    };
+
+    std::thread::sleep(std::time::Duration::from_secs(7));
+    send_keys("sendkey c\nsendkey a\nsendkey l\nsendkey c\nsendkey spc\nsendkey 4\nsendkey 2\nsendkey ret\n");
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    let _ = child.kill();
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to read qemu output");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("sq(0x002A) = 0x06E4"),
+        "calc 42 did not print its result; qemu stdout: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("ForgeOS> "),
+        "shell prompt missing; qemu stdout: {:?}",
+        stdout
+    );
+}
+
+#[test]
 fn fileio_dev_compiles_and_runs() {
     let bin = compile_example("fileio");
     let output = Command::new(&bin)
@@ -954,4 +1133,152 @@ fn website_dev_compiles_and_serves_pages_x86_32() {
 
     let _ = child.kill();
     let _ = child.wait();
+}
+
+#[test]
+fn linker_script_x86_64_compiles_and_runs() {
+    let out_dir =
+        std::env::temp_dir().join(format!("forge_fld_x86_64_test_{}", std::process::id()));
+    let _ = fs::create_dir_all(&out_dir);
+    let bin = out_dir.join("hello");
+
+    let mut cmd = Command::cargo_bin("forgec").unwrap();
+    cmd.arg("examples/hello.dev")
+        .arg("-o")
+        .arg(&bin)
+        .arg("--linker")
+        .arg("examples/targets/x86_64-linux.fld");
+    cmd.assert().success();
+
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run linker-script binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "Hello, Forge!\n");
+    assert!(
+        output.status.success(),
+        "linker-script x86_64 binary exited with non-zero status"
+    );
+}
+
+#[test]
+fn linker_script_x86_16_boot_sector() {
+    let out_dir =
+        std::env::temp_dir().join(format!("forge_fld_boot_test_{}", std::process::id()));
+    let _ = fs::create_dir_all(&out_dir);
+    let bin = out_dir.join("boot");
+
+    let mut cmd = Command::cargo_bin("forgec").unwrap();
+    cmd.arg("examples/bootloader.dev")
+        .arg("-o")
+        .arg(&bin)
+        .arg("--linker")
+        .arg("examples/targets/x86_16-boot.fld");
+    cmd.assert().success();
+
+    let bytes = fs::read(&bin).expect("failed to read boot sector");
+    assert_eq!(bytes.len(), 512, "boot sector must be 512 bytes");
+    assert_eq!(
+        &bytes[510..512],
+        &[0x55, 0xAA],
+        "missing boot signature 0x55 0xAA"
+    );
+}
+
+#[test]
+fn linker_script_custom_hosted_entry() {
+    let out_dir = std::env::temp_dir().join(format!(
+        "forge_fld_entry_test_{}",
+        std::process::id()
+    ));
+    let _ = fs::create_dir_all(&out_dir);
+    let src = out_dir.join("entry.dev");
+    let fld = out_dir.join("entry.fld");
+    let bin = out_dir.join("entry");
+
+    fs::write(&src, "package test\n\npub def mymain() -> int32:\n    return 0\n").unwrap();
+    fs::write(
+        &fld,
+        "ARCH x86_64\nFORMAT elf\nHOSTED true\nENTRY mymain\n",
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("forgec").unwrap();
+    cmd.arg(&src).arg("-o").arg(&bin).arg("--linker").arg(&fld);
+    cmd.assert().success();
+
+    let status = std::process::Command::new(&bin)
+        .status()
+        .expect("failed to run binary");
+    assert!(status.success(), "custom ENTRY binary should exit 0");
+}
+
+#[test]
+fn linker_script_rejects_raw_format_on_x86_64() {
+    let out_dir = std::env::temp_dir().join(format!(
+        "forge_fld_raw_test_{}",
+        std::process::id()
+    ));
+    let _ = fs::create_dir_all(&out_dir);
+    let fld = out_dir.join("raw.fld");
+    fs::write(&fld, "ARCH x86_64\nFORMAT raw\nHOSTED true\n").unwrap();
+
+    let mut cmd = Command::cargo_bin("forgec").unwrap();
+    cmd.arg("examples/hello.dev")
+        .arg("-o")
+        .arg(out_dir.join("out"))
+        .arg("--linker")
+        .arg(&fld);
+    cmd.assert().failure().stderr(predicates::str::contains(
+        "FORMAT raw is only supported for ARCH x86_16",
+    ));
+}
+
+#[test]
+fn linker_script_raw_x86_16_image_has_no_boot_signature() {
+    let out_dir = std::env::temp_dir().join(format!(
+        "forge_fld_raw16_test_{}",
+        std::process::id()
+    ));
+    let _ = fs::create_dir_all(&out_dir);
+    let fld = out_dir.join("raw16.fld");
+    fs::write(
+        &fld,
+        "ARCH x86_16\nFORMAT raw\nHOSTED false\nENTRY _start\n",
+    )
+    .unwrap();
+
+    let mut cmd = Command::cargo_bin("forgec").unwrap();
+    cmd.arg("examples/kernel.dev")
+        .arg("-o")
+        .arg(out_dir.join("raw"))
+        .arg("--linker")
+        .arg(&fld);
+    cmd.assert().success();
+
+    // The raw image must be emitted byte-for-byte: no 510-byte padding and no
+    // 0x55AA trailer.  Compile the same source as a boot sector and check that
+    // the raw image is its exact prefix.
+    let mut cmd_boot = Command::cargo_bin("forgec").unwrap();
+    cmd_boot
+        .arg("examples/kernel.dev")
+        .arg("-o")
+        .arg(out_dir.join("boot"))
+        .arg("--target")
+        .arg("x86_16-boot");
+    cmd_boot.assert().success();
+
+    let raw = fs::read(out_dir.join("raw")).expect("failed to read raw image");
+    let boot = fs::read(out_dir.join("boot")).expect("failed to read boot sector");
+    assert_eq!(boot.len(), 512, "boot sector must be 512 bytes");
+    assert_eq!(&boot[510..512], &[0x55, 0xAA], "missing boot signature");
+    assert_eq!(
+        &boot[..raw.len()],
+        &raw[..],
+        "raw image must be the unpadded prefix of the boot sector"
+    );
+    assert!(
+        boot[raw.len()..510].iter().all(|&b| b == 0),
+        "boot sector padding must be zero bytes"
+    );
 }

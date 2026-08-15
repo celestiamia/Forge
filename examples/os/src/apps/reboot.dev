@@ -1,0 +1,5 @@
+package apps.reboot
+
+def app_reboot() -> void:
+    put_line("Rebooting...")
+    _dev_bios_reboot()

@@ -6,7 +6,7 @@
 //! control flow, raw pointer load/store, arithmetic, and string literals.
 
 pub(super) use anyhow::{Result, anyhow, bail};
-pub(super) use std::collections::HashMap;
+pub(super) use std::collections::{HashMap, HashSet};
 
 pub(super) use crate::backend::ir::{
     BinOp, Expr, ExprKind, Func, LValue, Literal, Program, Stmt, StructDef, Type,
@@ -17,7 +17,12 @@ pub(super) use crate::backend::ir::{
 /// The returned bytes are the raw machine code and data; the caller is
 /// responsible for padding to a boot sector and appending the signature.
 pub fn compile_program(prog: &Program) -> Result<Vec<u8>> {
-    let mut cg = CodeGen16::new(prog);
+    let load_base = prog
+        .config
+        .as_ref()
+        .map(|c| c.load_base)
+        .unwrap_or(0x7C00);
+    let mut cg = CodeGen16::new(prog, load_base);
     cg.emit_program()?;
     cg.finish()
 }
@@ -33,6 +38,9 @@ pub(super) struct CodeGen16<'p> {
     ret_label: u32,
     loop_end_stack: Vec<u32>,
     loop_head_stack: Vec<u32>,
+    /// Names of `_dev_*` runtime helpers the program actually calls; only
+    /// these get emitted.
+    referenced: HashSet<String>,
 }
 
 #[derive(Clone, Copy)]
@@ -48,12 +56,13 @@ mod layout;
 mod program;
 mod stmt;
 pub(super) use asm::*;
+pub(super) use program::BUILTIN_FUNCS;
 
 impl<'p> CodeGen16<'p> {
-    pub(super) fn new(prog: &'p Program) -> Self {
+    pub(super) fn new(prog: &'p Program, load_base: u16) -> Self {
         Self {
             prog,
-            asm: Encoder::new(),
+            asm: Encoder::new(load_base),
             locals: HashMap::new(),
             arrays: HashMap::new(),
             frame_size: 0,
@@ -62,6 +71,7 @@ impl<'p> CodeGen16<'p> {
             ret_label: 0,
             loop_end_stack: Vec::new(),
             loop_head_stack: Vec::new(),
+            referenced: HashSet::new(),
         }
     }
 

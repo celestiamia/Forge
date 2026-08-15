@@ -6,7 +6,7 @@ Complete guide to building `forgec` from source.
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| Rust | 1.70+ | Compiler toolchain |
+| Rust | 1.85+ (edition 2024) | Compiler toolchain |
 | Cargo | Included with Rust | Build system |
 | Git | Any | Version control |
 

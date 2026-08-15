@@ -1,0 +1,48 @@
+package kernel.io
+
+# Screen, keyboard, disk and control-plane helpers for ForgeOS.
+#
+# All `_dev_*` functions are runtime helpers emitted by the compiler; see
+# src/backend/codegen16/program.rs (BUILTIN_FUNCS).
+
+extern def _dev_bios_teletype(c: char) -> void
+extern def _dev_load_char(p: ptr[char]) -> char
+extern def _dev_bios_key() -> char
+extern def _dev_bios_clear() -> void
+extern def _dev_bios_reboot() -> void
+extern def _dev_halt() -> void
+extern def _dev_jump(addr: u16) -> void
+
+def puts(msg: ptr[char]) -> void:
+    unsafe:
+        var p: ptr[char] = msg
+        var c: char = _dev_load_char(p)
+        while c != 0:
+            _dev_bios_teletype(c)
+            p = p + 1
+            c = _dev_load_char(p)
+
+def put_line(msg: ptr[char]) -> void:
+    puts(msg)
+    _dev_bios_teletype(13 as char)
+    _dev_bios_teletype(10 as char)
+
+def put_hex_digit(d: u16) -> void:
+    if d < 10:
+        _dev_bios_teletype(((48 as u16) + d) as char)
+    else:
+        _dev_bios_teletype(((55 as u16) + d) as char)
+
+def put_hex16(v: u16) -> void:
+    var place: u16 = 4096
+    var i: u16 = 0
+    while i < 4:
+        var digit: u16 = v / place
+        put_hex_digit(digit)
+        v = v % place
+        place = place / 16
+        i = i + 1
+
+def put_byte(b: u8) -> void:
+    put_hex_digit((b as u16) / 16)
+    put_hex_digit((b as u16) % 16)

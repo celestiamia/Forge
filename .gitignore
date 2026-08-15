@@ -24,6 +24,7 @@
 *.iso
 *.hex
 *.map
+*.raw
 
 # Editor / IDE state
 .vscode/

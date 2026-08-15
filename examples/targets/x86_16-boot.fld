@@ -1,0 +1,31 @@
+# x86_16 real-mode boot sector (mirrors the `x86_16-boot` preset).
+#
+# Usage: forgec bootloader.dev -o boot.bin --linker examples/targets/x86_16-boot.fld
+#
+# Produces a 512-byte flat binary with the 0x55AA signature, loaded by the
+# BIOS at 0x7C00.  Freestanding: no hosted runtime, no syscalls, no heap.
+
+ARCH x86_16
+FORMAT flat
+HOSTED false
+ENTRY _start
+
+MEMORY {
+    ram (rwx) : origin = 0x0000, length = 64K
+}
+
+SECTIONS {
+    .text > ram
+    .rodata > ram
+    .data > ram
+    .bss > ram
+}
+
+RUNTIME {
+    syscalls = false
+    gc = false
+    alloc = false
+    float = false
+    sockets = false
+    files = false
+}

@@ -78,7 +78,7 @@ Examples:
 
 ## Architecture Overview
 
-See `CLAUDE.md` and `AGENTS.md` for detailed architecture documentation.
+See [`AGENTS.md`](AGENTS.md) and the [architecture docs](docs/contributing/architecture.md) for detailed architecture documentation.
 
 Key areas:
 - `src/lexer/`, `src/parser/` — Frontend

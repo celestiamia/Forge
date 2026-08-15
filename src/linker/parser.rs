@@ -22,6 +22,9 @@ impl Parser {
         let mut entry: Option<String> = None;
         // base_address is always None here; the default is determined by format below
         let mut heap_size: u64 = 0;
+        // Origin for x86_16 flat/raw images; the BIOS loads boot sectors at
+        // 0x7C00, other stages can override with `LOAD`.
+        let mut load_base: u16 = 0x7C00;
         let mut regions: Vec<MemoryRegion> = Vec::new();
         let mut sections: Vec<SectionMapping> = Vec::new();
         let mut runtime = RuntimeConfig::default();
@@ -48,6 +51,7 @@ impl Parser {
                 "FORMAT" => format = Some(self.parse_format()?),
                 "HOSTED" => hosted = Some(self.parse_bool()?),
                 "ENTRY" => entry = Some(self.expect_ident()?),
+                "LOAD" => load_base = self.parse_load_base()?,
                 "STACK" => {
                     self.skip_stack();
                 }
@@ -82,6 +86,7 @@ impl Parser {
             hosted,
             entry,
             base_address,
+            load_base,
             heap_size,
             regions,
             sections,
@@ -226,8 +231,22 @@ impl Parser {
         }
     }
 
+    /// `LOAD <hex>` — where an x86_16 flat/raw stage is loaded in memory.
+    fn parse_load_base(&mut self) -> Result<u16, String> {
+        let tok = self.peek().clone();
+        if let Tk::Number(n) = tok {
+            self.advance();
+            if n > u64::from(u16::MAX) {
+                return Err(format!("LOAD address {} does not fit in 16 bits", n));
+            }
+            Ok(n as u16)
+        } else {
+            Err("LOAD expects a hexadecimal address".to_string())
+        }
+    }
+
     fn at_block_start(&self) -> bool {
-        matches!(self.peek(), Tk::Ident(s) if matches!(s.as_str(), "MEMORY" | "SECTIONS" | "RUNTIME" | "ARCH" | "FORMAT" | "HOSTED" | "ENTRY" | "STACK" | "HEAP"))
+        matches!(self.peek(), Tk::Ident(s) if matches!(s.as_str(), "MEMORY" | "SECTIONS" | "RUNTIME" | "ARCH" | "FORMAT" | "HOSTED" | "ENTRY" | "LOAD" | "STACK" | "HEAP"))
     }
 
     fn expect_ident(&mut self) -> Result<String, String> {

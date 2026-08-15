@@ -1,0 +1,25 @@
+package shell.shell
+
+# The interactive command line: prompt, key-by-key line editing, dispatch.
+
+import shell.commands
+
+def shell_main() -> void:
+    var buf: [char; 40]
+    while true:
+        puts("ForgeOS> ")
+        read_line(buf)
+        run_command(buf)
+
+def read_line(buf: ptr[char]) -> void:
+    var i: u16 = 0
+    var c: char = _dev_bios_key()
+    unsafe:
+        while c != 13:
+            _dev_bios_teletype(c)
+            buf[i] = c
+            i = i + 1
+            c = _dev_bios_key()
+        buf[i] = 0
+    _dev_bios_teletype(13 as char)
+    _dev_bios_teletype(10 as char)

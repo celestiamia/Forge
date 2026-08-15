@@ -369,10 +369,16 @@ impl<'p> CodeGen<'p> {
             .get("_dev_ignore_sigpipe")
             .ok_or_else(|| anyhow::anyhow!("missing _dev_ignore_sigpipe"))?;
         self.asm.call(ignore_sigpipe)?;
+        let main_name = self
+            .prog
+            .config
+            .as_ref()
+            .map(|c| c.entry.as_str())
+            .unwrap_or("_forge_main");
         let main_lab = *self
             .func_labels
-            .get("_forge_main")
-            .ok_or_else(|| anyhow::anyhow!("hosted mode requires a main function"))?;
+            .get(main_name)
+            .ok_or_else(|| anyhow::anyhow!("hosted mode requires a {} function", main_name))?;
         // The Linux ABI starts the process with argc at [rsp] and the argv
         // array at [rsp+8].  Pass both to main; a `pub def main()` that
         // declares no parameters simply ignores them.

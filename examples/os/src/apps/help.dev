@@ -1,0 +1,12 @@
+package apps.help
+
+def app_help() -> void:
+    put_line("ForgeOS commands:")
+    puts("  help    - this list\n")
+    puts("  hello   - greet from an app module\n")
+    puts("  about   - about this OS\n")
+    puts("  mem     - conventional memory size\n")
+    puts("  calc    - square of a number, e.g. `calc 42`\n")
+    puts("  dump    - hex dump of low memory\n")
+    puts("  clear   - clear the screen\n")
+    puts("  reboot  - reboot the machine\n")

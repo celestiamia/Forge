@@ -1,43 +1,60 @@
 use super::*;
 
+/// `_dev_*` runtime helpers the 16-bit backend can emit.  Only the ones the
+/// program actually calls are emitted (tracked via [`CodeGen16::referenced`]).
+pub const BUILTIN_FUNCS: [&str; 10] = [
+    "_dev_bios_teletype",
+    "_dev_serial_putc",
+    "_dev_load_char",
+    "_dev_halt",
+    "_dev_bios_key",
+    "_dev_bios_disk_read",
+    "_dev_bios_disk_reset",
+    "_dev_bios_reboot",
+    "_dev_bios_clear",
+    "_dev_jump",
+];
+
 impl<'p> CodeGen16<'p> {
     pub(super) fn emit_program(&mut self) -> Result<()> {
+        // Flat binary entry: the `ENTRY` directive from a linker script,
+        // falling back to the conventional `_start`.
+        let entry_name = self
+            .prog
+            .config
+            .as_ref()
+            .map(|c| c.entry.as_str())
+            .unwrap_or("_start");
         let mut funcs: Vec<&Func> = Vec::new();
         let mut start: Option<&Func> = None;
         for f in &self.prog.funcs {
-            if f.name == "_start" {
+            if f.name == entry_name {
                 start = Some(f);
             } else {
                 funcs.push(f);
             }
         }
-        let start =
-            start.ok_or_else(|| anyhow!("flat binary boot target requires a _start function"))?;
+        let start = start.ok_or_else(|| {
+            anyhow!("flat binary boot target requires a {} function", entry_name)
+        })?;
 
         let start_lab = self.asm.new_label();
-        self.func_labels.insert("_start".to_string(), start_lab);
+        self.func_labels.insert(entry_name.to_string(), start_lab);
         for f in &funcs {
             let lab = self.asm.new_label();
             self.func_labels.insert(f.name.clone(), lab);
         }
-        let teletype_lab = self.asm.new_label();
-        let halt_lab = self.asm.new_label();
-        let load_char_lab = self.asm.new_label();
-        let serial_lab = self.asm.new_label();
-        self.func_labels
-            .insert("_dev_bios_teletype".to_string(), teletype_lab);
-        self.func_labels.insert("_dev_halt".to_string(), halt_lab);
-        self.func_labels
-            .insert("_dev_load_char".to_string(), load_char_lab);
-        self.func_labels
-            .insert("_dev_serial_putc".to_string(), serial_lab);
+        for name in BUILTIN_FUNCS {
+            let lab = self.asm.new_label();
+            self.func_labels.insert(name.to_string(), lab);
+        }
 
         self.emit_func(start, true)?;
         for f in &funcs {
             self.emit_func(f, false)?;
         }
 
-        self.emit_builtins(teletype_lab, halt_lab, load_char_lab, serial_lab)?;
+        self.emit_builtins()?;
 
         let mut strings: Vec<(u32, &str)> = self
             .string_labels
@@ -77,12 +94,16 @@ impl<'p> CodeGen16<'p> {
             self.asm.sub_sp_imm(frame as i16)?;
         }
 
+        // Args are pushed left-to-right by the caller, so the first argument
+        // ends up at the deepest stack offset: param i lives at
+        // 4 + (n - 1 - i) * 2.
+        let n = f.params.len();
         for (i, (name, _ty)) in f.params.iter().enumerate() {
             let slot = *self
                 .locals
                 .get(name)
                 .ok_or_else(|| anyhow!("missing param slot: {}", name))?;
-            let arg_off = (4 + i * 2) as i8;
+            let arg_off = (4 + (n - 1 - i) * 2) as i8;
             self.asm.load16_bp(Reg16::Ax, arg_off);
             self.store_slot(slot, Reg16::Ax, Reg8::Al)?;
         }
@@ -107,47 +128,137 @@ impl<'p> CodeGen16<'p> {
         Ok(())
     }
 
-    pub(super) fn emit_builtins(
-        &mut self,
-        teletype_lab: u32,
-        halt_lab: u32,
-        load_char_lab: u32,
-        serial_lab: u32,
-    ) -> Result<()> {
-        self.asm.bind(teletype_lab);
-        self.asm.push(Reg16::Bp);
-        self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
-        self.asm.load8_bp(Reg8::Al, 4);
-        self.asm.mov8_imm(Reg8::Ah, 0x0E);
-        self.asm.mov8_imm(Reg8::Bh, 0x00);
-        self.asm.mov8_imm(Reg8::Bl, 0x07);
-        self.asm.int(0x10);
-        self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
-        self.asm.pop(Reg16::Bp);
-        self.asm.ret();
-
-        self.asm.bind(halt_lab);
-        self.asm.cli();
-        self.asm.hlt();
-
-        self.asm.bind(load_char_lab);
-        self.asm.push(Reg16::Bp);
-        self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
-        self.asm.load16_bp(Reg16::Si, 4);
-        self.asm.load8_si(Reg8::Al);
-        self.asm.xor_ah_ah();
-        self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
-        self.asm.pop(Reg16::Bp);
-        self.asm.ret();
-
-        self.asm.bind(serial_lab);
-        self.asm.push(Reg16::Bp);
-        self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
-        self.asm.load8_bp(Reg8::Al, 4);
-        self.asm.out_imm8_al(0xE9); // Bochs/QEMU debug port
-        self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
-        self.asm.pop(Reg16::Bp);
-        self.asm.ret();
+    pub(super) fn emit_builtins(&mut self) -> Result<()> {
+        for name in BUILTIN_FUNCS {
+            if !self.referenced.contains(name) {
+                continue;
+            }
+            let lab = *self
+                .func_labels
+                .get(name)
+                .ok_or_else(|| anyhow!("missing builtin label: {}", name))?;
+            self.asm.bind(lab);
+            match name {
+                "_dev_bios_teletype" => {
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    self.asm.load8_bp(Reg8::Al, 4);
+                    self.asm.mov8_imm(Reg8::Ah, 0x0E);
+                    self.asm.mov8_imm(Reg8::Bh, 0x00);
+                    self.asm.mov8_imm(Reg8::Bl, 0x07);
+                    self.asm.int(0x10);
+                    self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
+                    self.asm.pop(Reg16::Bp);
+                    self.asm.ret();
+                }
+                "_dev_halt" => {
+                    self.asm.cli();
+                    self.asm.hlt();
+                }
+                "_dev_load_char" => {
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    self.asm.load16_bp(Reg16::Si, 4);
+                    self.asm.load8_si(Reg8::Al);
+                    self.asm.xor_ah_ah();
+                    self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
+                    self.asm.pop(Reg16::Bp);
+                    self.asm.ret();
+                }
+                "_dev_serial_putc" => {
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    self.asm.load8_bp(Reg8::Al, 4);
+                    self.asm.out_imm8_al(0xE9); // Bochs/QEMU debug port
+                    self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
+                    self.asm.pop(Reg16::Bp);
+                    self.asm.ret();
+                }
+                "_dev_bios_key" => {
+                    // INT 16h AH=0: block until a key, return its ASCII code.
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    self.asm.mov8_imm(Reg8::Ah, 0x00);
+                    self.asm.int(0x16);
+                    self.asm.xor_ah_ah();
+                    self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
+                    self.asm.pop(Reg16::Bp);
+                    self.asm.ret();
+                }
+                "_dev_bios_disk_reset" => {
+                    // INT 13h AH=0: reset/recalibrate the drive.
+                    // Arg: drive.  Returns the BIOS status byte (0 = ok).
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    self.asm.load8_bp(Reg8::Dl, 4); // drive
+                    self.asm.mov8_imm(Reg8::Ah, 0x00);
+                    self.asm.int(0x13);
+                    self.asm.xor_ah_ah();
+                    self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
+                    self.asm.pop(Reg16::Bp);
+                    self.asm.ret();
+                }
+                "_dev_bios_disk_read" => {
+                    // INT 13h AH=2: read CHS sectors into ES:BX.
+                    // Args: drive, cyl, head, sector (1-based), count, buffer
+                    // (flat address).  Args are pushed left-to-right, so the
+                    // buffer is the first push and sits at [bp+4].
+                    // ES:BX is derived from the flat buffer address:
+                    // ES = addr >> 4, BX = addr & 0xF.
+                    // Returns 0 on success or the BIOS status byte on failure.
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    self.asm.load16_bp(Reg16::Bx, 4); // buffer
+                    self.asm.mov16_rr(Reg16::Ax, Reg16::Bx);
+                    self.asm.emit_slice(&[0xD1, 0xE8]); // shr ax, 1
+                    self.asm.emit_slice(&[0xD1, 0xE8]); // shr ax, 1
+                    self.asm.emit_slice(&[0xD1, 0xE8]); // shr ax, 1
+                    self.asm.emit_slice(&[0xD1, 0xE8]); // shr ax, 1
+                    self.asm.mov_seg_ax(SegReg::Es)?; // es = buf >> 4
+                    self.asm.emit_slice(&[0x83, 0xE3, 0x0F]); // and bx, 0x0F
+                    self.asm.load8_bp(Reg8::Dl, 14); // drive
+                    self.asm.load8_bp(Reg8::Ch, 12); // cyl
+                    self.asm.load8_bp(Reg8::Dh, 10); // head
+                    self.asm.load8_bp(Reg8::Cl, 8); // sector
+                    self.asm.load8_bp(Reg8::Al, 6); // count
+                    self.asm.mov8_imm(Reg8::Ah, 0x02);
+                    self.asm.int(0x13);
+                    let ok_lab = self.asm.new_label();
+                    self.asm.jcc_short_lab(0x73, ok_lab); // jnc
+                    self.asm.emit_slice(&[0x8A, 0xC4]); // mov al, ah (status)
+                    self.asm.xor_ah_ah();
+                    let done_lab = self.asm.new_label();
+                    self.asm.jmp_short_lab(done_lab);
+                    self.asm.bind(ok_lab);
+                    self.asm.xor_ax_ax();
+                    self.asm.bind(done_lab);
+                    self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
+                    self.asm.pop(Reg16::Bp);
+                    self.asm.ret();
+                }
+                "_dev_bios_reboot" => {
+                    // INT 19h: reboot the machine.  Never returns.
+                    self.asm.int(0x19);
+                }
+                "_dev_bios_clear" => {
+                    // INT 10h AH=0, AL=3: switch to 80x25 text mode, clearing
+                    // the screen.
+                    self.asm.mov16_imm(Reg16::Ax, 0x0003);
+                    self.asm.int(0x10);
+                    self.asm.ret();
+                }
+                "_dev_jump" => {
+                    // Far jump to segment 0:addr (arg).
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    self.asm.load16_bp(Reg16::Ax, 4);
+                    self.asm.emit_slice(&[0x6A, 0x00]); // push 0 (segment)
+                    self.asm.push(Reg16::Ax);
+                    self.asm.emit_slice(&[0xCB]); // retf
+                }
+                other => bail!("unknown builtin {}", other),
+            }
+        }
         Ok(())
     }
 
