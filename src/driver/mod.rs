@@ -444,4 +444,41 @@ pub def main() -> int32:
             msg
         );
     }
+
+    #[test]
+    fn compound_assignment_runs() {
+        let src = r#"
+package test
+
+pub def main() -> int32:
+    var x: int32 = 1
+    x += 2
+    x -= 1
+    x *= 3
+    x /= 2
+    x %= 4
+    var y: int32 = 14
+    y &= 15
+    y |= 8
+    y ^= 3
+    y <<= 1
+    y >>= 2
+    return x + y
+"#;
+        let dir = tempfile::tempdir().unwrap();
+        let source = write_temp_dev(&dir, "compound", src);
+        let output = dir.path().join("compound");
+        let out = compile(CompileOptions {
+            source,
+            output,
+            target: Some("x86_64-unknown-linux-gnu".to_string()),
+            freestanding: false,
+            linker: None,
+        })
+        .unwrap();
+        thread::sleep(Duration::from_millis(10));
+        let status = Command::new(&out).status().unwrap();
+        // x: 1+2=3, -1=2, *3=6, /2=3, %4=3. y: 14&15=14, |8=14, ^3=13, <<1=26, >>2=6. sum=9.
+        assert_eq!(status.code(), Some(9));
+    }
 }

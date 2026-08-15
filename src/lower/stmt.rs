@@ -36,6 +36,23 @@ impl LowerCtx<'_> {
                 let rhs = self.lower_expr(&a.value)?;
                 Ok(vec![ir::Stmt::Assign { lhs, rhs }])
             }
+            ast::Stmt::CompoundAssign(c) => {
+                // `t op= v` desugars to `t = t op v` (op read once).
+                let op = self.lower_binop(c.op)?;
+                let lhs = self.lower_lvalue(&c.target)?;
+                let target_expr = self.lower_expr(&c.target)?;
+                let rhs_expr = self.lower_expr(&c.value)?;
+                let ty = target_expr.ty.clone();
+                let rhs = ir::Expr::new(
+                    ir::ExprKind::Bin {
+                        op,
+                        left: Box::new(target_expr),
+                        right: Box::new(rhs_expr),
+                    },
+                    ty,
+                );
+                Ok(vec![ir::Stmt::Assign { lhs, rhs }])
+            }
             ast::Stmt::Expr(e) => Ok(vec![ir::Stmt::Expr(self.lower_expr(e)?)]),
             ast::Stmt::Return(e) => {
                 let expr = e.as_ref().map(|x| self.lower_expr(x)).transpose()?;

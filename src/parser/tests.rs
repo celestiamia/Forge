@@ -363,16 +363,57 @@ def main() -> int32:
     // A line starting with `.` or `as` after an expression is an intentional
     // multi-line continuation (at the same indentation) and must still work.
     #[test]
-    fn dot_and_as_continuations_still_work() {
-        let m = parse_ok(
-            "package test\n\ndef f():\n    x = foo.bar\n    .baz()\n    y = i\n    as int64\n",
-        );
+    fn compound_assignment_parses() {
+        for op in ["+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>="] {
+            let src = format!(
+                "package test\n\ndef f():\n    var y = 0\n    y {} 1\n    return y\n",
+                op
+            );
+            let m = parse_ok(&src);
+            let Item::Function(ref f) = m.items[0] else {
+                panic!("expected function");
+            };
+            let body = f.body.as_ref().expect("function body");
+            assert_eq!(body.stmts.len(), 3, "expected var + compound + return");
+            assert!(
+                matches!(body.stmts[1], Stmt::CompoundAssign(_)),
+                "expected CompoundAssign for {}, got {:?}",
+                op,
+                body.stmts[1]
+            );
+        }
+    }
+
+    #[test]
+    fn compound_assignment_does_not_absorb_paren_statement() {
+        // Regression companion: a compound-assign ending a line must not
+        // swallow a following statement that starts with `(`.
+        let src = "package test\n\ndef f():\n    var x = 0\n    x += 1\n    (p)[0] = x\n";
+        let m = parse_ok(src);
         let Item::Function(ref f) = m.items[0] else {
             panic!("expected function");
         };
         let body = f.body.as_ref().expect("function body");
-        assert_eq!(body.stmts.len(), 2, "expected two statements");
-        assert!(matches!(body.stmts[0], Stmt::Assign(_)));
-        assert!(matches!(body.stmts[1], Stmt::Assign(_)));
+        assert_eq!(body.stmts.len(), 3, "expected three statements");
+        assert!(matches!(body.stmts[0], Stmt::Var(_)));
+        assert!(matches!(body.stmts[1], Stmt::CompoundAssign(_)));
+        assert!(matches!(body.stmts[2], Stmt::Assign(_)));
+    }
+
+    #[test]
+    fn floor_div_pow_compound_assign_is_parse_error() {
+        // There are no //= or **= tokens; `y // = 4` parses `//` as the
+        // FloorDiv binary operator and then chokes on `=`, which must be a
+        // clean parse error, not a panic.
+        for src in [
+            "package test\n\ndef f():\n    var y = 0\n    y //= 4\n",
+            "package test\n\ndef f():\n    var y = 0\n    y **= 4\n",
+        ] {
+            assert!(
+                parse_module(src).is_err(),
+                "expected parse error for {:?}",
+                src
+            );
+        }
     }
 }

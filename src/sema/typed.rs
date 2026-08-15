@@ -130,6 +130,11 @@ pub enum TypedStmt {
         target: TypedExpr,
         value: TypedExpr,
     },
+    CompoundAssign {
+        target: TypedExpr,
+        op: ast::BinOp,
+        value: TypedExpr,
+    },
     Expr(TypedExpr),
     Return(Option<TypedExpr>),
     If {

@@ -249,7 +249,14 @@ impl Parser {
     pub(super) fn parse_expr_or_assign(&mut self) -> Result<Stmt, ParseError> {
         let expr = self.parse_expr()?;
         self.skip_newlines();
-        if self.eat(&Token::Assign) {
+        if let Some(op) = self.parse_assign_op() {
+            let value = self.parse_expr()?;
+            Ok(Stmt::CompoundAssign(CompoundAssignStmt {
+                target: expr,
+                op,
+                value,
+            }))
+        } else if self.eat(&Token::Assign) {
             let value = self.parse_expr()?;
             Ok(Stmt::Assign(AssignStmt {
                 target: expr,
@@ -258,5 +265,27 @@ impl Parser {
         } else {
             Ok(Stmt::Expr(expr))
         }
+    }
+
+    /// If the cursor is on a compound-assignment token (`+=`, `-=`, ...),
+    /// consume it and return the matching `BinOp`. Returns `None` otherwise.
+    fn parse_assign_op(&mut self) -> Option<BinOp> {
+        let op = match self.peek() {
+            Token::PlusEq => Some(BinOp::Add),
+            Token::MinusEq => Some(BinOp::Sub),
+            Token::StarEq => Some(BinOp::Mul),
+            Token::SlashEq => Some(BinOp::Div),
+            Token::PercentEq => Some(BinOp::Mod),
+            Token::AndEq => Some(BinOp::BitAnd),
+            Token::OrEq => Some(BinOp::BitOr),
+            Token::XorEq => Some(BinOp::BitXor),
+            Token::ShlEq => Some(BinOp::Shl),
+            Token::ShrEq => Some(BinOp::Shr),
+            _ => None,
+        };
+        if op.is_some() {
+            self.advance();
+        }
+        op
     }
 }

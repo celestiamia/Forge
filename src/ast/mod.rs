@@ -206,6 +206,7 @@ pub enum Stmt {
     Let(LetStmt),
     Var(VarStmt),
     Assign(AssignStmt),
+    CompoundAssign(CompoundAssignStmt),
     Expr(Expr),
     Return(Option<Expr>),
     If(IfStmt),
@@ -235,6 +236,13 @@ pub struct VarStmt {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AssignStmt {
     pub target: Expr,
+    pub value: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompoundAssignStmt {
+    pub target: Expr,
+    pub op: BinOp,
     pub value: Expr,
 }
 

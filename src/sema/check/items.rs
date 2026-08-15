@@ -258,6 +258,7 @@ impl Context {
             Stmt::Let(l) => self.check_let_var(&l.name, &l.ty, &l.value, false),
             Stmt::Var(v) => self.check_let_var(&v.name, &v.ty, &v.value, true),
             Stmt::Assign(a) => self.check_assign(a),
+            Stmt::CompoundAssign(c) => self.check_compound_assign(c),
             Stmt::Expr(e) => TypedStmt::Expr(self.check_expr(e, None)),
             Stmt::Return(e) => self.check_return(e),
             Stmt::If(i) => self.check_if(i),
@@ -344,6 +345,33 @@ impl Context {
             ));
         }
         TypedStmt::Assign { target, value }
+    }
+
+    fn check_compound_assign(&mut self, c: &ast::CompoundAssignStmt) -> TypedStmt {
+        let target = self.check_expr(&c.target, None);
+        // The RHS must be type-compatible with the target (e.g. `x += 1`
+        // where x is int32 requires an int32 RHS, modulo usual numeric
+        // coercion).
+        let value = self.check_expr(&c.value, Some(&target.ty));
+        if !self.is_mutable_lvalue(&target) {
+            self.error(format!(
+                "cannot use `{}` on non-mutable or non-lvalue expression",
+                ast_binop_symbol(c.op)
+            ));
+        }
+        if !value.ty.is_unknown() && !target.ty.is_unknown() && value.ty != target.ty {
+            self.error(format!(
+                "`{}` expected `{}`, found `{}`",
+                ast_binop_symbol(c.op),
+                target.ty,
+                value.ty
+            ));
+        }
+        TypedStmt::CompoundAssign {
+            target,
+            op: c.op,
+            value,
+        }
     }
 
     fn check_return(&mut self, e: &Option<ast::Expr>) -> TypedStmt {

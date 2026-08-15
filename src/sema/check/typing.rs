@@ -173,6 +173,22 @@ pub(super) fn op_name(op: BinOp) -> &'static str {
     }
 }
 
+pub(super) fn ast_binop_symbol(op: BinOp) -> &'static str {
+    match op {
+        BinOp::Add => "+=",
+        BinOp::Sub => "-=",
+        BinOp::Mul => "*=",
+        BinOp::Div => "/=",
+        BinOp::Mod => "%=",
+        BinOp::BitAnd => "&=",
+        BinOp::BitOr => "|=",
+        BinOp::BitXor => "^=",
+        BinOp::Shl => "<<=",
+        BinOp::Shr => ">>=",
+        _ => "=",
+    }
+}
+
 pub(super) fn cast_allowed(from: &Type, to: &Type) -> bool {
     if from == to || from.is_unknown() || to.is_unknown() {
         return true;
