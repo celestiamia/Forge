@@ -64,20 +64,58 @@ impl Context {
             },
             Item::Impl(i) => {
                 let target = self.resolve_type_expr(&i.target);
-                let methods: Vec<TypedFunction> =
-                    i.methods.iter().map(|m| self.check_function(m)).collect();
+                let target_name = base_type_name_from_type_expr(&i.target);
+                let sigs = self.methods.get(&target_name).cloned().unwrap_or_default();
+                let methods: Vec<TypedFunction> = i
+                    .methods
+                    .iter()
+                    .map(|m| {
+                        let sig = sigs
+                            .iter()
+                            .find(|s| s.name == m.name)
+                            .cloned()
+                            .unwrap_or_else(|| FnSig {
+                                name: m.name.clone(),
+                                generics: m.generics.clone(),
+                                params: Vec::new(),
+                                ret: Type::Unknown,
+                                is_unsafe: m.unsafe_kw,
+                                has_body: true,
+                            });
+                        self.check_function_with_sig(m, sig)
+                    })
+                    .collect();
                 TypedItem::Impl { target, methods }
             }
         }
     }
 
     pub(super) fn check_function(&mut self, f: &ast::Function) -> TypedFunction {
-        let sig = self
+        let sig = match self
             .functions
             .get(&f.name)
             .or_else(|| self.extern_fns.get(&f.name))
-            .cloned()
-            .unwrap();
+        {
+            Some(s) => s.clone(),
+            None => {
+                self.error(format!(
+                    "internal error: no registered signature for function `{}`",
+                    f.name
+                ));
+                FnSig {
+                    name: f.name.clone(),
+                    generics: f.generics.clone(),
+                    params: Vec::new(),
+                    ret: Type::Unknown,
+                    is_unsafe: f.unsafe_kw,
+                    has_body: true,
+                }
+            }
+        };
+        self.check_function_with_sig(f, sig)
+    }
+
+    fn check_function_with_sig(&mut self, f: &ast::Function, sig: FnSig) -> TypedFunction {
         let prev_unsafe = self.in_unsafe;
         self.in_unsafe = self.in_unsafe || sig.is_unsafe;
         self.current_function = Some(sig.name.clone());
