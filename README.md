@@ -95,9 +95,16 @@ GitHub Pages:
 
 ## Roadmap & Ideas
 
-The roadmap has moved to **GitHub Issues** for better tracking and collaboration:
+Forge's roadmap lives in [`ROADMAP.md`](./ROADMAP.md), a living document of
+features and improvements organized by theme. These ideas are preliminary and
+**may fluctuate and change over time** as Forge matures — they are a starting
+point for discussion, not a fixed contract. Feedback, corrections, and new
+proposals are welcome.
 
-🔗 **[Roadmap & Ideas Tracking Issue](https://github.com/celestiamia/Forge/issues/1)**
+To propose a new item, open a pull request amending `ROADMAP.md` (or GitHub
+issues for broader discussion).
+
+🔗 **[GitHub Issues](https://github.com/celestiamia/Forge/issues)**
 
 ## Contributing
 

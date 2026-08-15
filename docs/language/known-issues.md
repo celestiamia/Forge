@@ -1,19 +1,22 @@
 # Known Issues & Limitations
 
 This page documents the current limitations of Forge's first milestone. Some
-features are parsed or type-checked but do not work end-to-end; a few crash
-the compiler. Everything here is expected to land in future milestones.
+features are parsed or type-checked but do not work end-to-end. Everything here
+is expected to land in future milestones.
 
-## Compiler Crashes (panics)
+## Clean Errors (no compiler crashes)
 
-These constructs compile far enough to **panic the compiler** rather than
-producing a clean error. Avoid them for now.
+These constructs are rejected with a clean diagnostic instead of panicking the
+compiler:
 
-| Construct | Symptom |
-|-----------|---------|
-| Generic functions: `def identity[T](x: T) -> T` | Panic at lowering (`unknown type: T`) |
-| `impl` blocks: `impl Point: ...` | Panic in the type checker |
-| Nested struct fields: `Outer { inner: Inner { ... } }` | Panic at codegen (`struct size for Inner must come from layout table`) |
+| Construct | Error |
+|-----------|-------|
+| Generic functions: `def identity[T](x: T) -> T` | `generic function \`identity\` is not supported yet` (at lowering) |
+| Generic structs: `struct Pair[T]: ...` | `generic struct \`Pair\` is not supported yet` |
+| `impl` blocks: `impl Point: ...` | Methods type-check; the impl itself is accepted (method calls not yet lowered) |
+| Nested struct fields: `Outer { inner: Inner { ... } }` | Supported; layouts are computed recursively |
+| Recursive structs by value: `struct A: a: A` | `struct \`A\` contains itself by value` |
+| `int128` / `uint128` | `128-bit integers are not supported by any backend yet` |
 
 ## Parsed But Not Functional
 
@@ -35,22 +38,21 @@ producing a clean error. Avoid them for now.
 | Compound assignment `+=`, `-=`, etc. | Parse error — write `x = x + 1` |
 | `asm!()` on x86_64 / x86_32 | Codegen error — inline assembly works only on the `x86_16-boot` target |
 
-## Parser Gotchas
+## Parser Notes
 
-These are known fragile spots in the parser. Workarounds are included.
-
-- **`as` casts inside `var` declarations in `while`/`else` blocks** can trigger
-  parser bugs. Prefer declaring `var x: int64 = expr` then casting in the
-  expression: `(x as int32)`. Hoist declarations out of loops when possible.
-- **Consecutive `var` declarations in `while` loop bodies inside `unsafe`
-  blocks** are fragile.
+- An expression ending with `as` (or any expression) is never merged with a
+  following statement that starts with `(`, `[`, or `{` — those can begin a new
+  statement. Multi-line continuation still works for `.` and `as` at the same
+  indentation.
 
 ## Backend Limitations
 
 - **x86_32 has no float support** — any `float32`/`float64` usage fails at
   codegen. Stdlib modules that use floats cannot be imported on x86_32.
-- **`int128` / `uint128`** are accepted by the type checker but unsupported by
-  all backends — they fail at codegen.
+- **x86_32 struct-by-value copies copy only the first 4 bytes** — locals are
+  4-byte slots, so a multi-field struct assigned to another variable (or a
+  nested struct value) loses every field after the first. Field-by-field
+  access works; whole-struct copies are x86_64-only for now.
 - **No optimizer** — every unsafe deref emits a real memory access
   (effectively volatile); codegen is roughly `-O0` quality.
 - **Struct fields are laid out without padding** — alignment is not

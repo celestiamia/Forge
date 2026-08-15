@@ -133,7 +133,7 @@ Compilation is deterministic: `merge_modules` in `src/driver/loader.rs` merges t
 
 - `src/mir/` is scaffolding for future work; not wired into the pipeline
 - `src/ty/mod.rs` `Type` enum is the source of truth for type names — sema and lowerer both route through it
-- Type names `i128`/`uint128` are mapped in sema (`typing.rs`) but unsupported by any backend — they will compile but fail at codegen
+- Type names `i128`/`uint128` are mapped in sema (`typing.rs`) but rejected at lowering with "128-bit integers are not supported by any backend yet"
 - `.gitignore` comments warn: do NOT gitignore bare `core` (would exclude the `core/` stdlib dir)
 
 ## Cross-target parity
@@ -142,5 +142,5 @@ When adding a feature to the x86_64 backend, mirror it in `codegen32/` + `x86/` 
 
 ## Parser gotchas
 
-- `as` casts in `var` or assignment declarations inside `while`/`else` blocks can trigger parser bugs — prefer `var x: int64 = expr` then `(x as int32)` in expressions, or hoist `var` declarations outside loops
-- Consecutive `var` declarations in while-loop bodies inside `unsafe` blocks are fragile
+- Postfix expressions may continue across a newline only via `.` or `as` at the same indentation. A following statement starting with `(`, `[`, or `{` is never absorbed — `var x: int64 = i as int64` followed by `(p)[0] = i` parses as two statements. Keep the `.`/`as` continuation lines at the same indent as the expression they continue (deeper indent yields an `Indent` token and fails).
+- Struct layouts are computed recursively (`compute_struct_layouts` in `codegen/layout.rs` + `codegen32/layout.rs`) — nested structs work; by-value struct cycles are a clean error.
