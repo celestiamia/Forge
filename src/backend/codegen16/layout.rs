@@ -2,7 +2,13 @@ use super::*;
 
 impl<'p> CodeGen16<'p> {
     pub(super) fn alloc_named(&mut self, name: &str, ty: &Type) -> Result<Slot16> {
-        let (size, signed) = type_info(ty)?;
+        let (size, signed) = match type_info(ty) {
+            Ok((s, sn)) => (s, sn),
+            Err(_) => {
+                let sz = type_size_16(self.prog, ty);
+                (sz as u8, sz > 1)
+            }
+        };
         let align = size.max(1);
         let offset = self.alloc_slot(size, align);
         let slot = Slot16 {

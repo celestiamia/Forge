@@ -64,6 +64,28 @@ pub struct Lexer<'src> {
     at_line_start: bool,
     /// Becomes true once EOF has been emitted.
     eof_emitted: bool,
+    /// Tracks the category of the last significant token emitted (ignoring
+    /// whitespace, newlines, indentation, and comments).  This is used to
+    /// disambiguate `.` followed by a digit: `t.0` is a field access
+    /// (`Dot` + `IntLit`), but `.0` in `=` position is a float literal.
+    last_sig: LastSigToken,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LastSigToken {
+    None,
+    Ident,
+    IntLit,
+    FloatLit,
+    RBrace,
+    RParen,
+    RBracket,
+    True,
+    False,
+    Null,
+    CharLit,
+    StringLit,
+    Other,
 }
 
 impl<'src> Lexer<'src> {
@@ -78,6 +100,7 @@ impl<'src> Lexer<'src> {
             pending_dedents: 0,
             at_line_start: true,
             eof_emitted: false,
+            last_sig: LastSigToken::None,
         }
     }
 
@@ -88,6 +111,33 @@ impl<'src> Lexer<'src> {
 
     /// Return the next token, or an error.
     pub fn next_token(&mut self) -> Result<Token, LexError> {
+        let tok = self.next_token_raw()?;
+        self.update_last_sig(&tok);
+        Ok(tok)
+    }
+
+    fn update_last_sig(&mut self, tok: &Token) {
+        self.last_sig = match tok {
+            Token::Ident(name) => match name.as_str() {
+                "true" => LastSigToken::True,
+                "false" => LastSigToken::False,
+                "null" => LastSigToken::Null,
+                _ => LastSigToken::Ident,
+            },
+            Token::IntLit(_) => LastSigToken::IntLit,
+            Token::FloatLit(_) => LastSigToken::FloatLit,
+            Token::CharLit(_) => LastSigToken::CharLit,
+            Token::StringLit(_) => LastSigToken::StringLit,
+            Token::RBrace => LastSigToken::RBrace,
+            Token::RParen => LastSigToken::RParen,
+            Token::RBracket => LastSigToken::RBracket,
+            Token::Newline | Token::Indent | Token::Dedent | Token::Eof => LastSigToken::Other,
+            _ => LastSigToken::Other,
+        };
+    }
+
+    /// Internal: produce the next token without updating `last_sig`.
+    fn next_token_raw(&mut self) -> Result<Token, LexError> {
         if self.eof_emitted {
             return Ok(Token::Eof);
         }
@@ -151,10 +201,26 @@ impl<'src> Lexer<'src> {
                 'a'..='z' | 'A'..='Z' | '_' => return self.lex_ident_or_keyword(),
                 '.' => {
                     let c2 = self.peek2();
-                    if c2.is_ascii_digit() {
+                    if c2.is_ascii_digit()
+                        && !matches!(
+                            self.last_sig,
+                            LastSigToken::Ident
+                                | LastSigToken::IntLit
+                                | LastSigToken::FloatLit
+                                | LastSigToken::RBrace
+                                | LastSigToken::RParen
+                                | LastSigToken::RBracket
+                                | LastSigToken::True
+                                | LastSigToken::False
+                                | LastSigToken::Null
+                                | LastSigToken::CharLit
+                                | LastSigToken::StringLit
+                        )
+                    {
                         return self.lex_float_starting_dot();
                     }
-                    return self.lex_operator_or_delim();
+                    let tok = self.lex_operator_or_delim()?;
+                    return Ok(tok);
                 }
                 '+' | '-' | '*' | '/' | '%' | '<' | '>' | '&' | '|' | '^' | '~' | '!' | '='
                 | '@' | ',' | ':' | ';' | '(' | ')' | '[' | ']' | '{' | '}' => {

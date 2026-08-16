@@ -282,7 +282,7 @@ impl<'p> CodeGen16<'p> {
                 elem_ty,
                 count,
             } => {
-                let (size, _signed) = type_info(elem_ty)?;
+                let size = type_size_16(self.prog, elem_ty) as u8;
                 let raw_size = size as usize * *count;
                 let align = size.max(1);
                 let raw_off = self.alloc_slot(raw_size as u8, align);

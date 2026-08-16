@@ -112,7 +112,7 @@ impl LowerCtx<'_> {
             }
             ast::Expr::Break => bail!("break is not supported in expression position"),
             ast::Expr::Continue => bail!("continue is not supported in expression position"),
-            ast::Expr::Tuple(_) => bail!("tuples are not supported in the first milestone"),
+            ast::Expr::Tuple(elems) => self.lower_tuple_expr(elems),
             ast::Expr::Array(elems) => {
                 if elems.is_empty() {
                     bail!("empty array literals are not supported");

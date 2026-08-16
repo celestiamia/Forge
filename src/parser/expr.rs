@@ -405,7 +405,17 @@ impl Parser {
                     index: Box::new(index),
                 });
             } else if self.eat(&Token::Dot) {
-                let field = self.expect_ident()?;
+                let field = if let Token::Ident(name) = self.peek() {
+                    name.clone()
+                } else if let Token::IntLit(n) = self.peek() {
+                    n.to_string()
+                } else {
+                    return Err(self.error(format!(
+                        "expected identifier or integer after `.`, found {:?}",
+                        self.peek()
+                    )));
+                };
+                self.advance();
                 expr = Expr::Field(FieldExpr {
                     span: self.current_span(),
                     object: Box::new(expr),

@@ -64,7 +64,7 @@ impl Parser {
 
     pub(super) fn parse_let(&mut self) -> Result<Stmt, ParseError> {
         self.expect(Token::Let)?;
-        let name = self.expect_ident()?;
+        let pattern = self.parse_pattern()?;
         let ty = if self.eat(&Token::Colon) {
             Some(self.parse_type()?)
         } else {
@@ -75,12 +75,12 @@ impl Parser {
         } else {
             None
         };
-        Ok(Stmt::Let(LetStmt { name, ty, value }))
+        Ok(Stmt::Let(LetStmt { pattern, ty, value }))
     }
 
     pub(super) fn parse_var(&mut self) -> Result<Stmt, ParseError> {
         self.expect(Token::Var)?;
-        let name = self.expect_ident()?;
+        let pattern = self.parse_pattern()?;
         let ty = if self.eat(&Token::Colon) {
             Some(self.parse_type()?)
         } else {
@@ -91,7 +91,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(Stmt::Var(VarStmt { name, ty, value }))
+        Ok(Stmt::Var(VarStmt { pattern, ty, value }))
     }
 
     pub(super) fn parse_return(&mut self) -> Result<Stmt, ParseError> {

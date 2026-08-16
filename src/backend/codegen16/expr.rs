@@ -65,7 +65,7 @@ impl<'p> CodeGen16<'p> {
                 self.eval_expr(trailing)?;
             }
             ExprKind::SizeOf(ty) => {
-                let size = type_size_16(ty);
+                let size = type_size_16(self.prog, ty);
                 self.asm.mov16_imm(Reg16::Ax, size as u16);
             }
             ExprKind::OffsetOf { ty, field } => {

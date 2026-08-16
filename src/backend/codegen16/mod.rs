@@ -94,15 +94,19 @@ pub(super) fn type_info(ty: &Type) -> Result<(u8, bool)> {
     }
 }
 
-pub(super) fn type_size_16(ty: &Type) -> usize {
+pub(super) fn type_size_16(prog: &Program, ty: &Type) -> usize {
     match ty {
         Type::I8 | Type::U8 | Type::Char | Type::Bool => 1,
         Type::I16 | Type::U16 | Type::Ptr(_) => 2,
         Type::I32 | Type::U32 => 4,
         Type::I64 | Type::U64 => 8,
-        Type::Struct(_name) => {
-            // For structs, sum up field sizes (simplified)
-            2 // default to 2 for unsupported
+        Type::Struct(name) => {
+            let def = match prog.structs.iter().find(|s| s.name == *name) {
+                Some(d) => d,
+                None => return 2,
+            };
+            let layout = layout_struct(def);
+            layout.size as usize
         }
         _ => 2,
     }

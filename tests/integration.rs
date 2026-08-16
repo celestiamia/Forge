@@ -1282,3 +1282,88 @@ fn linker_script_raw_x86_16_image_has_no_boot_signature() {
         "boot sector padding must be zero bytes"
     );
 }
+
+#[test]
+fn tuples_dev_compiles_and_runs() {
+    let bin = compile_example("tuples");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run tuples binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "", "tuples produced unexpected output");
+    assert_eq!(
+        output.status.code(),
+        Some(7),
+        "tuples binary should exit with code 7 (3+4)"
+    );
+}
+
+#[test]
+fn tuples_dev_compiles_and_runs_x86_32() {
+    let bin = compile_example_with_target("tuples", "x86_32-unknown-linux-gnu");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run tuples (x86_32) binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "", "tuples (x86_32) produced unexpected output");
+    assert_eq!(
+        output.status.code(),
+        Some(7),
+        "tuples (x86_32) binary should exit with code 7 (3+4)"
+    );
+}
+
+#[test]
+fn tuple16_dev_compiles_and_runs() {
+    // Only run this test if qemu-system-x86_64 is available
+    if std::process::Command::new("qemu-system-x86_64")
+        .arg("-version")
+        .output()
+        .is_err()
+    {
+        eprintln!("Skipping tuple16 test: qemu-system-x86_64 not found");
+        return;
+    }
+
+    let out_dir =
+        std::env::temp_dir().join(format!("forge_tuple16_test_{}", std::process::id()));
+    let _ = fs::create_dir_all(&out_dir);
+    let bin = out_dir.join("tuple16");
+
+    let mut cmd = Command::cargo_bin("forgec").unwrap();
+    cmd.arg("examples/tuple16.dev")
+        .arg("-o")
+        .arg(&bin)
+        .arg("--target")
+        .arg("x86_16-boot");
+    cmd.assert().success();
+
+    let bytes = fs::read(&bin).expect("failed to read boot sector");
+    assert_eq!(bytes.len(), 512, "boot sector must be 512 bytes");
+    assert_eq!(
+        &bytes[510..512],
+        &[0x55, 0xAA],
+        "missing boot signature 0x55 0xAA"
+    );
+
+    let mut qemu = std::process::Command::new("qemu-system-x86_64");
+    qemu.arg("-fda")
+        .arg(&bin)
+        .arg("-nographic")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    let mut child = qemu.spawn().expect("failed to spawn qemu-system-x86_64");
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    let _ = child.kill();
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to read qemu output");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("TUPLE_OK"),
+        "tuple16 did not print expected message; qemu stdout: {:?}",
+        stdout
+    );
+}

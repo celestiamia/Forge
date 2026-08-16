@@ -221,14 +221,14 @@ pub enum Stmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LetStmt {
-    pub name: String,
+    pub pattern: Pattern,
     pub ty: Option<TypeExpr>,
     pub value: Option<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VarStmt {
-    pub name: String,
+    pub pattern: Pattern,
     pub ty: Option<TypeExpr>,
     pub value: Option<Expr>,
 }

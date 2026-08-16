@@ -11,30 +11,25 @@ impl LowerCtx<'_> {
 
     pub(super) fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Result<Vec<ir::Stmt>> {
         match stmt {
-            ast::Stmt::Let(l) => {
-                let ty =
-                    l.ty.as_ref()
-                        .map(|t| self.lower_type(t))
-                        .transpose()?
-                        .unwrap_or(ir::Type::I64);
-                let init = l.value.as_ref().map(|e| self.lower_expr(e)).transpose()?;
-                self.vars.insert(l.name.clone(), ty.clone());
-                self.lower_binding(&l.name, l.ty.as_ref(), ty, init)
+             ast::Stmt::Let(l) => {
+                self.lower_let(&l.pattern, l.ty.as_ref(), &l.value, false)
             }
             ast::Stmt::Var(v) => {
-                let ty =
-                    v.ty.as_ref()
-                        .map(|t| self.lower_type(t))
-                        .transpose()?
-                        .unwrap_or(ir::Type::I64);
-                let init = v.value.as_ref().map(|e| self.lower_expr(e)).transpose()?;
-                self.vars.insert(v.name.clone(), ty.clone());
-                self.lower_binding(&v.name, v.ty.as_ref(), ty, init)
+                self.lower_let(&v.pattern, v.ty.as_ref(), &v.value, false)
             }
             ast::Stmt::Assign(a) => {
                 let lhs = self.lower_lvalue(&a.target)?;
                 let rhs = self.lower_expr(&a.value)?;
-                Ok(vec![ir::Stmt::Assign { lhs, rhs }])
+                if let ir::ExprKind::Block(stmts, result) = rhs.kind {
+                    let mut out = stmts.clone();
+                    out.push(ir::Stmt::Assign {
+                        lhs,
+                        rhs: result.as_ref().clone(),
+                    });
+                    Ok(out)
+                } else {
+                    Ok(vec![ir::Stmt::Assign { lhs, rhs }])
+                }
             }
             ast::Stmt::CompoundAssign(c) => {
                 // `t op= v` desugars to `t = t op v` (op read once).
@@ -165,6 +160,171 @@ impl LowerCtx<'_> {
             ast::Stmt::Continue => Ok(vec![ir::Stmt::Continue]),
             ast::Stmt::Match(m) => self.lower_match_stmt(m),
         }
+    }
+
+    pub(super) fn lower_let(
+        &mut self,
+        pattern: &ast::Pattern,
+        declared: Option<&ast::TypeExpr>,
+        value: &Option<ast::Expr>,
+        _mutable: bool,
+    ) -> Result<Vec<ir::Stmt>> {
+        match pattern {
+            ast::Pattern::Ident(name) => {
+                let ty =
+                    declared.map(|t| self.lower_type(t))
+                        .transpose()?
+                        .unwrap_or(ir::Type::I64);
+                let init = value.as_ref().map(|e| self.lower_expr(e)).transpose()?;
+                self.vars.insert(name.clone(), ty.clone());
+                self.lower_binding(name, declared, ty, init)
+            }
+            ast::Pattern::Tuple(pats) => {
+                self.lower_tuple_destructure(pats, declared, value)
+            }
+            ast::Pattern::Wildcard => {
+                if let Some(v) = value {
+                    Ok(vec![ir::Stmt::Expr(self.lower_expr(v)?)])
+                } else {
+                    Ok(vec![])
+                }
+            }
+            ast::Pattern::Literal(_) => {
+                bail!("literal patterns in let bindings are not supported")
+            }
+        }
+    }
+
+    fn lower_tuple_destructure(
+        &mut self,
+        pats: &[ast::Pattern],
+        declared: Option<&ast::TypeExpr>,
+        value: &Option<ast::Expr>,
+    ) -> Result<Vec<ir::Stmt>> {
+        let init = value
+            .as_ref()
+            .map(|e| self.lower_expr(e))
+            .transpose()?
+            .ok_or_else(|| anyhow::anyhow!("tuple destructuring requires an initializer"))?;
+
+        // The lowered tuple value is a pointer to a synthetic struct.
+        // If the initializer produced a Block (e.g. a nested tuple literal),
+        // inline those statements and use the block's result as the pointer.
+        let mut stmts = Vec::new();
+        let tuple_ptr = if let ir::ExprKind::Block(blocks, result) = &init.kind {
+            stmts.extend(blocks.clone());
+            result.as_ref().clone()
+        } else {
+            let tmp = self.fresh_temp("$tuple");
+            let ptr_ty = init.ty.clone();
+            stmts.push(ir::Stmt::Let {
+                name: tmp.clone(),
+                ty: ptr_ty.clone(),
+                init: Some(init.clone()),
+            });
+            ir::Expr::new(ir::ExprKind::Var(tmp), ptr_ty)
+        };
+
+        let sub_declared = declared.and_then(|d| {
+            if let ast::TypeExpr::Tuple(tys) = d {
+                Some(tys)
+            } else {
+                None
+            }
+        });
+
+        self.destructure_tuple(&tuple_ptr, pats, sub_declared, &mut stmts)?;
+        Ok(stmts)
+    }
+
+    /// Recursively desctructure a tuple pointer into the given patterns.
+    /// `sub_declared` is the type-level tuple corresponding to `pats` (if any).
+    fn destructure_tuple(
+        &mut self,
+        ptr: &ir::Expr,
+        pats: &[ast::Pattern],
+        sub_declared: Option<&Vec<ast::TypeExpr>>,
+        stmts: &mut Vec<ir::Stmt>,
+    ) -> Result<()> {
+        let struct_name = match &ptr.ty {
+            ir::Type::Ptr(inner) => match inner.as_ref() {
+                ir::Type::Struct(n) => n.clone(),
+                _ => bail!("cannot destructure non-tuple value"),
+            },
+            _ => bail!("cannot destructure non-tuple value"),
+        };
+
+        let struct_def = self
+            .structs
+            .get(&struct_name)
+            .ok_or_else(|| anyhow::anyhow!("unknown tuple struct: {}", struct_name))?
+            .clone();
+
+        if pats.len() != struct_def.fields.len() {
+            bail!(
+                "tuple pattern has {} elements, but tuple has {}",
+                pats.len(),
+                struct_def.fields.len()
+            );
+        }
+
+        for (i, pat) in pats.iter().enumerate() {
+            let field_ty = struct_def.fields[i].1.clone();
+
+            let gep = ir::Expr::new(
+                ir::ExprKind::Gep {
+                    base: Box::new(ptr.clone()),
+                    field: i,
+                },
+                ir::Type::Ptr(Box::new(field_ty.clone())),
+            );
+            let load = ir::Expr::new(ir::ExprKind::Load(Box::new(gep)), field_ty.clone());
+
+            match pat {
+                ast::Pattern::Ident(name) => {
+                    let ty = sub_declared
+                        .and_then(|tys| tys.get(i))
+                        .map(|t| self.lower_type(t))
+                        .transpose()?
+                        .unwrap_or_else(|| field_ty.clone());
+                    self.vars.insert(name.clone(), ty.clone());
+                    stmts.push(ir::Stmt::Let {
+                        name: name.clone(),
+                        ty,
+                        init: Some(load),
+                    });
+                }
+                ast::Pattern::Tuple(sub_pats) => {
+                    // The field value is itself a tuple pointer; recurse.
+                    let sub_decl = sub_declared.and_then(|tys| tys.get(i)).and_then(|t| {
+                        if let ast::TypeExpr::Tuple(ts) = t {
+                            Some(ts)
+                        } else {
+                            None
+                        }
+                    });
+
+                    // If the loaded value is a Block (nested tuple literal),
+                    // inline the block statements and use the result pointer.
+                    let field_ptr = if let ir::ExprKind::Block(blocks, result) = &load.kind {
+                        stmts.extend(blocks.clone());
+                        result.as_ref().clone()
+                    } else {
+                        load
+                    };
+
+                    self.destructure_tuple(&field_ptr, sub_pats, sub_decl, stmts)?;
+                }
+                ast::Pattern::Wildcard => {
+                    stmts.push(ir::Stmt::Expr(load));
+                }
+                ast::Pattern::Literal(_) => {
+                    bail!("literal patterns in tuple destructuring are not supported");
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Lower a `let`/`var` binding, emitting a `StackAlloc` when the declared

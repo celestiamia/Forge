@@ -881,7 +881,7 @@ impl Context {
         let mut result_ty = Type::Unknown;
         for case in &m.cases {
             self.push_scope();
-            self.check_pattern(&case.pattern, &scrutinee.ty);
+            self.check_pattern(&case.pattern, &scrutinee.ty, false);
             let body = self.check_block(&case.body);
             self.pop_scope();
             if result_ty.is_unknown() && !body.ty.is_unknown() {

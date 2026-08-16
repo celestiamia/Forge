@@ -116,13 +116,13 @@ pub struct TypedBlock {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypedStmt {
     Let {
-        name: String,
+        pattern: TypedPattern,
         ty: Type,
         init: TypedExpr,
         mutable: bool,
     },
     Var {
-        name: String,
+        pattern: TypedPattern,
         ty: Type,
         init: TypedExpr,
     },

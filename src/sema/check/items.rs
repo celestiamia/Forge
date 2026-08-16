@@ -255,8 +255,8 @@ impl Context {
 
     pub(super) fn check_stmt(&mut self, stmt: &Stmt) -> TypedStmt {
         match stmt {
-            Stmt::Let(l) => self.check_let_var(&l.name, &l.ty, &l.value, false),
-            Stmt::Var(v) => self.check_let_var(&v.name, &v.ty, &v.value, true),
+            Stmt::Let(l) => self.check_let_var(&l.pattern, &l.ty, &l.value, false),
+            Stmt::Var(v) => self.check_let_var(&v.pattern, &v.ty, &v.value, true),
             Stmt::Assign(a) => self.check_assign(a),
             Stmt::CompoundAssign(c) => self.check_compound_assign(c),
             Stmt::Expr(e) => TypedStmt::Expr(self.check_expr(e, None)),
@@ -274,7 +274,7 @@ impl Context {
 
     fn check_let_var(
         &mut self,
-        name: &str,
+        pattern: &ast::Pattern,
         ty_opt: &Option<ast::TypeExpr>,
         value_opt: &Option<ast::Expr>,
         mutable: bool,
@@ -284,36 +284,39 @@ impl Context {
             let init = self.check_expr(value, annotated.as_ref());
             let ty = annotated.unwrap_or_else(|| init.ty.clone());
             if !init.ty.is_unknown() && !ty.is_unknown() && init.ty != ty {
+                let pat_str = pattern_binding_name(pattern);
                 self.error(format!(
                     "`{} {}` expected `{}`, found `{}`",
                     if mutable { "var" } else { "let" },
-                    name,
+                    pat_str,
                     ty,
                     init.ty
                 ));
             }
             (init, ty)
         } else {
+            let pat_str = pattern_binding_name(pattern);
             let ty = annotated.unwrap_or_else(|| {
                 self.error(format!(
                     "`{} {}` needs a type annotation or initializer",
                     if mutable { "var" } else { "let" },
-                    name
+                    pat_str
                 ));
                 Type::Unknown
             });
             (zero_expr(&ty), ty)
         };
-        self.bind_var(name, ty.clone(), mutable);
+        self.check_pattern(pattern, &ty, mutable);
+        let pat = self.lower_pattern(pattern);
         if mutable {
             TypedStmt::Var {
-                name: name.to_string(),
+                pattern: pat,
                 ty,
                 init,
             }
         } else {
             TypedStmt::Let {
-                name: name.to_string(),
+                pattern: pat,
                 ty,
                 init,
                 mutable: false,
@@ -432,7 +435,7 @@ impl Context {
         let mut cases = Vec::new();
         for case in &m.cases {
             self.push_scope();
-            self.check_pattern(&case.pattern, &scrutinee.ty);
+            self.check_pattern(&case.pattern, &scrutinee.ty, false);
             let body = self.check_block(&case.body);
             self.pop_scope();
             cases.push(TypedMatchCase {
@@ -465,7 +468,7 @@ impl Context {
         }
     }
 
-    pub(super) fn check_pattern(&mut self, pat: &Pattern, ty: &Type) {
+    pub(super) fn check_pattern(&mut self, pat: &Pattern, ty: &Type, mutable: bool) {
         match pat {
             Pattern::Wildcard => {}
             Pattern::Literal(l) => {
@@ -478,7 +481,7 @@ impl Context {
                 }
             }
             Pattern::Ident(name) => {
-                self.bind_var(name, ty.clone(), false);
+                self.bind_var(name, ty.clone(), mutable);
             }
             Pattern::Tuple(pats) => {
                 if let Type::Tuple { fields } = ty {
@@ -490,7 +493,7 @@ impl Context {
                         ));
                     } else {
                         for (p, f) in pats.iter().zip(fields.iter()) {
-                            self.check_pattern(p, f);
+                            self.check_pattern(p, f, mutable);
                         }
                     }
                 } else if !ty.is_unknown() {
@@ -515,4 +518,16 @@ impl Context {
     }
 
     // Expressions
+}
+
+fn pattern_binding_name(pat: &Pattern) -> String {
+    match pat {
+        Pattern::Ident(name) => name.clone(),
+        Pattern::Tuple(pats) => {
+            let names: Vec<String> = pats.iter().map(pattern_binding_name).collect();
+            format!("({})", names.join(", "))
+        }
+        Pattern::Wildcard => "_".to_string(),
+        Pattern::Literal(_) => "<literal>".to_string(),
+    }
 }

@@ -1,0 +1,10 @@
+package test
+
+pub def main() -> int64:
+    var t: (int64, int64) = (3, 4)
+    if t.0 + t.1 != 7:
+        return 1
+    var (a, b) = t
+    if a != 3 || b != 4:
+        return 2
+    return a + b

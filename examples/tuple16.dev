@@ -1,0 +1,32 @@
+package tuple16
+
+extern def _dev_bios_teletype(c: char) -> void
+extern def _dev_load_char(p: ptr[char]) -> char
+extern def _dev_halt() -> void
+
+@freestanding
+pub def _start() -> void:
+    var t: (u16, u16) = (65 as u16, 66 as u16)
+    var ok: u16 = 0
+    if t.0 == 65:
+        ok = ok + 1
+    if t.1 == 66:
+        ok = ok + 1
+    var (a, b) = t
+    if a == 65:
+        ok = ok + 1
+    if b == 66:
+        ok = ok + 1
+    if ok == 4:
+        puts("TUPLE_OK\n")
+    else:
+        puts("TUPLE_FAIL\n")
+
+def puts(msg: ptr[char]) -> void:
+    unsafe:
+        var p: ptr[char] = msg
+        var c: char = _dev_load_char(p)
+        while c != 0:
+            _dev_bios_teletype(c)
+            p = p + 1
+            c = _dev_load_char(p)

@@ -45,7 +45,7 @@ mod tests {
 
     fn var_init(name: &str, value: Expr) -> Stmt {
         Stmt::Var(VarStmt {
-            name: name.to_string(),
+            pattern: Pattern::Ident(name.to_string()),
             ty: None,
             value: Some(value),
         })
@@ -53,7 +53,7 @@ mod tests {
 
     fn let_init(name: &str, value: Expr) -> Stmt {
         Stmt::Let(LetStmt {
-            name: name.to_string(),
+            pattern: Pattern::Ident(name.to_string()),
             ty: None,
             value: Some(value),
         })
@@ -149,7 +149,7 @@ mod tests {
             Some(ty_name("i32")),
             Block {
                 stmts: vec![Stmt::Let(LetStmt {
-                    name: "b".to_string(),
+                    pattern: Pattern::Ident("b".to_string()),
                     ty: Some(ty_name("bool")),
                     value: Some(int(1)),
                 })],

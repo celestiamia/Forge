@@ -281,7 +281,7 @@ impl<'a> LowerCtx<'a> {
         })
     }
 
-    fn lower_type(&self, ty: &ast::TypeExpr) -> Result<ir::Type> {
+    fn lower_type(&mut self, ty: &ast::TypeExpr) -> Result<ir::Type> {
         match ty {
             ast::TypeExpr::Name(n) => match n.as_str() {
                 "void" => Ok(ir::Type::Void),
@@ -328,11 +328,100 @@ impl<'a> LowerCtx<'a> {
                 // as a pointer to the element type.  Stack allocation will use the count.
                 Ok(ir::Type::Ptr(Box::new(elem)))
             }
-            ast::TypeExpr::Tuple(_) => bail!("tuples are not supported in the first milestone"),
+            ast::TypeExpr::Tuple(elems) => {
+                let inner_types: Vec<ir::Type> = elems
+                    .iter()
+                    .map(|t| self.lower_type(t))
+                    .collect::<Result<Vec<_>>>()?;
+                let name = self.ensure_tuple_struct(&inner_types);
+                Ok(ir::Type::Struct(name))
+            }
             ast::TypeExpr::Function { .. } => {
                 bail!("function types are not supported in the first milestone")
             }
         }
+    }
+
+    fn ensure_tuple_struct(&mut self, elem_types: &[ir::Type]) -> String {
+        let name = format!("__tuple_{}", elem_types.iter().map(|t| format!("{:?}", t)).collect::<Vec<_>>().join("_"));
+        if !self.structs.contains_key(&name) {
+            let fields: Vec<(String, ir::Type)> = elem_types
+                .iter()
+                .enumerate()
+                .map(|(i, t)| (i.to_string(), t.clone()))
+                .collect();
+            self.structs.insert(
+                name.clone(),
+                ir::StructDef {
+                    name: name.clone(),
+                    fields,
+                },
+            );
+        }
+        name
+    }
+
+    fn lower_tuple_expr(&mut self, elems: &[ast::Expr]) -> Result<ir::Expr> {
+        let mut elem_types = Vec::new();
+        let mut lowered_elems = Vec::new();
+        for elem in elems {
+            let lowered = self.lower_expr(elem)?;
+            elem_types.push(lowered.ty.clone());
+            lowered_elems.push(lowered);
+        }
+        let name = self.ensure_tuple_struct(&elem_types);
+        let struct_def = self.structs.get(&name).unwrap().clone();
+        let ptr_ty = ir::Type::Ptr(Box::new(ir::Type::Struct(name.clone())));
+
+        let total_size: usize = struct_def
+            .fields
+            .iter()
+            .map(|(_, ty)| match ty {
+                ir::Type::I8 | ir::Type::U8 | ir::Type::Char | ir::Type::Bool => 1,
+                ir::Type::I16 | ir::Type::U16 => 2,
+                ir::Type::I32 | ir::Type::U32 | ir::Type::F32 => 4,
+                _ => 8,
+            })
+            .sum();
+        let count = total_size.div_ceil(8).max(1);
+
+        let slot_name = self.fresh_temp("$tuple");
+        let mut stmts = vec![ir::Stmt::StackAlloc {
+            name: slot_name.clone(),
+            elem_ty: ir::Type::I64,
+            count,
+        }];
+
+        for (i, value) in lowered_elems.iter().enumerate() {
+            let var_expr = ir::Expr::new(ir::ExprKind::Var(slot_name.clone()), ptr_ty.clone());
+            let gep = ir::Expr::new(
+                ir::ExprKind::Gep {
+                    base: Box::new(var_expr),
+                    field: i,
+                },
+                ir::Type::Ptr(Box::new(elem_types[i].clone())),
+            );
+            if let ir::ExprKind::Block(pre, result) = &value.kind {
+                for pre_stmt in pre {
+                    stmts.push(pre_stmt.clone());
+                }
+                stmts.push(ir::Stmt::Assign {
+                    lhs: ir::LValue::Deref(gep),
+                    rhs: result.as_ref().clone(),
+                });
+            } else {
+                stmts.push(ir::Stmt::Assign {
+                    lhs: ir::LValue::Deref(gep),
+                    rhs: value.clone(),
+                });
+            }
+        }
+
+        let result_expr = ir::Expr::new(ir::ExprKind::Var(slot_name), ptr_ty.clone());
+        Ok(ir::Expr::new(
+            ir::ExprKind::Block(stmts, Box::new(result_expr)),
+            ptr_ty,
+        ))
     }
 
     fn fresh_temp(&mut self, prefix: &str) -> String {
