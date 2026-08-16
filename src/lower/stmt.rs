@@ -171,11 +171,19 @@ impl LowerCtx<'_> {
     ) -> Result<Vec<ir::Stmt>> {
         match pattern {
             ast::Pattern::Ident(name) => {
-                let ty =
-                    declared.map(|t| self.lower_type(t))
-                        .transpose()?
-                        .unwrap_or(ir::Type::I64);
                 let init = value.as_ref().map(|e| self.lower_expr(e)).transpose()?;
+                let ty = declared
+                    .map(|t| self.lower_type(t))
+                    .transpose()?
+                    .unwrap_or_else(|| {
+                        // Infer the variable's type from its initializer so that
+                        // struct-typed values (struct literals, enum variants,
+                        // and struct-typed locals) are not silently widened to
+                        // `I64`.  A missing initializer still defaults to `I64`.
+                        init.as_ref()
+                            .map(|e| e.ty.clone())
+                            .unwrap_or(ir::Type::I64)
+                    });
                 self.vars.insert(name.clone(), ty.clone());
                 self.lower_binding(name, declared, ty, init)
             }
