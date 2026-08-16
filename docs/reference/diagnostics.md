@@ -33,18 +33,20 @@ Error: inline assembly is not implemented in the x64 backend
 |-------|-----------------|-----------------|
 | Parse errors | Lexing/parsing | `expected expression, found Def` |
 | Type checking | Semantic analysis | `unknown identifier \`Red\``, `expected \`i32\`, found \`ptr[char]\`` |
-| Lowering | AST → IR | `tuples are not supported in the first milestone` |
+| Lowering | AST → IR | `function types are not supported in the first milestone`, `generic struct \`X\` is not supported yet` |
 | Codegen | Machine code emission | `inline assembly is not implemented in the x64 backend` |
 | Runtime helpers | Missing runtime symbol | name-conflict or missing-symbol errors |
 
 ## Compiler Panics
 
-Some constructs crash the compiler instead of producing a clean error (see
-[Known Issues](../language/known-issues.md)):
+All accepted constructs produce clean diagnostics (no compiler panics). The
+diagnostics listed above are the only lowering-time rejections today:
 
-- Generic functions (`def identity[T](...)`)
+- Generic functions / structs (`def identity[T](...)`, `struct Pair[T]`)
 - `impl` blocks
-- Nested struct fields
+- Function types `fn(int32) -> int32`
+- `int128` / `uint128`
+- Recursive-by-value structs (`struct A: a: A`)
 
 When a panic occurs, run with `RUST_BACKTRACE=1` to get a backtrace, and
 report it as a bug with a minimal reproduction:

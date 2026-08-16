@@ -119,7 +119,8 @@ def foo() -> int32:
 |----------|-------------|
 | `=` | Assignment |
 
-Compound assignment (`+=`, `-=`, etc.) is **not** supported — write `x = x + 1`.
+Compound assignment (`+=`, `-=`, etc.) is **supported** — `x += 1` is
+desugared to `x = x + 1`.
 
 ### Other
 

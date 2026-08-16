@@ -34,8 +34,12 @@ re-litigate them:
 - [x] **Block expressions** `let x = { ... }` and `unsafe { ... }` as expressions —
        end-to-end across all three targets (x86_64, x86_32, x86_16)
 - [x] **Enum variants** end-to-end — construction (`Color.Red`,
-       `Option.Some(x)`), `match`/`case` on variant values, payload
-       destructuring, and discriminants across x86_64 and x86_32
+        `Option.Some(x)`), `match`/`case` on variant values, payload
+        destructuring, and discriminants across x86_64 and x86_32
+- [x] **Tuples** — literals, types, field-access (`t.0`, `t.1`) on x86_64 and
+        x86_32 (return-type propagation through calls is a remaining item below)
+- [x] **Compound assignment** `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`,
+        `<<=`, `>>=`
 
 ## Compiler stability & diagnostics
 
@@ -51,10 +55,11 @@ re-litigate them:
 These are accepted by the grammar/type-checker today but rejected at lowering
 or codegen:
 
-- [ ] **Tuples** — literals, types, destructuring, returns
-- [ ] **Compound assignment** `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`,
-       `<<=`, `>>=`
 - [ ] **Fixed-size array types** `[T; N]` and repeat literals `[0; N]`
+- [ ] **Tuple return-type propagation** — `-> (T, U)` checks out, but the type
+        is not carried back to the caller (result falls back to `int64`); tuple
+        destructuring assignment `let (a, b) = t` and destructuring tuple-typed
+        parameters
 - [ ] **`@packed` / `@align(N)`** actually affect struct layout
 - [ ] **Slices** `slice[T]`, `&arr[..]`, `&arr[1..3]`
 - [ ] **Function types** `fn(...) -> ...` (and function-pointer values)

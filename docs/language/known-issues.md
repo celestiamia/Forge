@@ -23,8 +23,8 @@ compiler:
 | Construct | Status |
 |-----------|--------|
 | `union` | "not a struct type" error; no codegen |
-| Tuples `(a, b)` (type annotations, literals, return types) | Fails at lowering: "tuples are not supported in the first milestone" |
-| Tuple destructuring `let (a, b) = t` | Parse error |
+| Tuples (type annotations, literals, field access `t.0`, `t.1`) | Supported end-to-end on x86_64 and x86_32 |
+| Tuple destructuring `let (a, b) = t` and `-> (T, U)` as a **return type** | Parse/typecheck, but the type is not propagated through calls (call result falls back to `int64`; use an intermediate `ref[T]` where possible) |
 | Fixed-size array annotations `[int32; 5]` and repeat literals `[0; 3]` | Parse error (plain `[1, 2, 3]` literals work) |
 | Slices `slice[T]`, `&arr[..]`, `&arr[1..3]` | Type error |
 | Function types `fn(int32) -> int32` | Parse error |
@@ -34,7 +34,7 @@ compiler:
 | Block expressions `let x = { ... }` | Supported end-to-end |
 | `@export`, `@inline`, `@noreturn`, `@naked` | Unknown attribute errors (only `@freestanding`, `@packed`, `@align`, `@c_enum`, `@extern` are accepted) |
 | `@packed`, `@align(N)`, `@c_enum` | Accepted but have **no effect** on layout or codegen yet |
-| Compound assignment `+=`, `-=`, etc. | Parse error — write `x = x + 1` |
+| Compound assignment `+=`, `-=`, etc. | Supported end-to-end (desugar `x += 1` to `x = x + 1`; see [Syntax](syntax.md)) |
 | `asm!()` on x86_64 / x86_32 | Codegen error — inline assembly works only on the `x86_16-boot` target |
 
 ## Parser Notes

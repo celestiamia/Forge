@@ -147,5 +147,5 @@ All take `ptr[uint8]` arguments and a `uint64` byte count.
 
 - `ref[T]`/`refmut[T]`/`own[T]` — only partially parsed; `refmut` and `own`
   cannot be constructed
-- Slices (`slice[T]`), tuples, `fn` types
+- Slices (`slice[T]`), `fn` types
 - Bounds-checked indexing and borrow checking

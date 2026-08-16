@@ -117,4 +117,6 @@ The following are **not** available in this milestone (see
 - **Closures / lambdas** — `|x| x + 1`
 - **Variadic functions** — `extern def printf(fmt, ...)`
 - **Default parameters**
-- **Tuples as return types** — `-> (int32, int32)` fails at lowering
+- **Tuples as return types** — `-> (int32, int32)` type-checks, but the
+  returned tuple type is not propagated through the call (the caller sees
+  `int64`); use an intermediate `ref[T]` binding or field access when possible

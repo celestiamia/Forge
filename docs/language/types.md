@@ -152,7 +152,7 @@ The following type forms parse but are not functional yet — see
 
 - `ref[T]` / `refmut[T]` — references (only `ref[T]` annotation + deref work)
 - `own[T]` — owned pointers (declaration only; no constructor)
-- `(T1, T2, ...)` — tuples (fail at lowering)
+- `(T1, T2, ...)` — tuples (literals, field access `t.0` supported; see [Functions: tuples as return types](functions.md) for the propagation limitation)
 - `[T; N]` — fixed-size array annotations
 - `slice[T]` — slices
 - `fn(T) -> T` — function types
