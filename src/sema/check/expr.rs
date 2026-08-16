@@ -623,7 +623,7 @@ impl Context {
                             args_in.len()
                         ));
                     }
-                    let arg = self.check_expr(&args_in[0], Some(payload_ty));
+                    let arg = self.check_expr(args_in[0], Some(payload_ty));
                     let result_ty = callee.ty.clone();
                     return TypedExpr::new(
                         TypedExprKind::Call {

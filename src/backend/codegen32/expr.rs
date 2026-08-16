@@ -288,7 +288,7 @@ impl<'p> CodeGen<'p> {
         // convention.  After the call EAX holds that pointer.
         let sret = matches!(ret_ty, Type::Struct(_))
             && !Self::is_enum_struct(ret_ty)
-            && self.value_size(ret_ty).map_or(false, |s| s > 4);
+            && self.value_size(ret_ty).is_some_and(|s| s > 4);
         let sret_slot = if sret {
             let size = self.value_size(ret_ty).unwrap_or(4).max(4);
             let s = self.alloc_slot(size, 4);

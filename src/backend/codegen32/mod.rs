@@ -295,13 +295,10 @@ impl<'p> CodeGen<'p> {
     /// so multi-field structs are laid out inline instead of being
     /// truncated to the first 4-byte slot.
     pub(super) fn var_size_align(&self, ty: &Type) -> (usize, usize) {
-        match ty {
-            Type::Struct(name) => {
-                if let Some(layout) = self.struct_layouts.get(name) {
-                    return (layout.size.max(4), 4);
-                }
-            }
-            _ => {}
+        if let Type::Struct(name) = ty
+            && let Some(layout) = self.struct_layouts.get(name)
+        {
+            return (layout.size.max(4), 4);
         }
         let size = type_size(ty, &self.struct_layouts);
         (size.max(4), 4)
@@ -430,7 +427,7 @@ impl<'p> CodeGen<'p> {
         // EBP+8); real named parameters start one slot higher.
         let sret = matches!(&f.ret, Type::Struct(_))
             && !Self::is_enum_struct(&f.ret)
-            && self.value_size(&f.ret).map_or(false, |s| s > 4);
+            && self.value_size(&f.ret).is_some_and(|s| s > 4);
         self.sret = sret;
         let arg0 = if sret { 8 } else { 0 };
 

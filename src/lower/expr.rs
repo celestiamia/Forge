@@ -530,15 +530,11 @@ impl LowerCtx<'_> {
         let base = self.lower_expr(&f.object)?;
 
         // Check if this is an enum variant constructor: Color.Red, Option.Some
-        if let ir::Type::Struct(name) = &base.ty {
-            if name.starts_with("__enum_") {
-                if let Ok((struct_name, discriminant)) =
-                    self.resolve_enum_variant(&base.ty, &f.field)
-                {
-                    let discriminant = discriminant;
-                    return self.lower_enum_variant(struct_name, discriminant);
-                }
-            }
+        if let ir::Type::Struct(name) = &base.ty
+            && name.starts_with("__enum_")
+            && let Ok((struct_name, discriminant)) = self.resolve_enum_variant(&base.ty, &f.field)
+        {
+            return self.lower_enum_variant(struct_name, discriminant);
         }
 
         let (struct_name, idx) = self.resolve_field(&base.ty, &f.field)?;

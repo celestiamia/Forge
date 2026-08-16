@@ -522,17 +522,16 @@ impl Context {
                         enum_name, variant_name
                     ));
                 }
-                if let Some(p) = payload {
-                    if let Some(v) = variant {
-                        if let Some(payload_ty) = &v.payload {
-                            self.check_pattern(p, payload_ty, mutable);
-                        } else {
-                            self.error(format!(
-                                "variant `{}` of enum `{}` has no payload to bind",
-                                variant_name, enum_name
-                            ));
-                        }
-                    }
+                if let Some(p) = payload
+                    && let Some(v) = variant
+                    && let Some(payload_ty) = &v.payload
+                {
+                    self.check_pattern(p, payload_ty, mutable);
+                } else if payload.is_some() && variant.is_some() {
+                    self.error(format!(
+                        "variant `{}` of enum `{}` has no payload to bind",
+                        variant_name, enum_name
+                    ));
                 }
             }
         }
