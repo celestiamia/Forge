@@ -48,6 +48,16 @@ impl<'p> CodeGen<'p> {
                     .get(name)
                     .ok_or_else(|| anyhow::anyhow!("unknown variable: {}", name))?;
                 match &e.ty {
+                    // Struct-typed locals are address-bearing on x86_32: the
+                    // struct data lives inline in the slot and is too wide to
+                    // fit in EAX, so we hand back the slot address.  Callers
+                    // that need the value copy it out via `copy_ptr_to_slot`.
+                    // Synthetic `__enum_*` structs are excluded: their slot
+                    // holds a 4-byte pointer to a stack temp, so the value is
+                    // the pointer itself.
+                    Type::Struct(_) if !Self::is_enum_struct(&e.ty) => {
+                        self.asm.lea(Reg::Eax, Mem::base_disp(Reg::Ebp, slot.offset))?;
+                    }
                     Type::I8
                     | Type::I16
                     | Type::I32
@@ -67,7 +77,7 @@ impl<'p> CodeGen<'p> {
                 }
             }
             ExprKind::Bin { op, left, right } => self.eval_bin(*op, left, right, &e.ty)?,
-            ExprKind::Call { func, args } => self.eval_call(func, args)?,
+            ExprKind::Call { func, args } => self.eval_call(func, args, &e.ty)?,
             ExprKind::Cast { expr, ty } => self.eval_cast(expr, ty)?,
             ExprKind::Gep { base, field } => {
                 self.eval_expr(base)?; // pointer to struct in EAX
@@ -265,23 +275,52 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
-    pub(super) fn eval_call(&mut self, func: &str, args: &[Expr]) -> Result<()> {
+    pub(super) fn eval_call(&mut self, func: &str, args: &[Expr], ret_ty: &Type) -> Result<()> {
         let target = *self
             .func_labels
             .get(func)
             .ok_or_else(|| anyhow::anyhow!("unknown function: {}", func))?;
 
+        // i386 sret: a struct return larger than 4 bytes is written into a
+        // caller-allocated scratch struct; its address is passed as the first
+        // (leftmost) argument, i.e. pushed last under the right-to-left cdecl
+        // convention.  After the call EAX holds that pointer.
+        let sret = matches!(ret_ty, Type::Struct(_))
+            && !Self::is_enum_struct(ret_ty)
+            && self.value_size(ret_ty).map_or(false, |s| s > 4);
+        let sret_slot = if sret {
+            let size = self.value_size(ret_ty).unwrap_or(4).max(4);
+            let s = self.alloc_slot(size, 4);
+            Some(s.offset)
+        } else {
+            None
+        };
+
         let mut arg_slots = Vec::new();
         for a in args {
             self.eval_expr(a)?;
             let slot = self.alloc_slot(4, 4);
-            self.store_scalar(slot.offset)?;
+            if matches!(a.ty, Type::Struct(_)) && !Self::is_enum_struct(&a.ty) {
+                // Struct-typed expressions are address-bearing; pass the
+                // first 4 bytes (tag/first field) per the x86_32 convention.
+                self.asm.mov(Reg::Ecx, Mem::base(Reg::Eax))?;
+                self.asm.mov(Mem::base_disp(Reg::Ebp, slot.offset), Reg::Ecx)?;
+            } else {
+                self.store_scalar(slot.offset)?;
+            }
             arg_slots.push(slot);
         }
 
+        // Right-to-left push: real args first, then the sret pointer last so
+        // it lands in the first (lowest-address) argument slot.
         for slot in arg_slots.iter().rev() {
             self.asm
                 .mov(Reg::Eax, Mem::base_disp(Reg::Ebp, slot.offset))?;
+            self.asm.push(Reg::Eax)?;
+        }
+        if let Some(sret_off) = sret_slot {
+            self.asm
+                .lea(Reg::Eax, Mem::base_disp(Reg::Ebp, sret_off))?;
             self.asm.push(Reg::Eax)?;
         }
 
@@ -289,6 +328,9 @@ impl<'p> CodeGen<'p> {
 
         if !arg_slots.is_empty() {
             self.asm.add(Reg::Esp, (arg_slots.len() * 4) as i32)?;
+        }
+        if sret_slot.is_some() {
+            self.asm.add(Reg::Esp, 4i32)?;
         }
         Ok(())
     }

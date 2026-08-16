@@ -48,10 +48,12 @@ compiler:
 
 - **x86_32 has no float support** — any `float32`/`float64` usage fails at
   codegen. Stdlib modules that use floats cannot be imported on x86_32.
-- **x86_32 struct-by-value copies copy only the first 4 bytes** — locals are
-  4-byte slots, so a multi-field struct assigned to another variable (or a
-  nested struct value) loses every field after the first. Field-by-field
-  access works; whole-struct copies are x86_64-only for now.
+- **x86_32 struct-by-value copies are limited** — whole-struct copies,
+  assignments, and returns work via inline slot copies / the i386 sret
+  convention (struct returns > 4 bytes go through a hidden first-arg
+  pointer).  Struct *arguments* still pass only the first 4 bytes of the
+  struct (tag/first field); passing a multi-field struct by value loses
+  every field after the first.
 - **No optimizer** — every unsafe deref emits a real memory access
   (effectively volatile); codegen is roughly `-O0` quality.
 - **Struct fields are laid out without padding** — alignment is not

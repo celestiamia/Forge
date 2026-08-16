@@ -103,6 +103,63 @@ impl<'p> CodeGen<'p> {
         }
     }
 
+    /// Whether `ty` is a synthetic `__enum_*` struct.  Enum values on x86_32
+    /// are 4-byte pointers to a stack temp holding tag+payload, so they keep
+    /// scalar (pointer-value) semantics; only real user structs are
+    /// address-bearing inline structs.
+    pub(super) fn is_enum_struct(ty: &Type) -> bool {
+        matches!(ty, Type::Struct(name) if name.starts_with("__enum_"))
+    }
+
+    /// Byte size (≥4) of a value of `ty`, treating structs as their full layout
+    /// size.  Returns `None` for void/unsized types.
+    pub(super) fn value_size(&self, ty: &Type) -> Option<usize> {
+        match ty {
+            Type::Struct(name) => self
+                .struct_layouts
+                .get(name)
+                .map(|l| l.size.max(4)),
+            _ => Some(type_size(ty, &self.struct_layouts).max(4)),
+        }
+    }
+
+    /// Copy `size` bytes from `[src_reg]` to `[dst_reg]` using 4-byte moves
+    /// and a trailing 1/2/3-byte move for the remainder.  `src_reg` and
+    /// `dst_reg` are addresses (not the data themselves).
+    pub(super) fn copy_mem_to_mem(&mut self, dst: Reg, src: Reg, size: usize) -> Result<()> {
+        let mut offset = 0i32;
+        let mut remaining = size;
+        while remaining >= 4 {
+            self.asm
+                .mov(Reg::Ecx, Mem::base_disp(src, offset))?;
+            self.asm
+                .store32(Mem::base_disp(dst, offset), Reg::Ecx)?;
+            offset += 4;
+            remaining -= 4;
+        }
+        if remaining > 0 {
+            match remaining {
+                1 => {
+                    self.asm.movzx8(Reg::Ecx, Mem::base_disp(src, offset))?;
+                    self.asm.store8(Mem::base_disp(dst, offset), Reg::Ecx)?;
+                }
+                2 => {
+                    self.asm.mov(Reg::Ecx, Mem::base_disp(src, offset))?;
+                    self.asm.store16(Mem::base_disp(dst, offset), Reg::Ecx)?;
+                }
+                3 => {
+                    self.asm.movzx8(Reg::Ecx, Mem::base_disp(src, offset))?;
+                    self.asm.store8(Mem::base_disp(dst, offset), Reg::Ecx)?;
+                    let o = offset + 1;
+                    self.asm.mov(Reg::Ecx, Mem::base_disp(src, o))?;
+                    self.asm.store16(Mem::base_disp(dst, o), Reg::Ecx)?;
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn load_from_addr(&mut self, ty: &Type) -> Result<()> {
         match ty {
             Type::I8 => self.asm.movsx8(Reg::Eax, Mem::base(Reg::Eax))?,

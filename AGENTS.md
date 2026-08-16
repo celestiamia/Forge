@@ -102,6 +102,7 @@ Compilation is deterministic: `merge_modules` in `src/driver/loader.rs` merges t
 - Float values are stored as 64-bit integer bit patterns in 64-bit slots/RAX
 - Integer-to-float and float-to-integer casts use **XMM7** (scratch), not XMM0 — XMM0 is used by `eval_float_bin` for binary operations and will be clobbered
 - Parser `parse_type` and `parse_type_atom` call `skip_newlines()` internally; use `parse_type_noskip()` from the `as` handler in `parse_postfix` to avoid consuming newlines that the postfix loop needs to see
+- x86_32 structs (codegen32): real struct locals are allocated with their full byte size (min 4) and are **address-bearing** — `Var` of a struct leaves the slot address in EAX; copies/initializers/assignments copy the full byte width (`copy_struct_bytes`/`copy_ptr_to_slot`/`copy_mem_to_mem` in `codegen32/`). Struct returns > 4 bytes use the i386 **sret** convention (hidden first arg = caller-allocated struct pointer at `EBP+8`; callee copies the struct there and returns that pointer in EAX; named params shift up by one 4-byte arg slot). Synthetic `__enum_*` structs are the exception: their values are 4-byte pointers to a stack temp, so they keep scalar semantics everywhere (`is_enum_struct` in `codegen32/layout.rs`). Struct *arguments* still pass only the first 4 bytes.
 
 ## Codegen16 notes (x86_16 flat/raw images)
 

@@ -50,6 +50,11 @@ pub struct CodeGen<'p> {
     struct_layouts: HashMap<String, StructLayout>,
     addr_tmp: i32,
     ret_label: u32,
+    /// Whether the current function returns a struct larger than 4 bytes
+    /// through the i386 sret convention (hidden first arg = caller-allocated
+    /// struct pointer; callee writes the struct there and returns the same
+    /// pointer in EAX).
+    sret: bool,
     string_patches: Vec<(usize, u32)>,
     /// (global label, string label) pairs for string-initialized constants,
     /// patched once the rodata layout is known.
@@ -285,6 +290,99 @@ impl<'p> CodeGen<'p> {
         }
     }
 
+    /// Return the (size, align) for a local variable of the given type.
+    /// Struct locals are allocated with their full byte size (minimum 4)
+    /// so multi-field structs are laid out inline instead of being
+    /// truncated to the first 4-byte slot.
+    pub(super) fn var_size_align(&self, ty: &Type) -> (usize, usize) {
+        match ty {
+            Type::Struct(name) => {
+                if let Some(layout) = self.struct_layouts.get(name) {
+                    return (layout.size.max(4), 4);
+                }
+            }
+            _ => {}
+        }
+        let size = type_size(ty, &self.struct_layouts);
+        (size.max(4), 4)
+    }
+
+    /// Copy `size` bytes from the struct data at `[rbp+src]` into the struct
+    /// data at `[rbp+dst]`.  Uses 4-byte moves for the aligned bulk of the
+    /// copy, then a trailing 1/2/3-byte move for any remainder.  `size` must
+    /// be > 0.
+    pub(super) fn copy_struct_bytes(&mut self, dst: i32, src: i32, size: usize) -> Result<()> {
+        self.asm.lea(Reg::Edi, Mem::base_disp(Reg::Ebp, dst))?;
+        self.asm.lea(Reg::Esi, Mem::base_disp(Reg::Ebp, src))?;
+        let mut remaining = size;
+        while remaining >= 4 {
+            self.asm.mov(Reg::Ecx, Mem::base(Reg::Esi))?;
+            self.asm.store32(Mem::base(Reg::Edi), Reg::Ecx)?;
+            self.asm.add(Reg::Edi, 4i32)?;
+            self.asm.add(Reg::Esi, 4i32)?;
+            remaining -= 4;
+        }
+        if remaining > 0 {
+            match remaining {
+                1 => {
+                    self.asm.movzx8(Reg::Ecx, Mem::base(Reg::Esi))?;
+                    self.asm.store8(Mem::base(Reg::Edi), Reg::Ecx)?;
+                }
+                2 => {
+                    self.asm.mov(Reg::Ecx, Mem::base(Reg::Esi))?;
+                    self.asm.store16(Mem::base(Reg::Edi), Reg::Ecx)?;
+                }
+                3 => {
+                    self.asm.movzx8(Reg::Ecx, Mem::base(Reg::Esi))?;
+                    self.asm.store8(Mem::base(Reg::Edi), Reg::Ecx)?;
+                    self.asm.add(Reg::Esi, 1i32)?;
+                    self.asm.add(Reg::Edi, 1i32)?;
+                    self.asm.mov(Reg::Ecx, Mem::base(Reg::Esi))?;
+                    self.asm.store16(Mem::base(Reg::Edi), Reg::Ecx)?;
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok(())
+    }
+
+    /// Copy `size` bytes of struct data from the address held in `src_reg`
+    /// (i.e. `[*src_reg]`) into the local slot at `[rbp+dst]`.
+    pub(super) fn copy_ptr_to_slot(&mut self, dst: i32, src_reg: Reg, size: usize) -> Result<()> {
+        self.asm.lea(Reg::Edi, Mem::base_disp(Reg::Ebp, dst))?;
+        self.asm.mov(Reg::Esi, src_reg)?;
+        let mut remaining = size;
+        while remaining >= 4 {
+            self.asm.mov(Reg::Ecx, Mem::base(Reg::Esi))?;
+            self.asm.store32(Mem::base(Reg::Edi), Reg::Ecx)?;
+            self.asm.add(Reg::Edi, 4i32)?;
+            self.asm.add(Reg::Esi, 4i32)?;
+            remaining -= 4;
+        }
+        if remaining > 0 {
+            match remaining {
+                1 => {
+                    self.asm.movzx8(Reg::Ecx, Mem::base(Reg::Esi))?;
+                    self.asm.store8(Mem::base(Reg::Edi), Reg::Ecx)?;
+                }
+                2 => {
+                    self.asm.mov(Reg::Ecx, Mem::base(Reg::Esi))?;
+                    self.asm.store16(Mem::base(Reg::Edi), Reg::Ecx)?;
+                }
+                3 => {
+                    self.asm.movzx8(Reg::Ecx, Mem::base(Reg::Esi))?;
+                    self.asm.store8(Mem::base(Reg::Edi), Reg::Ecx)?;
+                    self.asm.add(Reg::Esi, 1i32)?;
+                    self.asm.add(Reg::Edi, 1i32)?;
+                    self.asm.mov(Reg::Ecx, Mem::base(Reg::Esi))?;
+                    self.asm.store16(Mem::base(Reg::Edi), Reg::Ecx)?;
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn new(prog: &'p Program, struct_layouts: HashMap<String, StructLayout>) -> Self {
         Self {
             prog,
@@ -298,6 +396,7 @@ impl<'p> CodeGen<'p> {
             struct_layouts,
             addr_tmp: 0,
             ret_label: 0,
+            sret: false,
             string_patches: Vec::new(),
             global_string_patches: Vec::new(),
             alloc_ptr_patch: None,
@@ -326,13 +425,22 @@ impl<'p> CodeGen<'p> {
         let slot = self.alloc_slot(4, 4);
         self.addr_tmp = slot.offset;
 
+        // i386 sret: a struct return larger than 4 bytes is written through a
+        // hidden first argument (the caller-allocated struct pointer at
+        // EBP+8); real named parameters start one slot higher.
+        let sret = matches!(&f.ret, Type::Struct(_))
+            && !Self::is_enum_struct(&f.ret)
+            && self.value_size(&f.ret).map_or(false, |s| s > 4);
+        self.sret = sret;
+        let arg0 = if sret { 8 } else { 0 };
+
         for (name, _ty) in &f.params {
             self.alloc_named_slot(name, 4, 4);
         }
         for (i, (name, _ty)) in f.params.iter().enumerate() {
             let slot = self.locals.get(name).unwrap();
             self.asm
-                .mov(Reg::Eax, Mem::base_disp(Reg::Ebp, (8 + i * 4) as i32))?;
+                .mov(Reg::Eax, Mem::base_disp(Reg::Ebp, (8 + arg0 + i * 4) as i32))?;
             self.asm
                 .mov(Mem::base_disp(Reg::Ebp, slot.offset), Reg::Eax)?;
         }
@@ -356,12 +464,43 @@ impl<'p> CodeGen<'p> {
     pub(super) fn emit_stmt(&mut self, s: &Stmt) -> Result<()> {
         match s {
             Stmt::Let { name, ty, init } => {
-                let slot = self.alloc_named_slot(name, 4, 4);
+                let (size, align) = self.var_size_align(ty);
+                let slot = self.alloc_named_slot(name, size, align);
                 if let Some(e) = init {
-                    self.eval_expr(e)?;
-                    self.store_scalar(slot.offset)?;
+                    // Struct-typed initializers are laid out inline in the
+                    // local's slot (not via the 4-byte EAX round-trip), so
+                    // multi-field struct copies preserve every field.  The
+                    // source address is computed without going through EAX so
+                    // values larger than 4 bytes round-trip correctly.
+                    // Synthetic `__enum_*` structs are excluded: their values
+                    // are 4-byte pointers and must round-trip as scalars.
+                    if let Type::Struct(_) = &e.ty {
+                        if Self::is_enum_struct(&e.ty) {
+                            self.eval_expr(e)?;
+                            self.store_scalar(slot.offset)?;
+                            return Ok(());
+                        }
+                        let src_off = match &e.kind {
+                            ExprKind::Var(n) => self
+                                .locals
+                                .get(n)
+                                .map(|s| s.offset)
+                                .ok_or_else(|| anyhow::anyhow!("unknown variable: {}", n))?,
+                            _ => {
+                                // Struct literal / enum variant / block: eval
+                                // leaves the source address in EAX.
+                                self.eval_expr(e)?;
+                                self.copy_ptr_to_slot(slot.offset, Reg::Eax, size)?;
+                                return Ok(());
+                            }
+                        };
+                        self.copy_struct_bytes(slot.offset, src_off, size)?;
+                    } else {
+                        self.eval_expr(e)?;
+                        self.store_scalar(slot.offset)?;
+                    }
                 }
-                let _ = ty;
+                let _ = (size, align);
             }
             Stmt::StackAlloc {
                 name,
@@ -381,17 +520,59 @@ impl<'p> CodeGen<'p> {
                 self.lvalue_addr(lhs)?; // address in EAX
                 self.asm
                     .mov(Mem::base_disp(Reg::Ebp, self.addr_tmp), Reg::Eax)?;
-                self.eval_expr(rhs)?; // value in EAX
-                self.asm
-                    .mov(Reg::Edx, Mem::base_disp(Reg::Ebp, self.addr_tmp))?;
-                let width = self.lvalue_store_width(lhs);
-                self.store_width(width, Reg::Edx, Reg::Eax)?;
+                // Struct-typed assignments copy the full struct (the RHS
+                // evaluates to a source address in EAX) instead of a single
+                // 32-bit store, so multi-field structs are preserved.
+                if let Type::Struct(_) = &rhs.ty {
+                    if Self::is_enum_struct(&rhs.ty) {
+                        self.eval_expr(rhs)?; // pointer value in EAX
+                        self.asm
+                            .mov(Reg::Edx, Mem::base_disp(Reg::Ebp, self.addr_tmp))?;
+                        let width = self.lvalue_store_width(lhs);
+                        self.store_width(width, Reg::Edx, Reg::Eax)?;
+                    } else {
+                        self.eval_expr(rhs)?; // source address in EAX
+                        let size = self.value_size(&rhs.ty).unwrap_or(4).max(4);
+                        self.asm.mov(Reg::Esi, Reg::Eax)?;
+                        self.asm
+                            .mov(Reg::Edi, Mem::base_disp(Reg::Ebp, self.addr_tmp))?;
+                        self.copy_mem_to_mem(Reg::Edi, Reg::Esi, size)?;
+                    }
+                } else {
+                    self.eval_expr(rhs)?; // value in EAX
+                    self.asm
+                        .mov(Reg::Edx, Mem::base_disp(Reg::Ebp, self.addr_tmp))?;
+                    let width = self.lvalue_store_width(lhs);
+                    self.store_width(width, Reg::Edx, Reg::Eax)?;
+                }
             }
             Stmt::Return(None) => {
                 self.asm.jmp(self.ret_label)?;
             }
             Stmt::Return(Some(e)) => {
-                self.eval_expr(e)?;
+                if self.sret
+                    && matches!(&e.ty, Type::Struct(_))
+                    && !Self::is_enum_struct(&e.ty)
+                {
+                    // i386 sret: write the struct into `*[EBP+8]` and return
+                    // that caller-allocated pointer in EAX.
+                    self.eval_expr(e)?; // source address in EAX
+                    let size = self.value_size(&e.ty).unwrap_or(4).max(4);
+                    self.asm
+                        .mov(Mem::base_disp(Reg::Ebp, self.addr_tmp), Reg::Eax)?;
+                    // copy from [*EAX] into *[EBP+8] (the caller-allocated sret slot)
+                    self.asm
+                        .mov(Reg::Esi, Mem::base_disp(Reg::Ebp, self.addr_tmp))?;
+                    self.asm
+                        .mov(Reg::Edi, Mem::base_disp(Reg::Ebp, 8))?;
+                    self.copy_mem_to_mem(Reg::Edi, Reg::Esi, size)?;
+                    // i386 ABI: return the caller-allocated pointer (arg0)
+                    // that the struct was written into.
+                    self.asm
+                        .mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 8))?;
+                } else {
+                    self.eval_expr(e)?;
+                }
                 self.asm.jmp(self.ret_label)?;
             }
             Stmt::Expr(e) => {
