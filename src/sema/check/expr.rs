@@ -228,7 +228,24 @@ impl Context {
                 static_info.ty.clone(),
             );
         }
-        if self.adts.contains_key(name) || self.imports.contains_key(name) {
+        if let Some(info) = self.adts.get(name) {
+            let ty = match info.kind {
+                AdtKind::Struct => Type::Struct {
+                    name: info.name.clone(),
+                    fields: info.fields.clone(),
+                },
+                AdtKind::Union => Type::Union {
+                    name: info.name.clone(),
+                    fields: info.fields.clone(),
+                },
+                AdtKind::Enum => Type::Enum {
+                    name: info.name.clone(),
+                    variants: info.variants.clone(),
+                },
+            };
+            return TypedExpr::new(TypedExprKind::Ident(name.to_string()), ty);
+        }
+        if self.imports.contains_key(name) {
             return TypedExpr::new(TypedExprKind::Ident(name.to_string()), Type::Unknown);
         }
         self.error(format!("unknown identifier `{}`", name));
@@ -584,6 +601,48 @@ impl Context {
             self.error(format!("call to unknown function `{}`", name));
         }
 
+        // Enum variant constructor with payload: Color.Variant(payload)
+        if let Expr::Field(field) = &c.callee.as_ref()
+            && let Expr::Ident(enum_name) = &*field.object
+        {
+            let enum_info = self.adts.get(base_type_name(&callee.ty).as_str()).cloned();
+            if let Some(info) = enum_info
+                && info.kind == AdtKind::Enum
+                && info.variants.iter().any(|v| v.name == field.field)
+            {
+                let variant = info
+                    .variants
+                    .iter()
+                    .find(|v| v.name == field.field)
+                    .unwrap();
+                if let Some(payload_ty) = &variant.payload {
+                    if args_in.len() != 1 {
+                        self.error(format!(
+                            "variant `{}` expects 1 argument, got {}",
+                            field.field,
+                            args_in.len()
+                        ));
+                    }
+                    let arg = self.check_expr(&args_in[0], Some(payload_ty));
+                    let result_ty = callee.ty.clone();
+                    return TypedExpr::new(
+                        TypedExprKind::Call {
+                            callee: Box::new(callee),
+                            args: vec![arg],
+                            generic_args: None,
+                            mangled_name: None,
+                        },
+                        result_ty,
+                    );
+                } else {
+                    self.error(format!(
+                        "variant `{}` has no payload; use `{}`.{} without arguments",
+                        field.field, enum_name, field.field
+                    ));
+                }
+            }
+        }
+
         // Function pointer / other callable
         if let Type::Function { params, ret } = &callee.ty {
             let typed_args: Vec<TypedExpr> = args_in
@@ -773,6 +832,25 @@ impl Context {
             );
         }
 
+        let enum_name = base_type_name(base_ty);
+        if let Some(info) = self.adts.get(&enum_name)
+            && info.kind == AdtKind::Enum
+            && info.variants.iter().any(|v| v.name == f.field)
+        {
+            return TypedExpr::new(
+                TypedExprKind::Field {
+                    object: Box::new(object),
+                    field: f.field.clone(),
+                    field_index: info
+                        .variants
+                        .iter()
+                        .position(|v| v.name == f.field)
+                        .unwrap(),
+                },
+                base_ty.clone(),
+            );
+        }
+
         self.error(format!("type `{}` has no field `{}`", object.ty, f.field));
         TypedExpr::new(
             TypedExprKind::Field {
@@ -920,7 +998,7 @@ impl Context {
         let mut covered: HashSet<String> = HashSet::new();
         let mut has_wildcard = false;
         for case in cases {
-            match &case.pattern {
+             match &case.pattern {
                 TypedPattern::Wildcard => has_wildcard = true,
                 TypedPattern::Ident(name) => {
                     if info.variants.iter().any(|v| &v.name == name) {
@@ -929,6 +1007,9 @@ impl Context {
                         // A bare identifier that is not a variant acts like a binding wildcard.
                         has_wildcard = true;
                     }
+                }
+                TypedPattern::Variant { variant_name, .. } => {
+                    covered.insert(variant_name.clone());
                 }
                 _ => {}
             }

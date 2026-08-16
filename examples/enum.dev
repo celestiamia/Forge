@@ -1,0 +1,42 @@
+package enums
+
+from std.io import puts
+
+enum Color:
+    Red
+    Green
+    Blue
+
+enum Option:
+    None
+    Some(int32)
+
+def which(c: Color) -> int32:
+    match c:
+        case Color.Red:
+            puts("red\n")
+            return 1
+        case Color.Green:
+            puts("green\n")
+            return 2
+        case Color.Blue:
+            puts("blue\n")
+            return 3
+    return 0
+
+pub def main() -> int32:
+    # Unit-variant construction + match
+    var c = Color.Green
+    var code = which(c)
+
+    # Payload-variant construction + destructuring in a match arm
+    var a = Option.Some(42)
+    match a:
+        case Option.None:
+            puts("none\n")
+        case Option.Some(x):
+            puts("some\n")
+            code = code + x
+
+    puts("enum ok\n")
+    return code

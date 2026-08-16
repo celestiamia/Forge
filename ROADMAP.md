@@ -30,7 +30,12 @@ re-litigate them:
 - [x] `parse_type_noskip()` for `as` casts
 - [x] `__forge_pow` (integer power `**`) + floor division `//`
 - [x] `@freestanding`, `.fld` linker descriptors, ForgeOS example + x86_16
-      multi-stage boot
+       multi-stage boot
+- [x] **Block expressions** `let x = { ... }` and `unsafe { ... }` as expressions —
+       end-to-end across all three targets (x86_64, x86_32, x86_16)
+- [x] **Enum variants** end-to-end — construction (`Color.Red`,
+       `Option.Some(x)`), `match`/`case` on variant values, payload
+       destructuring, and discriminants across x86_64 and x86_32
 
 ## Compiler stability & diagnostics
 
@@ -47,12 +52,8 @@ These are accepted by the grammar/type-checker today but rejected at lowering
 or codegen:
 
 - [ ] **Tuples** — literals, types, destructuring, returns
-- [ ] **Enum variants** end-to-end — construction, `match` on variant values,
-      variant payloads, discriminant representation
-      (`@c_enum` is accepted but has no effect yet)
-- [ ] **Block expressions** `let x = { ... }`
 - [ ] **Compound assignment** `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`,
-      `<<=`, `>>=`
+       `<<=`, `>>=`
 - [ ] **Fixed-size array types** `[T; N]` and repeat literals `[0; N]`
 - [ ] **`@packed` / `@align(N)`** actually affect struct layout
 - [ ] **Slices** `slice[T]`, `&arr[..]`, `&arr[1..3]`
@@ -70,7 +71,6 @@ or codegen:
 - [ ] Default type parameters, associated types
 - [ ] Trait/`interface` system (method resolution on `impl`) — method calls
       are not yet lowered even though impls type-check
-- [ ] Enum variant payloads (`Option[T]`, tagged unions)
 - [ ] Struct update syntax / `..rest`
 
 ## Optimizer & codegen quality

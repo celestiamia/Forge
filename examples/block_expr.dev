@@ -1,0 +1,41 @@
+package block_expr
+
+from std.io import puts
+
+def compute() -> int32:
+    # Block expression as initializer with internal bindings
+    var x: int32 = {
+        var a = 6
+        var b = 7
+        a * b
+    }
+    return x
+
+pub def main() -> int32:
+    # Block expression as initializer with internal let bindings
+    var x: int32 = {
+        var a = 6
+        var b = 7
+        a * b
+    }
+
+    # Nested block expression
+    var y: int32 = {
+        var inner: int32 = {
+            var n = 3
+            n + 1
+        }
+        inner * 10
+    }
+
+    var total: int32 = x + y
+    puts("block expr ok\n")
+
+    # Block expression with early return path
+    var guarded: int32 = {
+        if total > 100:
+            return 99
+        total + 2
+    }
+
+    return guarded + compute()

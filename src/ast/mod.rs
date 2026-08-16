@@ -285,6 +285,11 @@ pub enum Pattern {
     Literal(Literal),
     Ident(String),
     Tuple(Vec<Pattern>),
+    Variant {
+        enum_name: String,
+        variant_name: String,
+        payload: Option<Box<Pattern>>,
+    },
 }
 
 // ---------------------------------------------------------------------------

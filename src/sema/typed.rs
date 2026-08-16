@@ -256,4 +256,9 @@ pub enum TypedPattern {
     Literal(ast::Literal),
     Ident(String),
     Tuple(Vec<TypedPattern>),
+    Variant {
+        enum_name: String,
+        variant_name: String,
+        payload: Option<Box<TypedPattern>>,
+    },
 }

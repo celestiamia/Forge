@@ -63,6 +63,133 @@ impl LowerCtx<'_> {
         Ok((name, idx))
     }
 
+    pub(super) fn resolve_enum_variant<'a>(
+        &self,
+        ty: &'a ir::Type,
+        field: &str,
+    ) -> Result<(&'a str, i64)> {
+        let struct_name = match ty {
+            ir::Type::Struct(n) => n.as_str(),
+            _ => bail!("variant access on non-struct type: {:?}", ty),
+        };
+        // Synthetic enum structs are named __enum_<EnumName>
+        let enum_name = struct_name.strip_prefix("__enum_").unwrap_or(struct_name);
+        let def = self
+            .enums
+            .get(enum_name)
+            .ok_or_else(|| anyhow::anyhow!("unknown enum: {}", enum_name))?;
+        let variant = def
+            .variants
+            .iter()
+            .find(|v| v.name == field)
+            .ok_or_else(|| anyhow::anyhow!("unknown variant {}.{}", enum_name, field))?;
+        Ok((struct_name, variant.discriminant))
+    }
+
+    /// Lower an enum variant constructor like `Color.Red` into a struct literal
+    /// that sets the tag field to the variant's discriminant.
+    pub(super) fn lower_enum_variant(
+        &mut self,
+        struct_name: &str,
+        discriminant: i64,
+    ) -> Result<ir::Expr> {
+        self.lower_struct_literal_with_tag(struct_name, discriminant, None)
+    }
+
+    pub(super) fn lower_enum_variant_with_payload_ir(
+        &mut self,
+        struct_name: &str,
+        discriminant: i64,
+        payload: ir::Expr,
+    ) -> Result<ir::Expr> {
+        self.lower_struct_literal_with_tag(struct_name, discriminant, Some(payload))
+    }
+
+    /// Check if source integer type can be cast to target integer type
+    /// without data loss concerns (both are integers, possibly different widths).
+    fn is_compatible_integer(&self, source: &ir::Type, target: &ir::Type) -> bool {
+        source.is_integer() && target.is_integer()
+    }
+
+    /// Build a synthetic enum struct on the stack with tag (and optionally payload).
+    fn lower_struct_literal_with_tag(
+        &mut self,
+        struct_name: &str,
+        tag_value: i64,
+        payload: Option<ir::Expr>,
+    ) -> Result<ir::Expr> {
+        let def = self
+            .structs
+            .get(struct_name)
+            .ok_or_else(|| anyhow::anyhow!("unknown enum struct: {}", struct_name))?;
+        let ptr_ty = ir::Type::Ptr(Box::new(ir::Type::Struct(struct_name.to_string())));
+
+        let total_size: usize = def
+            .fields
+            .iter()
+            .map(|(_, ty)| match ty {
+                ir::Type::I8 | ir::Type::U8 | ir::Type::Char | ir::Type::Bool => 1,
+                ir::Type::I16 | ir::Type::U16 => 2,
+                ir::Type::I32 | ir::Type::U32 | ir::Type::F32 => 4,
+                _ => 8,
+            })
+            .sum();
+        let count = total_size.div_ceil(8).max(1);
+
+        let slot_name = self.fresh_temp("$enum");
+        let mut stmts = vec![ir::Stmt::StackAlloc {
+            name: slot_name.clone(),
+            elem_ty: ir::Type::I64,
+            count,
+        }];
+
+        // Store tag (field 0)
+        let var_expr = ir::Expr::new(
+            ir::ExprKind::Var(slot_name.clone()),
+            ptr_ty.clone(),
+        );
+        let gep_tag = ir::Expr::new(
+            ir::ExprKind::Gep {
+                base: Box::new(var_expr.clone()),
+                field: 0,
+            },
+            ir::Type::Ptr(Box::new(ir::Type::I32)),
+        );
+        let lit_tag = ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(tag_value)), ir::Type::I64);
+        let cast_tag = ir::Expr::new(
+            ir::ExprKind::Cast {
+                expr: Box::new(lit_tag),
+                ty: ir::Type::I32,
+            },
+            ir::Type::I32,
+        );
+        stmts.push(ir::Stmt::Assign {
+            lhs: ir::LValue::Deref(gep_tag),
+            rhs: cast_tag,
+        });
+
+        // Store payload (field 1) if present
+        if let Some(payload_expr) = payload {
+            let gep_payload = ir::Expr::new(
+                ir::ExprKind::Gep {
+                    base: Box::new(var_expr),
+                    field: 1,
+                },
+                ir::Type::Ptr(Box::new(payload_expr.ty.clone())),
+            );
+            stmts.push(ir::Stmt::Assign {
+                lhs: ir::LValue::Deref(gep_payload),
+                rhs: payload_expr,
+            });
+        }
+
+        let result_expr = ir::Expr::new(ir::ExprKind::Var(slot_name), ptr_ty.clone());
+        Ok(ir::Expr::new(
+            ir::ExprKind::Block(stmts, Box::new(result_expr)),
+            ptr_ty,
+        ))
+    }
+
     pub(super) fn lower_expr(&mut self, expr: &ast::Expr) -> Result<ir::Expr> {
         match expr {
             ast::Expr::Literal(l) => self.lower_literal_expr(l),
@@ -104,9 +231,7 @@ impl LowerCtx<'_> {
                 ))
             }
             ast::Expr::If(_) => bail!("if-expressions are not supported in the first milestone"),
-            ast::Expr::Block(_) => {
-                bail!("block expressions are not supported in the first milestone")
-            }
+            ast::Expr::Block(b) => self.lower_block_expr(b),
             ast::Expr::Loop(_) => {
                 bail!("loop expressions are not supported in the first milestone")
             }
@@ -162,13 +287,11 @@ impl LowerCtx<'_> {
                 bail!("refmut expressions are not supported in the first milestone")
             }
             ast::Expr::StructLiteral { name, fields } => self.lower_struct_literal(name, fields),
-            ast::Expr::UnsafeBlock(_) => {
-                bail!("unsafe block expressions are not supported in the first milestone")
-            }
+            ast::Expr::UnsafeBlock(b) => self.lower_block_expr(b),
         }
     }
 
-    fn lower_literal_expr(&self, lit: &ast::Literal) -> Result<ir::Expr> {
+    pub(super) fn lower_literal_expr(&self, lit: &ast::Literal) -> Result<ir::Expr> {
         let lit = self.lower_literal(lit)?;
         let ty = match lit {
             ir::Literal::Int(_) => ir::Type::I64,
@@ -183,8 +306,17 @@ impl LowerCtx<'_> {
     }
 
     fn lower_ident(&self, name: &str) -> Result<ir::Expr> {
-        let ty = self.vars.get(name).cloned().unwrap_or(ir::Type::I64);
-        Ok(ir::Expr::new(ir::ExprKind::Var(name.to_string()), ty))
+        if let Some(ty) = self.vars.get(name) {
+            Ok(ir::Expr::new(ir::ExprKind::Var(name.to_string()), ty.clone()))
+        } else if self.enums.contains_key(name) {
+            let struct_name = enum_struct_name(name);
+            Ok(ir::Expr::new(
+                ir::ExprKind::Var(name.to_string()),
+                ir::Type::Struct(struct_name),
+            ))
+        } else {
+            Ok(ir::Expr::new(ir::ExprKind::Var(name.to_string()), ir::Type::I64))
+        }
     }
 
     fn lower_binary(&mut self, b: &ast::BinaryExpr) -> Result<ir::Expr> {
@@ -299,6 +431,54 @@ impl LowerCtx<'_> {
     }
 
     fn lower_call(&mut self, c: &ast::CallExpr) -> Result<ir::Expr> {
+        // Check if this is an enum variant constructor with payload: Color.Some(x)
+        if let ast::Expr::Field(field) = c.callee.as_ref()
+            && let ast::Expr::Ident(enum_name) = field.object.as_ref()
+        {
+            let enum_info = self.enums.get(enum_name).cloned();
+            if let Some(info) = enum_info
+                && let Some(variant) = info.variants.iter().find(|v| v.name == field.field)
+            {
+                if let Some(payload_ty) = &variant.payload {
+                    if c.args.len() != 1 {
+                        bail!("variant `{}` expects 1 argument, got {}", field.field, c.args.len());
+                    }
+                    let struct_name = enum_struct_name(enum_name);
+                    let payload_expr = self.lower_expr(&c.args[0])?;
+                    // Allow integer literals to match any integer type by inserting a cast
+                    let casted_payload = if payload_expr.ty != *payload_ty
+                        && self.is_compatible_integer(&payload_expr.ty, payload_ty)
+                    {
+                        ir::Expr::new(
+                            ir::ExprKind::Cast {
+                                expr: Box::new(payload_expr.clone()),
+                                ty: payload_ty.clone(),
+                            },
+                            payload_ty.clone(),
+                        )
+                    } else if payload_expr.ty != *payload_ty {
+                        bail!(
+                            "variant `{}` payload type mismatch: expected {:?}, got {:?}",
+                            field.field, payload_ty, payload_expr.ty
+                        )
+                    } else {
+                        payload_expr
+                    };
+
+                    // Store the payload type for the struct field
+                    let lowered_payload = casted_payload;
+
+                    return self.lower_enum_variant_with_payload_ir(
+                        &struct_name,
+                        variant.discriminant,
+                        lowered_payload,
+                    );
+                } else {
+                    bail!("variant `{}` has no payload; use `{}`.{} without arguments", field.field, enum_name, field.field);
+                }
+            }
+        }
+
         let name = match c.callee.as_ref() {
             ast::Expr::Ident(n) => n.clone(),
             _ => bail!("only direct function calls are supported in the first milestone"),
@@ -331,6 +511,19 @@ impl LowerCtx<'_> {
 
     fn lower_field(&mut self, f: &ast::FieldExpr) -> Result<ir::Expr> {
         let base = self.lower_expr(&f.object)?;
+
+        // Check if this is an enum variant constructor: Color.Red, Option.Some
+        if let ir::Type::Struct(name) = &base.ty {
+            if name.starts_with("__enum_") {
+                if let Ok((struct_name, discriminant)) =
+                    self.resolve_enum_variant(&base.ty, &f.field)
+                {
+                    let discriminant = discriminant;
+                    return self.lower_enum_variant(struct_name, discriminant);
+                }
+            }
+        }
+
         let (struct_name, idx) = self.resolve_field(&base.ty, &f.field)?;
         let struct_ty = ir::Type::Struct(struct_name.clone());
         let ptr_ty = ir::Type::Ptr(Box::new(struct_ty.clone()));
@@ -381,6 +574,54 @@ impl LowerCtx<'_> {
             ast::Literal::Bool(b) => Ok(ir::Literal::Bool(*b)),
             ast::Literal::Null => Ok(ir::Literal::Null),
         }
+    }
+
+    /// Lower a block expression `{ ...; trailing }` or `unsafe { ...; trailing }`.
+    ///
+    /// Mirrors the pattern used by `lower_match_case_value`: split the block
+    /// into prefix statements and a trailing statement.  If the last statement
+    /// is an expression, it becomes the block's value; otherwise the block's
+    /// value is `void` (a null literal).  Nested `Block` trailers (e.g. from
+    /// struct/tuple literals) are flattened so the resulting `ir::ExprKind::Block`
+    /// is single-level, matching what the codegen and `lower_binding` expect.
+    fn lower_block_expr(&mut self, block: &ast::Block) -> Result<ir::Expr> {
+        let mut stmts = Vec::new();
+
+        if block.stmts.is_empty() {
+            let trailing = ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Null), ir::Type::Void);
+            return Ok(ir::Expr::new(
+                ir::ExprKind::Block(stmts, Box::new(trailing)),
+                ir::Type::Void,
+            ));
+        }
+
+        let (last, prefix) = block.stmts.split_last().unwrap();
+        for s in prefix {
+            stmts.extend(self.lower_stmt(s)?);
+        }
+
+        let trailing = match last {
+            ast::Stmt::Expr(e) => {
+                let expr = self.lower_expr(e)?;
+                match expr.kind {
+                    ir::ExprKind::Block(inner, result) => {
+                        stmts.extend(inner);
+                        *result
+                    }
+                    _ => expr,
+                }
+            }
+            _ => {
+                stmts.extend(self.lower_stmt(last)?);
+                ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Null), ir::Type::Void)
+            }
+        };
+
+        let ty = trailing.ty.clone();
+        Ok(ir::Expr::new(
+            ir::ExprKind::Block(stmts, Box::new(trailing)),
+            ty,
+        ))
     }
 
     pub(super) fn lower_binop(&self, op: ast::BinOp) -> Result<ir::BinOp> {

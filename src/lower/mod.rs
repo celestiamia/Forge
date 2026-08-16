@@ -19,11 +19,16 @@ pub fn lower(module: &ast::Module, hosted: bool) -> Result<ir::Program> {
     ctx.lower_module(module)
 }
 
+fn enum_struct_name(enum_name: &str) -> String {
+    format!("__enum_{}", enum_name)
+}
+
 struct LowerCtx<'a> {
     #[allow(dead_code)]
     module: &'a ast::Module,
     hosted: bool,
     structs: HashMap<String, ir::StructDef>,
+    enums: HashMap<String, ir::EnumDef>,
     funcs: HashMap<String, (Vec<ir::Type>, ir::Type)>,
     externs: HashMap<String, (Vec<ir::Type>, ir::Type)>,
     vars: HashMap<String, ir::Type>,
@@ -39,6 +44,7 @@ impl<'a> LowerCtx<'a> {
             module,
             hosted,
             structs: HashMap::new(),
+            enums: HashMap::new(),
             funcs: HashMap::new(),
             externs: HashMap::new(),
             vars: HashMap::new(),
@@ -81,6 +87,50 @@ impl<'a> LowerCtx<'a> {
                         fields,
                     },
                 );
+            }
+        }
+        // Register enums, creating synthetic struct layouts for each. Enums are
+        // collected before function signatures below so that enum types can
+        // appear in parameter/return annotations (mirroring struct registration).
+        for item in &module.items {
+            if let ast::Item::Enum(e) = item {
+                if !e.generics.is_empty() {
+                    bail!("generic enum `{}` is not supported yet", e.name);
+                }
+                let struct_name = enum_struct_name(&e.name);
+                let payload_ty = e.variants.iter().filter_map(|v| v.payload.as_ref()).next();
+                let has_payload = payload_ty.is_some();
+                let mut fields = Vec::new();
+                fields.push(("tag".to_string(), ir::Type::I32));
+                if has_payload {
+                    let payload_ir = self.lower_type(payload_ty.unwrap())?;
+                    fields.push(("payload".to_string(), payload_ir));
+                }
+                self.structs.insert(
+                    struct_name.clone(),
+                    ir::StructDef {
+                        name: struct_name.clone(),
+                        fields: fields.clone(),
+                    },
+                );
+                let variants: Vec<ir::EnumVariant> = e
+                    .variants
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| ir::EnumVariant {
+                        name: v.name.clone(),
+                        discriminant: i as i64,
+                        payload: v.payload.as_ref().map(|t| self.lower_type(t)).transpose().ok().flatten(),
+                    })
+                    .collect();
+                self.enums.insert(
+                    e.name.clone(),
+                    ir::EnumDef {
+                        name: e.name.clone(),
+                        variants,
+                    },
+                );
+                self.vars.insert(e.name.clone(), ir::Type::Struct(struct_name.clone()));
             }
         }
         for item in &module.items {
@@ -266,10 +316,12 @@ impl<'a> LowerCtx<'a> {
         }
 
         let structs: Vec<ir::StructDef> = self.structs.values().cloned().collect();
+        let enums: Vec<ir::EnumDef> = self.enums.values().cloned().collect();
 
         Ok(ir::Program {
             name: module.package.clone(),
             structs,
+            enums,
             globals,
             externs,
             funcs,
@@ -305,6 +357,9 @@ impl<'a> LowerCtx<'a> {
                 other => {
                     if self.structs.contains_key(other) {
                         Ok(ir::Type::Struct(other.to_string()))
+                    } else if self.enums.contains_key(other) {
+                        let struct_name = enum_struct_name(other);
+                        Ok(ir::Type::Struct(struct_name))
                     } else {
                         bail!("unknown type: {}", other)
                     }

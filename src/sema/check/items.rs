@@ -503,6 +503,41 @@ impl Context {
                     ));
                 }
             }
+            Pattern::Variant {
+                enum_name,
+                variant_name,
+                payload,
+            } => {
+                let info = match self.adts.get(enum_name) {
+                    Some(i) if i.kind == AdtKind::Enum => i.clone(),
+                    _ => {
+                        self.error(format!("`{}` is not an enum", enum_name));
+                        return;
+                    }
+                };
+                let variant = info
+                    .variants
+                    .iter()
+                    .find(|v| v.name == *variant_name);
+                if variant.is_none() {
+                    self.error(format!(
+                        "enum `{}` has no variant `{}`",
+                        enum_name, variant_name
+                    ));
+                }
+                if let Some(p) = payload {
+                    if let Some(v) = variant {
+                        if let Some(payload_ty) = &v.payload {
+                            self.check_pattern(p, payload_ty, mutable);
+                        } else {
+                            self.error(format!(
+                                "variant `{}` of enum `{}` has no payload to bind",
+                                variant_name, enum_name
+                            ));
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -514,6 +549,15 @@ impl Context {
             Pattern::Tuple(pats) => {
                 TypedPattern::Tuple(pats.iter().map(|p| self.lower_pattern(p)).collect())
             }
+            Pattern::Variant {
+                enum_name,
+                variant_name,
+                payload,
+            } => TypedPattern::Variant {
+                enum_name: enum_name.clone(),
+                variant_name: variant_name.clone(),
+                payload: payload.as_ref().map(|p| Box::new(self.lower_pattern(p))),
+            },
         }
     }
 
@@ -529,5 +573,16 @@ fn pattern_binding_name(pat: &Pattern) -> String {
         }
         Pattern::Wildcard => "_".to_string(),
         Pattern::Literal(_) => "<literal>".to_string(),
+        Pattern::Variant {
+            enum_name,
+            variant_name,
+            payload,
+        } => {
+            if let Some(p) = payload {
+                format!("{}.{}({})", enum_name, variant_name, pattern_binding_name(p))
+            } else {
+                format!("{}.{}", enum_name, variant_name)
+            }
+        }
     }
 }

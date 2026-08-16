@@ -1367,3 +1367,75 @@ fn tuple16_dev_compiles_and_runs() {
         stdout
     );
 }
+
+#[test]
+fn block_expr_dev_compiles_and_runs() {
+    let bin = compile_example("block_expr");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run block_expr binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout, "block expr ok\n",
+        "block_expr produced unexpected output"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(126),
+        "block_expr should exit with code 126 (84 + 42)"
+    );
+}
+
+#[test]
+fn block_expr_dev_compiles_and_runs_x86_32() {
+    let bin = compile_example_with_target("block_expr", "x86_32-unknown-linux-gnu");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run block_expr (x86_32) binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout, "block expr ok\n",
+        "block_expr (x86_32) produced unexpected output"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(126),
+        "block_expr (x86_32) should exit with code 126 (84 + 42)"
+    );
+}
+
+#[test]
+fn enum_dev_compiles_and_runs() {
+    let bin = compile_example("enum");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run enum binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout, "green\nsome\nenum ok\n",
+        "enum produced unexpected output"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(44),
+        "enum should exit with code 44 (2 + 42)"
+    );
+}
+
+#[test]
+fn enum_dev_compiles_and_runs_x86_32() {
+    let bin = compile_example_with_target("enum", "x86_32-unknown-linux-gnu");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run enum (x86_32) binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout, "green\nsome\nenum ok\n",
+        "enum (x86_32) produced unexpected output"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(44),
+        "enum (x86_32) should exit with code 44 (2 + 42)"
+    );
+}

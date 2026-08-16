@@ -22,7 +22,6 @@ compiler:
 
 | Construct | Status |
 |-----------|--------|
-| `enum` — variants (`Color.Red`, `Red`, `case Red:`) | Declaration compiles; variants cannot be referenced or matched |
 | `union` | "not a struct type" error; no codegen |
 | Tuples `(a, b)` (type annotations, literals, return types) | Fails at lowering: "tuples are not supported in the first milestone" |
 | Tuple destructuring `let (a, b) = t` | Parse error |
@@ -32,7 +31,7 @@ compiler:
 | `refmut[T]` / `&mut x` | `&mut` is not parsed; `refmut` annotations cannot be satisfied |
 | `own[T]` | Type annotation parses, but there is no `own(...)` constructor |
 | Byte-string literals `b"bytes"` | Not supported |
-| Block expressions `let x = { ... }` | Error: "block expressions are not supported in the first milestone" |
+| Block expressions `let x = { ... }` | Supported end-to-end |
 | `@export`, `@inline`, `@noreturn`, `@naked` | Unknown attribute errors (only `@freestanding`, `@packed`, `@align`, `@c_enum`, `@extern` are accepted) |
 | `@packed`, `@align(N)`, `@c_enum` | Accepted but have **no effect** on layout or codegen yet |
 | Compound assignment `+=`, `-=`, etc. | Parse error — write `x = x + 1` |

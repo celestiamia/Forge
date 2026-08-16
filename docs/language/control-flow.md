@@ -111,8 +111,10 @@ match c:
     case _: puts("other")
 ```
 
-Patterns beyond literals and `_` (variable bindings, guards, struct/enum
-patterns) are not supported yet.
+Enum variant patterns are supported: `case Color.Red:` matches a unit variant,
+and `case Option.Some(x):` destructures a payload variant, binding `x`. Variable
+bindings outside of enum payloads, guards, and struct patterns are not supported
+yet.
 
 ## Return
 
@@ -139,6 +141,38 @@ Unsafe is required for:
 - Pointer arithmetic (`p + n`, `p - q`)
 
 Keep unsafe blocks minimal and document why they are safe.
+
+## Block Expressions
+
+Braces can also be used as an expression that evaluates to the value of its
+trailing statement:
+
+```dev
+var x: int32 = {
+    var a = 6
+    var b = 7
+    a * b       # trailing expression — this is the block's value
+}
+```
+
+- The block can contain `let`/`var` bindings, `if`/`while`/`for`, `match`, and
+  `return`
+- The trailing expression (the last statement if it is an expression) is the
+  block's value
+- If the last statement is not an expression (e.g. `return`, `let`), the block's
+  value is `void`
+- `unsafe` blocks work the same way as expressions: `puts(unsafe { ... })`
+- Nested block expressions are supported
+
+```dev
+var result = {
+    var inner = {
+        var n = 3
+        n + 1      # inner block's value
+    }
+    inner * 10     # outer block's value
+}
+```
 
 ## Panic / Abort
 

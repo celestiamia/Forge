@@ -83,6 +83,8 @@ pub struct Program {
     #[allow(dead_code)]
     pub name: String,
     pub structs: Vec<StructDef>,
+    #[allow(dead_code)]
+    pub enums: Vec<EnumDef>,
     pub globals: Vec<Global>,
     pub externs: Vec<ExternFunc>,
     pub funcs: Vec<Func>,
@@ -138,6 +140,20 @@ impl StructDef {
     pub fn field_type(&self, name: &str) -> Option<&Type> {
         self.fields.iter().find(|(n, _)| n == name).map(|(_, t)| t)
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct EnumDef {
+    #[allow(dead_code)]
+    pub name: String,
+    pub variants: Vec<EnumVariant>,
+}
+
+#[derive(Clone, Debug)]
+pub struct EnumVariant {
+    pub name: String,
+    pub discriminant: i64,
+    pub payload: Option<Type>,
 }
 
 #[derive(Clone, Debug)]

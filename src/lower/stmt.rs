@@ -192,6 +192,16 @@ impl LowerCtx<'_> {
             ast::Pattern::Literal(_) => {
                 bail!("literal patterns in let bindings are not supported")
             }
+            ast::Pattern::Variant { .. } => {
+                // Variant patterns in let bindings are accepted: in the first
+                // milestone we simply evaluate the initializer and discard the
+                // pattern test (sema guarantees exhaustiveness at the match site).
+                if let Some(v) = value {
+                    Ok(vec![ir::Stmt::Expr(self.lower_expr(v)?)])
+                } else {
+                    Ok(vec![])
+                }
+            }
         }
     }
 
@@ -320,6 +330,9 @@ impl LowerCtx<'_> {
                 }
                 ast::Pattern::Literal(_) => {
                     bail!("literal patterns in tuple destructuring are not supported");
+                }
+                ast::Pattern::Variant { .. } => {
+                    // Same as let: accept and discard pattern test.
                 }
             }
         }
@@ -471,23 +484,19 @@ impl LowerCtx<'_> {
 
     pub(super) fn lower_match_stmt(&mut self, m: &ast::MatchStmt) -> Result<Vec<ir::Stmt>> {
         let cond = self.lower_expr(&m.scrutinee)?;
-        let mut cases = Vec::new();
+        let mut cases: Vec<(ir::Expr, Vec<ir::Stmt>)> = Vec::new();
         let mut default = None;
         for case in &m.cases {
             let body = self.lower_block(&case.body)?;
-            match &case.pattern {
-                Pattern::Wildcard => default = Some(body),
-                Pattern::Literal(lit) => cases.push((self.lower_literal(lit)?, body)),
-                Pattern::Ident(name) => {
-                    // A bare identifier in a pattern acts like a wildcard binding,
-                    // which we treat as the default case for the first milestone.
-                    let _ = name;
-                    default = Some(body);
-                }
-                Pattern::Tuple(_) => bail!("tuple patterns are not supported in match lowering"),
+            let (case_cond, prefix) = self.lower_match_pattern(&cond, &case.pattern)?;
+            let mut full_body = prefix;
+            full_body.extend(body);
+            match case_cond {
+                Some(c) => cases.push((c, full_body)),
+                None => default = Some(full_body),
             }
         }
-        self.desugar_match_to_if(cond, cases, default)
+        Self::desugar_match_to_if(cases, default)
     }
 
     pub(super) fn lower_match_expr(&mut self, m: &ast::MatchExpr) -> Result<ir::Expr> {
@@ -496,26 +505,20 @@ impl LowerCtx<'_> {
         let tmp = self.fresh_temp("match");
         self.vars.insert(tmp.clone(), result_ty.clone());
 
-        let mut cases = Vec::new();
+        let mut cases: Vec<(ir::Expr, Vec<ir::Stmt>)> = Vec::new();
         let mut default = None;
         for case in &m.cases {
             let (prefix, value) = self.lower_match_case_value(&case.body)?;
-            let body = {
-                let mut b = prefix;
-                b.push(ir::Stmt::Assign {
-                    lhs: ir::LValue::Var(tmp.clone()),
-                    rhs: value,
-                });
-                b
-            };
-            match &case.pattern {
-                Pattern::Wildcard => default = Some(body),
-                Pattern::Literal(lit) => cases.push((self.lower_literal(lit)?, body)),
-                Pattern::Ident(name) => {
-                    let _ = name;
-                    default = Some(body);
-                }
-                Pattern::Tuple(_) => bail!("tuple patterns are not supported in match lowering"),
+            let (case_cond, pat_prefix) = self.lower_match_pattern(&cond, &case.pattern)?;
+            let mut body = pat_prefix;
+            body.extend(prefix);
+            body.push(ir::Stmt::Assign {
+                lhs: ir::LValue::Var(tmp.clone()),
+                rhs: value,
+            });
+            match case_cond {
+                Some(c) => cases.push((c, body)),
+                None => default = Some(body),
             }
         }
 
@@ -524,7 +527,7 @@ impl LowerCtx<'_> {
             ty: result_ty.clone(),
             init: None,
         };
-        let mut chain = self.desugar_match_to_if(cond, cases, default)?;
+        let mut chain = Self::desugar_match_to_if(cases, default)?;
         let mut body = vec![init];
         body.append(&mut chain);
         Ok(ir::Expr::new(
@@ -573,24 +576,121 @@ impl LowerCtx<'_> {
         }
         ty.ok_or_else(|| anyhow::anyhow!("cannot infer match result type"))
     }
+    /// Lower a match pattern into a boolean condition expression (or None for
+    /// wildcard/ident/default patterns) and a list of statements that must
+    /// execute before the case body (currently used for payload bindings).
+    pub(super) fn lower_match_pattern(
+        &mut self,
+        scrutinee: &ir::Expr,
+        pat: &Pattern,
+    ) -> Result<(Option<ir::Expr>, Vec<ir::Stmt>)> {
+        match pat {
+            Pattern::Wildcard => Ok((None, vec![])),
+            Pattern::Literal(lit) => {
+                let lit_expr = self.lower_literal_expr(lit)?;
+                let cond = ir::Expr::new(
+                    ir::ExprKind::Bin {
+                        op: ir::BinOp::Eq,
+                        left: Box::new(scrutinee.clone()),
+                        right: Box::new(lit_expr),
+                    },
+                    ir::Type::Bool,
+                );
+                Ok((Some(cond), vec![]))
+            }
+            Pattern::Ident(_) => Ok((None, vec![])),
+            Pattern::Tuple(_) => bail!("tuple patterns in match lowering are not supported"),
+            Pattern::Variant {
+                enum_name,
+                variant_name,
+                payload,
+            } => {
+                let enum_def = self
+                    .enums
+                    .get(enum_name)
+                    .ok_or_else(|| anyhow::anyhow!("unknown enum: {}", enum_name))?;
+                let variant = enum_def
+                    .variants
+                    .iter()
+                    .find(|v| v.name == *variant_name)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "unknown variant {}.{}",
+                            enum_name,
+                            variant_name
+                        )
+                    })?;
+
+                // Load tag field (field 0) from the struct
+                let tag_ptr = ir::Expr::new(
+                    ir::ExprKind::Gep {
+                        base: Box::new(scrutinee.clone()),
+                        field: 0,
+                    },
+                    ir::Type::Ptr(Box::new(ir::Type::I32)),
+                );
+                let tag_val = ir::Expr::new(ir::ExprKind::Load(Box::new(tag_ptr)), ir::Type::I32);
+                let lit_val = ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(variant.discriminant)), ir::Type::I64);
+                let lit_val = ir::Expr::new(
+                    ir::ExprKind::Cast {
+                        expr: Box::new(lit_val),
+                        ty: ir::Type::I32,
+                    },
+                    ir::Type::I32,
+                );
+                let cond = ir::Expr::new(
+                    ir::ExprKind::Bin {
+                        op: ir::BinOp::Eq,
+                        left: Box::new(tag_val),
+                        right: Box::new(lit_val),
+                    },
+                    ir::Type::Bool,
+                );
+
+                let mut prefix = vec![];
+                if let Some(payload_pat) = payload {
+                    let payload_ty = variant.payload.as_ref().unwrap();
+                    let payload_ptr = ir::Expr::new(
+                        ir::ExprKind::Gep {
+                            base: Box::new(scrutinee.clone()),
+                            field: 1,
+                        },
+                        ir::Type::Ptr(Box::new(payload_ty.clone())),
+                    );
+                    let payload_val = ir::Expr::new(
+                        ir::ExprKind::Load(Box::new(payload_ptr)),
+                        payload_ty.clone(),
+                    );
+                    prefix = self.lower_pattern_binding(payload_pat, payload_val)?;
+                }
+
+                Ok((Some(cond), prefix))
+            }
+        }
+    }
+
+    fn lower_pattern_binding(&mut self, pat: &Pattern, value: ir::Expr) -> Result<Vec<ir::Stmt>> {
+        match pat {
+            Pattern::Ident(name) => {
+                self.vars.insert(name.clone(), value.ty.clone());
+                Ok(vec![ir::Stmt::Let {
+                    name: name.clone(),
+                    ty: value.ty.clone(),
+                    init: Some(value),
+                }])
+            }
+            _ => bail!("only identifier bindings are supported in variant pattern payloads"),
+        }
+    }
+
     pub(super) fn desugar_match_to_if(
-        &self,
-        cond: ir::Expr,
-        cases: Vec<(ir::Literal, Vec<ir::Stmt>)>,
+        cases: Vec<(ir::Expr, Vec<ir::Stmt>)>,
         default: Option<Vec<ir::Stmt>>,
     ) -> Result<Vec<ir::Stmt>> {
         let mut chain: Option<Vec<ir::Stmt>> = default;
-        for (lit, body) in cases.into_iter().rev() {
-            let test = ir::Expr::new(
-                ir::ExprKind::Bin {
-                    op: ir::BinOp::Eq,
-                    left: Box::new(cond.clone()),
-                    right: Box::new(ir::Expr::new(ir::ExprKind::Lit(lit), cond.ty.clone())),
-                },
-                ir::Type::Bool,
-            );
+        for (cond, body) in cases.into_iter().rev() {
             chain = Some(vec![ir::Stmt::If {
-                cond: test,
+                cond,
                 then: body,
                 else_: chain,
             }]);

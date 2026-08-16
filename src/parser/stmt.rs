@@ -198,7 +198,21 @@ impl Parser {
             Token::Ident(name) => {
                 let name = name.clone();
                 self.advance();
-                if self.eat(&Token::LParen) {
+                if self.eat(&Token::Dot) {
+                    let variant = self.expect_ident()?;
+                    let payload = if self.eat(&Token::LParen) {
+                        let pat = self.parse_pattern()?;
+                        self.expect(Token::RParen)?;
+                        Some(Box::new(pat))
+                    } else {
+                        None
+                    };
+                    Ok(Pattern::Variant {
+                        enum_name: name,
+                        variant_name: variant,
+                        payload,
+                    })
+                } else if self.eat(&Token::LParen) {
                     let mut pats = vec![Pattern::Ident(name)];
                     if !self.eat(&Token::RParen) {
                         loop {

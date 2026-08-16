@@ -178,6 +178,23 @@ var a = [1, 2, 3]
 a[1] = 5
 ```
 
+### Block Expressions
+
+A brace-enclosed sequence of statements that evaluates to the value of its
+trailing expression:
+
+```dev
+var x: int32 = {
+    var a = 6
+    var b = 7
+    a * b
+}
+```
+
+Can be used anywhere an expression is expected — as initializers, function
+arguments, conditions, etc.  `unsafe` blocks work the same way as expressions.
+See [Control Flow](control-flow.md#block-expressions) for details.
+
 ## Statements
 
 ### If / Elif / Else
@@ -293,10 +310,17 @@ enum Color:
     Red
     Green
     Blue
+
+enum Option:
+    None
+    Some(int32)
 ```
 
-Enums are currently **declaration-only**: variants cannot be referenced or
-matched yet (see [Known Issues](known-issues.md)).
+Variants are constructed by field access on the enum type: `Color.Red`,
+`Option.Some(42)`. They can be matched with `match`/`case`; payload variants
+destructure their payload (`case Option.Some(x):`). See
+[Control Flow › Match Expression](control-flow.md#match-expression) and
+[Type System › Enums](types.md#enums--unions).
 
 ### Attributes
 

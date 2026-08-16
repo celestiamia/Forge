@@ -300,6 +300,39 @@ def identity[T](x: T) -> T:
     }
 
     #[test]
+    fn block_expr_runs() {
+        let src = r#"
+package test
+
+pub def main() -> int32:
+    var x: int32 = {
+        var a = 6
+        var b = 7
+        a * b
+    }
+    return x
+"#;
+        let dir = tempfile::tempdir().unwrap();
+        let source = write_temp_dev(&dir, "block_expr", src);
+        let output = dir.path().join("block_expr");
+        let out = compile(CompileOptions {
+            source,
+            output,
+            target: Some("x86_64-unknown-linux-gnu".to_string()),
+            freestanding: false,
+            linker: None,
+        })
+        .unwrap();
+        thread::sleep(Duration::from_millis(10));
+        let status = Command::new(&out).status().unwrap();
+        assert_eq!(
+            status.code(),
+            Some(42),
+            "block expression should evaluate to 6*7 = 42"
+        );
+    }
+
+    #[test]
     fn int128_is_a_clean_error() {
         let dir = tempfile::tempdir().unwrap();
         let src = r#"

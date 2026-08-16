@@ -96,9 +96,14 @@ enum Color:
     Blue
 ```
 
-`enum` and `union` declarations are accepted by the parser and type checker,
-but enum variants cannot be referenced and unions cannot be constructed —
-neither has codegen support. See [Known Issues](known-issues.md).
+`enum` declarations are fully supported. Variants can be constructed
+(`Color.Red`, `Option.Some(42)`), matched on with `match`/`case`, and
+destructured to bind payload values (`case Option.Some(x):`). See
+[Control Flow › Match Expression](control-flow.md#match-expression) for details.
+
+`union` declarations are accepted by the parser and type checker, but cannot be
+constructed — codegen support is not yet implemented. See
+[Known Issues](known-issues.md).
 
 ## Type Inference
 
