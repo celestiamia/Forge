@@ -998,7 +998,7 @@ impl Context {
         let mut covered: HashSet<String> = HashSet::new();
         let mut has_wildcard = false;
         for case in cases {
-             match &case.pattern {
+            match &case.pattern {
                 TypedPattern::Wildcard => has_wildcard = true,
                 TypedPattern::Ident(name) => {
                     if info.variants.iter().any(|v| &v.name == name) {

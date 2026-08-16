@@ -515,10 +515,7 @@ impl Context {
                         return;
                     }
                 };
-                let variant = info
-                    .variants
-                    .iter()
-                    .find(|v| v.name == *variant_name);
+                let variant = info.variants.iter().find(|v| v.name == *variant_name);
                 if variant.is_none() {
                     self.error(format!(
                         "enum `{}` has no variant `{}`",
@@ -579,7 +576,12 @@ fn pattern_binding_name(pat: &Pattern) -> String {
             payload,
         } => {
             if let Some(p) = payload {
-                format!("{}.{}({})", enum_name, variant_name, pattern_binding_name(p))
+                format!(
+                    "{}.{}({})",
+                    enum_name,
+                    variant_name,
+                    pattern_binding_name(p)
+                )
             } else {
                 format!("{}.{}", enum_name, variant_name)
             }

@@ -115,10 +115,7 @@ impl<'p> CodeGen<'p> {
     /// size.  Returns `None` for void/unsized types.
     pub(super) fn value_size(&self, ty: &Type) -> Option<usize> {
         match ty {
-            Type::Struct(name) => self
-                .struct_layouts
-                .get(name)
-                .map(|l| l.size.max(4)),
+            Type::Struct(name) => self.struct_layouts.get(name).map(|l| l.size.max(4)),
             _ => Some(type_size(ty, &self.struct_layouts).max(4)),
         }
     }
@@ -130,10 +127,8 @@ impl<'p> CodeGen<'p> {
         let mut offset = 0i32;
         let mut remaining = size;
         while remaining >= 4 {
-            self.asm
-                .mov(Reg::Ecx, Mem::base_disp(src, offset))?;
-            self.asm
-                .store32(Mem::base_disp(dst, offset), Reg::Ecx)?;
+            self.asm.mov(Reg::Ecx, Mem::base_disp(src, offset))?;
+            self.asm.store32(Mem::base_disp(dst, offset), Reg::Ecx)?;
             offset += 4;
             remaining -= 4;
         }

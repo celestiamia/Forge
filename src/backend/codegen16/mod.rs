@@ -17,11 +17,7 @@ pub(super) use crate::backend::ir::{
 /// The returned bytes are the raw machine code and data; the caller is
 /// responsible for padding to a boot sector and appending the signature.
 pub fn compile_program(prog: &Program) -> Result<Vec<u8>> {
-    let load_base = prog
-        .config
-        .as_ref()
-        .map(|c| c.load_base)
-        .unwrap_or(0x7C00);
+    let load_base = prog.config.as_ref().map(|c| c.load_base).unwrap_or(0x7C00);
     let mut cg = CodeGen16::new(prog, load_base);
     cg.emit_program()?;
     cg.finish()

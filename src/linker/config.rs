@@ -150,9 +150,7 @@ impl LinkerConfig {
                 self.format.as_str()
             );
         }
-        if self.arch == "x86_16"
-            && !matches!(self.format, OutputFormat::Flat | OutputFormat::Raw)
-        {
+        if self.arch == "x86_16" && !matches!(self.format, OutputFormat::Flat | OutputFormat::Raw) {
             anyhow::bail!(
                 "ARCH x86_16 requires FORMAT flat or raw (got {})",
                 self.format.as_str()

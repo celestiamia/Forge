@@ -34,9 +34,8 @@ impl<'p> CodeGen16<'p> {
                 funcs.push(f);
             }
         }
-        let start = start.ok_or_else(|| {
-            anyhow!("flat binary boot target requires a {} function", entry_name)
-        })?;
+        let start = start
+            .ok_or_else(|| anyhow!("flat binary boot target requires a {} function", entry_name))?;
 
         let start_lab = self.asm.new_label();
         self.func_labels.insert(entry_name.to_string(), start_lab);

@@ -144,10 +144,7 @@ impl LowerCtx<'_> {
         }];
 
         // Store tag (field 0)
-        let var_expr = ir::Expr::new(
-            ir::ExprKind::Var(slot_name.clone()),
-            ptr_ty.clone(),
-        );
+        let var_expr = ir::Expr::new(ir::ExprKind::Var(slot_name.clone()), ptr_ty.clone());
         let gep_tag = ir::Expr::new(
             ir::ExprKind::Gep {
                 base: Box::new(var_expr.clone()),
@@ -155,7 +152,10 @@ impl LowerCtx<'_> {
             },
             ir::Type::Ptr(Box::new(ir::Type::I32)),
         );
-        let lit_tag = ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(tag_value)), ir::Type::I64);
+        let lit_tag = ir::Expr::new(
+            ir::ExprKind::Lit(ir::Literal::Int(tag_value)),
+            ir::Type::I64,
+        );
         let cast_tag = ir::Expr::new(
             ir::ExprKind::Cast {
                 expr: Box::new(lit_tag),
@@ -307,7 +307,10 @@ impl LowerCtx<'_> {
 
     fn lower_ident(&self, name: &str) -> Result<ir::Expr> {
         if let Some(ty) = self.vars.get(name) {
-            Ok(ir::Expr::new(ir::ExprKind::Var(name.to_string()), ty.clone()))
+            Ok(ir::Expr::new(
+                ir::ExprKind::Var(name.to_string()),
+                ty.clone(),
+            ))
         } else if self.enums.contains_key(name) {
             let struct_name = enum_struct_name(name);
             Ok(ir::Expr::new(
@@ -315,7 +318,10 @@ impl LowerCtx<'_> {
                 ir::Type::Struct(struct_name),
             ))
         } else {
-            Ok(ir::Expr::new(ir::ExprKind::Var(name.to_string()), ir::Type::I64))
+            Ok(ir::Expr::new(
+                ir::ExprKind::Var(name.to_string()),
+                ir::Type::I64,
+            ))
         }
     }
 
@@ -441,7 +447,11 @@ impl LowerCtx<'_> {
             {
                 if let Some(payload_ty) = &variant.payload {
                     if c.args.len() != 1 {
-                        bail!("variant `{}` expects 1 argument, got {}", field.field, c.args.len());
+                        bail!(
+                            "variant `{}` expects 1 argument, got {}",
+                            field.field,
+                            c.args.len()
+                        );
                     }
                     let struct_name = enum_struct_name(enum_name);
                     let payload_expr = self.lower_expr(&c.args[0])?;
@@ -459,7 +469,9 @@ impl LowerCtx<'_> {
                     } else if payload_expr.ty != *payload_ty {
                         bail!(
                             "variant `{}` payload type mismatch: expected {:?}, got {:?}",
-                            field.field, payload_ty, payload_expr.ty
+                            field.field,
+                            payload_ty,
+                            payload_expr.ty
                         )
                     } else {
                         payload_expr
@@ -474,7 +486,12 @@ impl LowerCtx<'_> {
                         lowered_payload,
                     );
                 } else {
-                    bail!("variant `{}` has no payload; use `{}`.{} without arguments", field.field, enum_name, field.field);
+                    bail!(
+                        "variant `{}` has no payload; use `{}`.{} without arguments",
+                        field.field,
+                        enum_name,
+                        field.field
+                    );
                 }
             }
         }

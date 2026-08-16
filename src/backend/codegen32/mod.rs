@@ -439,8 +439,10 @@ impl<'p> CodeGen<'p> {
         }
         for (i, (name, _ty)) in f.params.iter().enumerate() {
             let slot = self.locals.get(name).unwrap();
-            self.asm
-                .mov(Reg::Eax, Mem::base_disp(Reg::Ebp, (8 + arg0 + i * 4) as i32))?;
+            self.asm.mov(
+                Reg::Eax,
+                Mem::base_disp(Reg::Ebp, (8 + arg0 + i * 4) as i32),
+            )?;
             self.asm
                 .mov(Mem::base_disp(Reg::Ebp, slot.offset), Reg::Eax)?;
         }
@@ -550,10 +552,7 @@ impl<'p> CodeGen<'p> {
                 self.asm.jmp(self.ret_label)?;
             }
             Stmt::Return(Some(e)) => {
-                if self.sret
-                    && matches!(&e.ty, Type::Struct(_))
-                    && !Self::is_enum_struct(&e.ty)
-                {
+                if self.sret && matches!(&e.ty, Type::Struct(_)) && !Self::is_enum_struct(&e.ty) {
                     // i386 sret: write the struct into `*[EBP+8]` and return
                     // that caller-allocated pointer in EAX.
                     self.eval_expr(e)?; // source address in EAX
@@ -563,13 +562,11 @@ impl<'p> CodeGen<'p> {
                     // copy from [*EAX] into *[EBP+8] (the caller-allocated sret slot)
                     self.asm
                         .mov(Reg::Esi, Mem::base_disp(Reg::Ebp, self.addr_tmp))?;
-                    self.asm
-                        .mov(Reg::Edi, Mem::base_disp(Reg::Ebp, 8))?;
+                    self.asm.mov(Reg::Edi, Mem::base_disp(Reg::Ebp, 8))?;
                     self.copy_mem_to_mem(Reg::Edi, Reg::Esi, size)?;
                     // i386 ABI: return the caller-allocated pointer (arg0)
                     // that the struct was written into.
-                    self.asm
-                        .mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 8))?;
+                    self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, 8))?;
                 } else {
                     self.eval_expr(e)?;
                 }

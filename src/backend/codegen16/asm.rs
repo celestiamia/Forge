@@ -154,9 +154,8 @@ impl Encoder {
 
         // Rebuild the buffer, inserting each widened patch in place of its
         // 2-byte original.  Patch bodies need the shifted target offsets.
-        let mut out: Vec<u8> = Vec::with_capacity(
-            self.bytes.len() + widened.iter().map(|(_, d)| *d).sum::<usize>(),
-        );
+        let mut out: Vec<u8> =
+            Vec::with_capacity(self.bytes.len() + widened.iter().map(|(_, d)| *d).sum::<usize>());
         {
             let mut sites: Vec<(usize, usize)> = widened.clone();
             sites.sort_unstable();
@@ -220,7 +219,8 @@ impl Encoder {
                 .labels
                 .get(lab)
                 .ok_or_else(|| anyhow!("undefined imm16 label {}", lab))?;
-            let addr = (u32::from(self.load_base) + (target + delta_before(target, &widened)) as u32) as u16;
+            let addr = (u32::from(self.load_base)
+                + (target + delta_before(target, &widened)) as u32) as u16;
             let p = off + delta_before(*off, &widened);
             out[p..p + 2].copy_from_slice(&addr.to_le_bytes());
         }

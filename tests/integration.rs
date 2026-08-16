@@ -512,8 +512,7 @@ fn kernel_dev_compiles_and_runs() {
         return;
     }
 
-    let out_dir =
-        std::env::temp_dir().join(format!("forge_kernel_test_{}", std::process::id()));
+    let out_dir = std::env::temp_dir().join(format!("forge_kernel_test_{}", std::process::id()));
     let _ = fs::create_dir_all(&out_dir);
     let bin = out_dir.join("kernel");
 
@@ -575,7 +574,11 @@ fn os_dev_boots_shell_and_calc() {
         eprintln!("Skipping OS test: qemu-system-x86_64 not found");
         return;
     }
-    if std::process::Command::new("socat").arg("-V").output().is_err() {
+    if std::process::Command::new("socat")
+        .arg("-V")
+        .output()
+        .is_err()
+    {
         eprintln!("Skipping OS test: socat not found");
         return;
     }
@@ -659,7 +662,9 @@ fn os_dev_boots_shell_and_calc() {
     };
 
     std::thread::sleep(std::time::Duration::from_secs(7));
-    send_keys("sendkey c\nsendkey a\nsendkey l\nsendkey c\nsendkey spc\nsendkey 4\nsendkey 2\nsendkey ret\n");
+    send_keys(
+        "sendkey c\nsendkey a\nsendkey l\nsendkey c\nsendkey spc\nsendkey 4\nsendkey 2\nsendkey ret\n",
+    );
     std::thread::sleep(std::time::Duration::from_secs(2));
     let _ = child.kill();
 
@@ -1163,8 +1168,7 @@ fn linker_script_x86_64_compiles_and_runs() {
 
 #[test]
 fn linker_script_x86_16_boot_sector() {
-    let out_dir =
-        std::env::temp_dir().join(format!("forge_fld_boot_test_{}", std::process::id()));
+    let out_dir = std::env::temp_dir().join(format!("forge_fld_boot_test_{}", std::process::id()));
     let _ = fs::create_dir_all(&out_dir);
     let bin = out_dir.join("boot");
 
@@ -1187,21 +1191,18 @@ fn linker_script_x86_16_boot_sector() {
 
 #[test]
 fn linker_script_custom_hosted_entry() {
-    let out_dir = std::env::temp_dir().join(format!(
-        "forge_fld_entry_test_{}",
-        std::process::id()
-    ));
+    let out_dir = std::env::temp_dir().join(format!("forge_fld_entry_test_{}", std::process::id()));
     let _ = fs::create_dir_all(&out_dir);
     let src = out_dir.join("entry.dev");
     let fld = out_dir.join("entry.fld");
     let bin = out_dir.join("entry");
 
-    fs::write(&src, "package test\n\npub def mymain() -> int32:\n    return 0\n").unwrap();
     fs::write(
-        &fld,
-        "ARCH x86_64\nFORMAT elf\nHOSTED true\nENTRY mymain\n",
+        &src,
+        "package test\n\npub def mymain() -> int32:\n    return 0\n",
     )
     .unwrap();
+    fs::write(&fld, "ARCH x86_64\nFORMAT elf\nHOSTED true\nENTRY mymain\n").unwrap();
 
     let mut cmd = Command::cargo_bin("forgec").unwrap();
     cmd.arg(&src).arg("-o").arg(&bin).arg("--linker").arg(&fld);
@@ -1215,10 +1216,7 @@ fn linker_script_custom_hosted_entry() {
 
 #[test]
 fn linker_script_rejects_raw_format_on_x86_64() {
-    let out_dir = std::env::temp_dir().join(format!(
-        "forge_fld_raw_test_{}",
-        std::process::id()
-    ));
+    let out_dir = std::env::temp_dir().join(format!("forge_fld_raw_test_{}", std::process::id()));
     let _ = fs::create_dir_all(&out_dir);
     let fld = out_dir.join("raw.fld");
     fs::write(&fld, "ARCH x86_64\nFORMAT raw\nHOSTED true\n").unwrap();
@@ -1236,10 +1234,7 @@ fn linker_script_rejects_raw_format_on_x86_64() {
 
 #[test]
 fn linker_script_raw_x86_16_image_has_no_boot_signature() {
-    let out_dir = std::env::temp_dir().join(format!(
-        "forge_fld_raw16_test_{}",
-        std::process::id()
-    ));
+    let out_dir = std::env::temp_dir().join(format!("forge_fld_raw16_test_{}", std::process::id()));
     let _ = fs::create_dir_all(&out_dir);
     let fld = out_dir.join("raw16.fld");
     fs::write(
@@ -1325,8 +1320,7 @@ fn tuple16_dev_compiles_and_runs() {
         return;
     }
 
-    let out_dir =
-        std::env::temp_dir().join(format!("forge_tuple16_test_{}", std::process::id()));
+    let out_dir = std::env::temp_dir().join(format!("forge_tuple16_test_{}", std::process::id()));
     let _ = fs::create_dir_all(&out_dir);
     let bin = out_dir.join("tuple16");
 

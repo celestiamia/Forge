@@ -11,12 +11,8 @@ impl LowerCtx<'_> {
 
     pub(super) fn lower_stmt(&mut self, stmt: &ast::Stmt) -> Result<Vec<ir::Stmt>> {
         match stmt {
-             ast::Stmt::Let(l) => {
-                self.lower_let(&l.pattern, l.ty.as_ref(), &l.value, false)
-            }
-            ast::Stmt::Var(v) => {
-                self.lower_let(&v.pattern, v.ty.as_ref(), &v.value, false)
-            }
+            ast::Stmt::Let(l) => self.lower_let(&l.pattern, l.ty.as_ref(), &l.value, false),
+            ast::Stmt::Var(v) => self.lower_let(&v.pattern, v.ty.as_ref(), &v.value, false),
             ast::Stmt::Assign(a) => {
                 let lhs = self.lower_lvalue(&a.target)?;
                 let rhs = self.lower_expr(&a.value)?;
@@ -180,16 +176,12 @@ impl LowerCtx<'_> {
                         // struct-typed values (struct literals, enum variants,
                         // and struct-typed locals) are not silently widened to
                         // `I64`.  A missing initializer still defaults to `I64`.
-                        init.as_ref()
-                            .map(|e| e.ty.clone())
-                            .unwrap_or(ir::Type::I64)
+                        init.as_ref().map(|e| e.ty.clone()).unwrap_or(ir::Type::I64)
                     });
                 self.vars.insert(name.clone(), ty.clone());
                 self.lower_binding(name, declared, ty, init)
             }
-            ast::Pattern::Tuple(pats) => {
-                self.lower_tuple_destructure(pats, declared, value)
-            }
+            ast::Pattern::Tuple(pats) => self.lower_tuple_destructure(pats, declared, value),
             ast::Pattern::Wildcard => {
                 if let Some(v) = value {
                     Ok(vec![ir::Stmt::Expr(self.lower_expr(v)?)])
@@ -622,11 +614,7 @@ impl LowerCtx<'_> {
                     .iter()
                     .find(|v| v.name == *variant_name)
                     .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "unknown variant {}.{}",
-                            enum_name,
-                            variant_name
-                        )
+                        anyhow::anyhow!("unknown variant {}.{}", enum_name, variant_name)
                     })?;
 
                 // Load tag field (field 0) from the struct
@@ -638,7 +626,10 @@ impl LowerCtx<'_> {
                     ir::Type::Ptr(Box::new(ir::Type::I32)),
                 );
                 let tag_val = ir::Expr::new(ir::ExprKind::Load(Box::new(tag_ptr)), ir::Type::I32);
-                let lit_val = ir::Expr::new(ir::ExprKind::Lit(ir::Literal::Int(variant.discriminant)), ir::Type::I64);
+                let lit_val = ir::Expr::new(
+                    ir::ExprKind::Lit(ir::Literal::Int(variant.discriminant)),
+                    ir::Type::I64,
+                );
                 let lit_val = ir::Expr::new(
                     ir::ExprKind::Cast {
                         expr: Box::new(lit_val),

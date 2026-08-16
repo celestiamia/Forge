@@ -56,7 +56,8 @@ impl<'p> CodeGen<'p> {
                     // holds a 4-byte pointer to a stack temp, so the value is
                     // the pointer itself.
                     Type::Struct(_) if !Self::is_enum_struct(&e.ty) => {
-                        self.asm.lea(Reg::Eax, Mem::base_disp(Reg::Ebp, slot.offset))?;
+                        self.asm
+                            .lea(Reg::Eax, Mem::base_disp(Reg::Ebp, slot.offset))?;
                     }
                     Type::I8
                     | Type::I16
@@ -304,7 +305,8 @@ impl<'p> CodeGen<'p> {
                 // Struct-typed expressions are address-bearing; pass the
                 // first 4 bytes (tag/first field) per the x86_32 convention.
                 self.asm.mov(Reg::Ecx, Mem::base(Reg::Eax))?;
-                self.asm.mov(Mem::base_disp(Reg::Ebp, slot.offset), Reg::Ecx)?;
+                self.asm
+                    .mov(Mem::base_disp(Reg::Ebp, slot.offset), Reg::Ecx)?;
             } else {
                 self.store_scalar(slot.offset)?;
             }
@@ -319,8 +321,7 @@ impl<'p> CodeGen<'p> {
             self.asm.push(Reg::Eax)?;
         }
         if let Some(sret_off) = sret_slot {
-            self.asm
-                .lea(Reg::Eax, Mem::base_disp(Reg::Ebp, sret_off))?;
+            self.asm.lea(Reg::Eax, Mem::base_disp(Reg::Ebp, sret_off))?;
             self.asm.push(Reg::Eax)?;
         }
 

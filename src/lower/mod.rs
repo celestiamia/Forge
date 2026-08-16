@@ -120,7 +120,13 @@ impl<'a> LowerCtx<'a> {
                     .map(|(i, v)| ir::EnumVariant {
                         name: v.name.clone(),
                         discriminant: i as i64,
-                        payload: v.payload.as_ref().map(|t| self.lower_type(t)).transpose().ok().flatten(),
+                        payload: v
+                            .payload
+                            .as_ref()
+                            .map(|t| self.lower_type(t))
+                            .transpose()
+                            .ok()
+                            .flatten(),
                     })
                     .collect();
                 self.enums.insert(
@@ -130,7 +136,8 @@ impl<'a> LowerCtx<'a> {
                         variants,
                     },
                 );
-                self.vars.insert(e.name.clone(), ir::Type::Struct(struct_name.clone()));
+                self.vars
+                    .insert(e.name.clone(), ir::Type::Struct(struct_name.clone()));
             }
         }
         for item in &module.items {
@@ -398,7 +405,14 @@ impl<'a> LowerCtx<'a> {
     }
 
     fn ensure_tuple_struct(&mut self, elem_types: &[ir::Type]) -> String {
-        let name = format!("__tuple_{}", elem_types.iter().map(|t| format!("{:?}", t)).collect::<Vec<_>>().join("_"));
+        let name = format!(
+            "__tuple_{}",
+            elem_types
+                .iter()
+                .map(|t| format!("{:?}", t))
+                .collect::<Vec<_>>()
+                .join("_")
+        );
         if !self.structs.contains_key(&name) {
             let fields: Vec<(String, ir::Type)> = elem_types
                 .iter()
