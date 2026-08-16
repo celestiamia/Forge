@@ -77,7 +77,14 @@ jobs:
           # Create checksums
           cd dist && sha256sum * > SHA256SUMS
 
+      - name: Delete existing nightly release (if any)
+        run: |
+          gh release delete nightly-${{ steps.version.outputs.version }} --yes --cleanup-tag || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create Nightly Release
+        id: release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly-${{ steps.version.outputs.version }}
@@ -97,7 +104,7 @@ jobs:
             chmod +x forgec-x86_64-linux
             sudo mv forgec-x86_64-linux /usr/local/bin/forgec
             ```
-          draft: false
+          draft: true
           prerelease: true
           files: |
             dist/forgec-x86_64-linux
@@ -106,3 +113,8 @@ jobs:
             dist/SHA256SUMS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish Nightly Release
+        run: gh release edit nightly-${{ steps.version.outputs.version }} --draft=false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
