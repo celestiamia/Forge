@@ -95,5 +95,5 @@ pub def main() -> int32:
 | Target | Available |
 |--------|-----------|
 | x86_64 | ✅ Full support |
-| x86_32 | ❌ (bump allocator only) |
+| x86_32 | ❌ Free-list allocator only — importing `std.gc` fails at codegen with a clean diagnostic |
 | x86_16 | ❌ (no heap) |

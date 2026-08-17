@@ -111,13 +111,18 @@ impl<'p> CodeGen<'p> {
         matches!(ty, Type::Struct(name) if name.starts_with("__enum_"))
     }
 
-    /// Byte size (≥4) of a value of `ty`, treating structs as their full layout
-    /// size.  Returns `None` for void/unsized types.
-    pub(super) fn value_size(&self, ty: &Type) -> Option<usize> {
-        match ty {
-            Type::Struct(name) => self.struct_layouts.get(name).map(|l| l.size.max(4)),
-            _ => Some(type_size(ty, &self.struct_layouts).max(4)),
-        }
+    /// Byte size (≥4) of a struct value of `ty`, where `ty` is either a bare
+    /// struct type or a pointer to one (the by-pointer ABI shape).
+    pub(super) fn struct_size_of(&self, ty: &Type) -> Option<usize> {
+        let name = match ty {
+            Type::Struct(n) => Some(n),
+            Type::Ptr(inner) => match inner.as_ref() {
+                Type::Struct(n) => Some(n),
+                _ => None,
+            },
+            _ => None,
+        };
+        name.and_then(|n| self.struct_layouts.get(n)).map(|l| l.size.max(4))
     }
 
     /// Copy `size` bytes from `[src_reg]` to `[dst_reg]` using 4-byte moves
@@ -162,6 +167,9 @@ impl<'p> CodeGen<'p> {
             Type::I16 => self.asm.movsx16(Reg::Eax, Mem::base(Reg::Eax))?,
             Type::U16 => self.asm.movzx16(Reg::Eax, Mem::base(Reg::Eax))?,
             Type::I32 | Type::U32 | Type::F32 => self.asm.mov(Reg::Eax, Mem::base(Reg::Eax))?,
+            // Real structs are address-bearing: their value *is* the address,
+            // so loading a struct-typed field/deref leaves EAX untouched.
+            Type::Struct(name) if !name.starts_with("__enum_") => {}
             _ => self.asm.mov(Reg::Eax, Mem::base(Reg::Eax))?,
         }
         Ok(())

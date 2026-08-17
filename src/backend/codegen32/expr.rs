@@ -282,15 +282,22 @@ impl<'p> CodeGen<'p> {
             .get(func)
             .ok_or_else(|| anyhow::anyhow!("unknown function: {}", func))?;
 
-        // i386 sret: a struct return larger than 4 bytes is written into a
-        // caller-allocated scratch struct; its address is passed as the first
-        // (leftmost) argument, i.e. pushed last under the right-to-left cdecl
-        // convention.  After the call EAX holds that pointer.
-        let sret = matches!(ret_ty, Type::Struct(_))
-            && !Self::is_enum_struct(ret_ty)
-            && self.value_size(ret_ty).is_some_and(|s| s > 4);
-        let sret_slot = if sret {
-            let size = self.value_size(ret_ty).unwrap_or(4).max(4);
+        // i386 sret: a struct return is written into a caller-allocated
+        // scratch struct; its address is passed as the first (leftmost)
+        // argument, i.e. pushed last under the right-to-left cdecl
+        // convention.  After the call EAX holds that pointer.  Call results
+        // are typed `Ptr(Struct)` by the lowerer; bare struct returns
+        // (e.g. from enum-payload helpers) are excluded via `__enum_`.
+        let sret_name = match ret_ty {
+            Type::Struct(n) if !n.starts_with("__enum_") => Some(n.clone()),
+            Type::Ptr(inner) => match inner.as_ref() {
+                Type::Struct(n) if !n.starts_with("__enum_") => Some(n.clone()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let sret_slot = if let Some(name) = &sret_name {
+            let size = self.struct_size_of(&Type::Struct(name.clone())).unwrap_or(4);
             let s = self.alloc_slot(size, 4);
             Some(s.offset)
         } else {
@@ -302,11 +309,10 @@ impl<'p> CodeGen<'p> {
             self.eval_expr(a)?;
             let slot = self.alloc_slot(4, 4);
             if matches!(a.ty, Type::Struct(_)) && !Self::is_enum_struct(&a.ty) {
-                // Struct-typed expressions are address-bearing; pass the
-                // first 4 bytes (tag/first field) per the x86_32 convention.
-                self.asm.mov(Reg::Ecx, Mem::base(Reg::Eax))?;
+                // Real structs are address-bearing; pass the struct's address
+                // so the callee can access the whole value.
                 self.asm
-                    .mov(Mem::base_disp(Reg::Ebp, slot.offset), Reg::Ecx)?;
+                    .mov(Mem::base_disp(Reg::Ebp, slot.offset), Reg::Eax)?;
             } else {
                 self.store_scalar(slot.offset)?;
             }

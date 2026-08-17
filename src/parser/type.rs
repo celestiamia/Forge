@@ -1,7 +1,49 @@
 use super::*;
 use crate::lexer::Token;
 
+/// Whether `name` is a built-in primitive type name (dual-spelled).
+pub(super) fn is_primitive_name(name: &str) -> bool {
+    matches!(
+        name,
+        "void"
+            | "bool"
+            | "char"
+            | "usize"
+            | "isize"
+            | "i8" | "int8"
+            | "i16" | "int16"
+            | "i32" | "int32" | "int"
+            | "i64" | "int64"
+            | "i128" | "int128"
+            | "u8" | "uint8" | "byte"
+            | "u16" | "uint16"
+            | "u32" | "uint32" | "uint"
+            | "u64" | "uint64"
+            | "u128" | "uint128"
+            | "f32" | "float32"
+            | "f64" | "float64" | "float"
+    )
+}
+
 impl Parser {
+    /// After the first type argument of a generic application has been parsed,
+    /// consume the remaining comma-separated arguments.  The closing `]` is
+    /// consumed by the caller (it is shared with the slice/pointer forms).
+    fn finish_generic_app(
+        &mut self,
+        base: String,
+        first: TypeExpr,
+    ) -> Result<TypeExpr, ParseError> {
+        let mut args = vec![first];
+        self.skip_newlines();
+        while self.eat(&Token::Comma) {
+            self.skip_newlines();
+            args.push(self.parse_type()?);
+            self.skip_newlines();
+        }
+        Ok(TypeExpr::GenericApp { base, args })
+    }
+
     pub(super) fn parse_type(&mut self) -> Result<TypeExpr, ParseError> {
         self.skip_newlines();
         self.parse_type_inner()
@@ -28,6 +70,9 @@ impl Parser {
                         TypeExpr::Name(ref n) if n == "own" => TypeExpr::Own(Box::new(inner)),
                         TypeExpr::Name(ref n) if n == "ref" => TypeExpr::Ref(Box::new(inner)),
                         TypeExpr::Name(ref n) if n == "refmut" => TypeExpr::RefMut(Box::new(inner)),
+                        TypeExpr::Name(n) if !is_primitive_name(&n) => {
+                            self.finish_generic_app(n, inner)?
+                        }
                         _ => TypeExpr::Slice(Box::new(inner)),
                     };
                 }
@@ -76,6 +121,9 @@ impl Parser {
                         TypeExpr::Name(ref n) if n == "own" => TypeExpr::Own(Box::new(inner)),
                         TypeExpr::Name(ref n) if n == "ref" => TypeExpr::Ref(Box::new(inner)),
                         TypeExpr::Name(ref n) if n == "refmut" => TypeExpr::RefMut(Box::new(inner)),
+                        TypeExpr::Name(n) if !is_primitive_name(&n) => {
+                            self.finish_generic_app(n, inner)?
+                        }
                         _ => TypeExpr::Slice(Box::new(inner)),
                     };
                 }

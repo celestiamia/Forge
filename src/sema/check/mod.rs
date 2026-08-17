@@ -98,11 +98,11 @@ struct Context {
     errors: Vec<Error>,
 }
 
-mod expr;
+pub(crate) mod expr;
 mod items;
 #[cfg(test)]
 mod tests;
-mod typing;
+pub(crate) mod typing;
 
 use typing::*;
 
@@ -158,6 +158,182 @@ impl Context {
         self.generic_stack.iter().rev().any(|s| s.contains(name))
     }
 
+    /// Register a monomorphized generic struct instantiation (`Pair` with
+    /// `[i64]` -> struct name `Pair$i64`) with its substituted fields, and
+    /// return its struct type.
+    fn register_mono_struct(&mut self, info: &AdtInfo, args: &[Type]) -> Type {
+        let mapping: HashMap<String, Type> = info
+            .generics
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect();
+        let fields: Vec<TyField> = info
+            .fields
+            .iter()
+            .map(|f| TyField {
+                name: f.name.clone(),
+                ty: substitute(&f.ty, &mapping),
+            })
+            .collect();
+        let name = crate::ty::mono_struct_name(&info.name, args);
+        self.adts.insert(
+            name.clone(),
+            AdtInfo {
+                name: name.clone(),
+                kind: AdtKind::Struct,
+                generics: Vec::new(),
+                fields: fields.clone(),
+                variants: Vec::new(),
+            },
+        );
+        Type::Struct { name, fields }
+    }
+
+    /// Infer concrete generic arguments by unifying type patterns with
+    /// argument types.  A `Pair[T]` pattern matched against a concrete
+    /// `Pair$i64` struct recovers the missing arguments by unifying the base
+    /// struct's (substituted) field types against the concrete struct's
+    /// fields.
+    fn infer_generic_params(
+        &mut self,
+        param_tys: &[Type],
+        arg_tys: &[Type],
+    ) -> Option<HashMap<String, Type>> {
+        let mut mapping = HashMap::new();
+        for (p, a) in param_tys.iter().zip(arg_tys.iter()) {
+            if !self.collect_substitutions(p, a, &mut mapping) {
+                return None;
+            }
+        }
+        Some(mapping)
+    }
+
+    fn collect_substitutions(
+        &mut self,
+        pattern: &Type,
+        concrete: &Type,
+        map: &mut HashMap<String, Type>,
+    ) -> bool {
+        if let (Type::StructApp { base, args }, Type::Struct { fields, .. }) = (pattern, concrete) {
+            let Some(info) = self.adts.get(base.as_str()).cloned() else {
+                return false;
+            };
+            let subst: HashMap<String, Type> = info
+                .generics
+                .iter()
+                .cloned()
+                .zip(args.iter().cloned())
+                .collect();
+            let field_patterns: Vec<Type> = info
+                .fields
+                .iter()
+                .map(|f| substitute(&f.ty, &subst))
+                .collect();
+            if field_patterns.len() != fields.len() {
+                return false;
+            }
+            for (fp, fc) in field_patterns.iter().zip(fields.iter()) {
+                if !self.collect_substitutions(fp, &fc.ty, map) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        match (pattern, concrete) {
+            (Type::Generic { name }, _) => {
+                map.insert(name.clone(), concrete.clone());
+                true
+            }
+            (Type::Pointer { pointee: p }, Type::Pointer { pointee: c })
+            | (Type::Own { pointee: p }, Type::Own { pointee: c })
+            | (Type::Ref { pointee: p }, Type::Ref { pointee: c })
+            | (Type::RefMut { pointee: p }, Type::RefMut { pointee: c }) => {
+                self.collect_substitutions(p, c, map)
+            }
+            (Type::Slice { elem: p }, Type::Slice { elem: c }) => {
+                self.collect_substitutions(p, c, map)
+            }
+            (Type::Array { elem: p, size: ps }, Type::Array { elem: c, size: cs })
+                if ps == cs =>
+            {
+                self.collect_substitutions(p, c, map)
+            }
+            (Type::Tuple { fields: pf }, Type::Tuple { fields: cf })
+                if pf.len() == cf.len() =>
+            {
+                for (p, c) in pf.iter().zip(cf.iter()) {
+                    if !self.collect_substitutions(p, c, map) {
+                        return false;
+                    }
+                }
+                true
+            }
+            (
+                Type::StructApp { base: pb, args: pa },
+                Type::StructApp { base: cb, args: ca },
+            ) if pb == cb && pa.len() == ca.len() => {
+                for (x, y) in pa.iter().zip(ca.iter()) {
+                    if !self.collect_substitutions(x, y, map) {
+                        return false;
+                    }
+                }
+                true
+            }
+            (a, b) if a == b || a.is_unknown() || b.is_unknown() => true,
+            _ => false,
+        }
+    }
+
+    /// Convert any remaining generic struct applications in `ty` into
+    /// concrete monomorphized struct types once all their type arguments are
+    /// concrete.  Used after substituting a generic function's return type.
+    fn finalize_struct_apps(&mut self, ty: &Type) -> Type {
+        match ty {
+            Type::StructApp { base, args } => {
+                let args: Vec<Type> = args.iter().map(|a| self.finalize_struct_apps(a)).collect();
+                if args.iter().any(|a| a.is_generic()) {
+                    return Type::StructApp {
+                        base: base.clone(),
+                        args,
+                    };
+                }
+                if let Some(info) = self.adts.get(base.as_str()).cloned() {
+                    self.register_mono_struct(&info, &args)
+                } else {
+                    Type::Struct {
+                        name: crate::ty::mono_struct_name(base, &args),
+                        fields: Vec::new(),
+                    }
+                }
+            }
+            Type::Pointer { pointee } => Type::pointer(self.finalize_struct_apps(pointee)),
+            Type::Slice { elem } => Type::slice(self.finalize_struct_apps(elem)),
+            Type::Array { elem, size } => {
+                Type::array(self.finalize_struct_apps(elem), *size)
+            }
+            Type::Tuple { fields } => Type::tuple(
+                fields
+                    .iter()
+                    .map(|f| self.finalize_struct_apps(f))
+                    .collect(),
+            ),
+            Type::Struct { name, fields } if fields.is_empty() => {
+                // A substituted struct type arrives without its fields; refill
+                // them from the ADT table so displays and field lookups agree.
+                if let Some(info) = self.adts.get(name.as_str()) {
+                    Type::Struct {
+                        name: name.clone(),
+                        fields: info.fields.clone(),
+                    }
+                } else {
+                    ty.clone()
+                }
+            }
+            _ => ty.clone(),
+        }
+    }
+
     pub(super) fn resolve_type_expr(&mut self, tx: &TypeExpr) -> Type {
         match tx {
             TypeExpr::Name(name) => {
@@ -172,6 +348,45 @@ impl Context {
                 }
                 self.error(format!("unknown type name `{}`", name));
                 Type::Unknown
+            }
+            TypeExpr::GenericApp { base, args } => {
+                let args: Vec<Type> = args
+                    .iter()
+                    .map(|t| self.resolve_type_expr(t))
+                    .collect();
+                let info = self.adts.get(base).cloned();
+                let Some(info) = info else {
+                    self.error(format!("unknown type name `{}`", base));
+                    return Type::Unknown;
+                };
+                if info.kind != AdtKind::Struct {
+                    self.error(format!("`{}` is not a struct type", base));
+                    return Type::Unknown;
+                }
+                if info.generics.is_empty() {
+                    self.error(format!("struct `{}` is not generic", base));
+                    return Type::Unknown;
+                }
+                if info.generics.len() != args.len() {
+                    self.error(format!(
+                        "struct `{}` expects {} type arguments, got {}",
+                        base,
+                        info.generics.len(),
+                        args.len()
+                    ));
+                    return Type::Unknown;
+                }
+                // Defer instantiation while any argument is still a generic
+                // parameter (i.e. inside a generic function body); the
+                // concrete monomorphized name is computed once the instance
+                // is known.
+                if args.iter().any(|a| a.is_generic() || matches!(a, Type::StructApp { .. })) {
+                    return Type::StructApp {
+                        base: base.clone(),
+                        args,
+                    };
+                }
+                self.register_mono_struct(&info, &args)
             }
             TypeExpr::Pointer(inner) => Type::pointer(self.resolve_type_expr(inner)),
             TypeExpr::Own(inner) => Type::own(self.resolve_type_expr(inner)),

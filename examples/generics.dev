@@ -1,0 +1,32 @@
+package generics
+
+# Generic functions and generic structs: monomorphized per call site.
+# `id[T]` instantiates for int64/f64/char; `Pair[T]` instantiates for
+# int64, f64, and the nested Pair[Pair[int64]]; generic functions both
+# return and consume generic structs (make_pair/sum_pair).
+
+struct Pair[T]:
+    first: T
+    second: T
+
+def id[T](x: T) -> T:
+    return x
+
+def swap[T](a: T, b: T) -> T:
+    var t: T = b
+    return t
+
+def make_pair[T](a: T, b: T) -> Pair[T]:
+    return Pair[T] { first: a, second: b }
+
+def sum_pair[T](p: Pair[T]) -> T:
+    return p.first + p.second
+
+pub def main() -> int64:
+    var a: int64 = id(42 as int64)
+    var b: f64 = id(3.5)
+    var c: char = id('z')
+    var p: Pair[int64] = make_pair(3 as int64, 4 as int64)
+    var q: Pair[f64] = make_pair(1.5, 2.5)
+    var n: Pair[Pair[int64]] = Pair[Pair[int64]] { first: p, second: p }
+    return a + (b as int64) + (c as int64) + sum_pair(p) + (sum_pair(q) as int64) + n.first.second + swap(9 as int64, 9 as int64)

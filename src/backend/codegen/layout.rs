@@ -117,6 +117,9 @@ impl<'p> CodeGen<'p> {
             Type::U16 => self.asm.movzx16(Reg::Rax, Mem::base(Reg::Rax))?,
             Type::I32 => self.asm.movsxd(Reg::Rax, Mem::base(Reg::Rax))?,
             Type::U32 => self.asm.mov32(Reg::Rax, Mem::base(Reg::Rax))?,
+            // Real structs are address-bearing: their value *is* the address,
+            // so loading a struct-typed field/deref leaves RAX untouched.
+            Type::Struct(name) if !name.starts_with("__enum_") => {}
             _ => self.asm.mov(Reg::Rax, Mem::base(Reg::Rax))?,
         }
         Ok(())
@@ -148,5 +151,75 @@ impl<'p> CodeGen<'p> {
             .get(idx)
             .copied()
             .ok_or_else(|| anyhow::anyhow!("field index {} out of range", idx))
+    }
+
+    /// The user struct name if `ty` denotes a by-pointer struct value:
+    /// either a bare non-enum `Struct` or a `Ptr` to one.  Returns `None`
+    /// for scalars and for the synthetic `__enum_*` structs.
+    pub(super) fn sret_struct_name(&self, ty: &Type) -> Option<String> {
+        match ty {
+            Type::Struct(name) if !name.starts_with("__enum_") => Some(name.clone()),
+            Type::Ptr(inner) => match inner.as_ref() {
+                Type::Struct(name) if !name.starts_with("__enum_") => Some(name.clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    pub(super) fn struct_size(&self, name: &str) -> Result<usize> {
+        self.struct_layouts
+            .get(name)
+            .map(|l| l.size)
+            .ok_or_else(|| anyhow::anyhow!("unknown struct: {}", name))
+    }
+
+    /// Copy `size` bytes from `[src_reg]` to `[dst_reg]` using 8-byte moves
+    /// and a trailing 1/2/3/4-byte move for the remainder.  `src_reg` and
+    /// `dst_reg` are addresses (not the data themselves).
+    pub(super) fn copy_mem_to_mem(&mut self, dst: Reg, src: Reg, size: usize) -> Result<()> {
+        let mut offset = 0i32;
+        let mut remaining = size;
+        while remaining >= 8 {
+            self.asm.mov(Reg::Rcx, Mem::base_disp(src, offset))?;
+            self.asm.mov(Mem::base_disp(dst, offset), Reg::Rcx)?;
+            offset += 8;
+            remaining -= 8;
+        }
+        while remaining >= 4 {
+            self.asm.mov32(Reg::Rcx, Mem::base_disp(src, offset))?;
+            self.asm.store32(Mem::base_disp(dst, offset), Reg::Rcx)?;
+            offset += 4;
+            remaining -= 4;
+        }
+        if remaining > 0 {
+            match remaining {
+                1 => {
+                    self.asm.movzx8(Reg::Rcx, Mem::base_disp(src, offset))?;
+                    self.asm.store8(Mem::base_disp(dst, offset), Reg::Rcx)?;
+                }
+                2 => {
+                    self.asm.movzx16(Reg::Rcx, Mem::base_disp(src, offset))?;
+                    self.asm.store16(Mem::base_disp(dst, offset), Reg::Rcx)?;
+                }
+                3 => {
+                    self.asm.movzx8(Reg::Rcx, Mem::base_disp(src, offset))?;
+                    self.asm.store8(Mem::base_disp(dst, offset), Reg::Rcx)?;
+                    let o = offset + 1;
+                    self.asm.movzx16(Reg::Rcx, Mem::base_disp(src, o))?;
+                    self.asm.store16(Mem::base_disp(dst, o), Reg::Rcx)?;
+                }
+                _ => unreachable!(),
+            }
+        }
+        Ok(())
+    }
+
+    /// Copy `size` bytes from `[src_reg]` into the frame slot at `dst`
+    /// (an `[rbp + dst]` displacement).
+    pub(super) fn copy_ptr_to_slot(&mut self, dst: i32, src: Reg, size: usize) -> Result<()> {
+        self.asm.lea(Reg::Rdi, Mem::base_disp(Reg::Rbp, dst))?;
+        self.asm.mov(Reg::Rsi, src)?;
+        self.copy_mem_to_mem(Reg::Rdi, Reg::Rsi, size)
     }
 }

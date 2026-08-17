@@ -75,7 +75,35 @@ struct Point:
 - Constructed with a struct literal: `Point { x: 1, y: 2 }`
 - Fields are laid out sequentially **without padding**
 - Field access on a pointer parameter auto-dereferences: `p.x` where `p: ptr[Point]`
-- Nested structs are not yet supported (see [Known Issues](known-issues.md))
+- Nested structs are supported — layouts are computed recursively (by-value
+  struct cycles are rejected with a clean error)
+
+### Generic Structs
+
+```dev
+struct Pair[T]:
+    first: T
+    second: T
+```
+
+Generic structs are instantiated with a type application and monomorphized per
+instantiation:
+
+```dev
+var p: Pair[int64] = Pair[int64] { first: 3, second: 4 }
+var q: Pair[Pair[int64]] = Pair[Pair[int64]] { first: p, second: p }
+```
+
+- Applications take one or more type arguments: `Pair[int64, f64]`
+- Nested applications work: `Pair[Pair[int64]]`
+- Inside a generic function body, type parameters can appear in annotations
+  and literals (`var t: T`, `Pair[T] { ... }`) — the concrete instance is
+  resolved at the call site
+- Each distinct instantiation generates its own struct definition
+  (mangled as `Pair$i64`); a generic struct with no remaining type
+  parameters is equivalent to a plain struct
+- See [Functions › Generic Functions](functions.md#generic-functions) for
+  generic functions, which can return and consume generic structs
 
 ### Arrays
 
@@ -86,6 +114,18 @@ let x = arr[0]
 
 Array literals and indexing work. Fixed-size type annotations
 (`[int32; 5]`) and repeat literals (`[0; 3]`) are **not** supported yet.
+
+### Tuples
+
+```dev
+let t: (int64, int64) = (3, 4)
+let a = t.0        # Field access by index
+var (x, y) = t     # Destructuring
+```
+
+Tuples work end-to-end on x86_64 and x86_32: literals, type annotations,
+indexed field access (`t.0`, `t.1`), destructuring, and tuple **return
+types** (`def pair() -> (int64, int64)`).
 
 ### Enums & Unions
 
@@ -152,7 +192,6 @@ The following type forms parse but are not functional yet — see
 
 - `ref[T]` / `refmut[T]` — references (only `ref[T]` annotation + deref work)
 - `own[T]` — owned pointers (declaration only; no constructor)
-- `(T1, T2, ...)` — tuples (literals, field access `t.0` supported; see [Functions: tuples as return types](functions.md) for the propagation limitation)
 - `[T; N]` — fixed-size array annotations
 - `slice[T]` — slices
 - `fn(T) -> T` — function types

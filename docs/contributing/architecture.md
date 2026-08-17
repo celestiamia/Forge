@@ -246,7 +246,7 @@ Object File (ELF/Flat Writer)
 | Target | Allocator | GC |
 |--------|-----------|-----|
 | x86_64 | First-fit free list (4 MiB heap) | ✅ Mark-and-sweep |
-| x86_32 | Bump | ❌ |
+| x86_32 | First-fit free list (4 MiB heap, 4-byte headers) | ❌ |
 | x86_16 | None | ❌ |
 
 ## Error Handling

@@ -120,6 +120,10 @@ impl Context {
         self.in_unsafe = self.in_unsafe || sig.is_unsafe;
         self.current_function = Some(sig.name.clone());
         self.return_type = Some(sig.ret.clone());
+        // Generic parameters are in scope inside the body so annotations and
+        // struct literals can reference `T`.
+        self.generic_stack
+            .push(sig.generics.iter().cloned().collect());
 
         let body = f.body.as_ref().map(|b| {
             self.push_scope();
@@ -148,6 +152,7 @@ impl Context {
         self.return_type = None;
         self.current_function = None;
         self.in_unsafe = prev_unsafe;
+        self.generic_stack.pop();
 
         TypedFunction {
             name: sig.name,

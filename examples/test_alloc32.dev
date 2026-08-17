@@ -1,0 +1,29 @@
+package test_alloc32
+
+from std.alloc import alloc, free
+
+# Exercises the x86_32 free-list allocator (first-fit with splitting and
+# block reuse) without relying on the x86_64-only garbage collector.
+pub def main() -> int32:
+    var a: ptr[char] = alloc(64)
+    var b: ptr[char] = alloc(64)
+    if a == b:
+        return 1
+    free(a)
+    var c: ptr[char] = alloc(64)
+    if c != a:
+        return 2
+    var p: ptr[char] = alloc(8)
+    var q: ptr[char] = alloc(8)
+    if p == q:
+        return 3
+    unsafe:
+        *p = (42 as char)
+        *(p + 1) = (7 as char)
+        if *p != (42 as char) || *(p + 1) != (7 as char):
+            return 4
+    free(p)
+    free(q)
+    free(b)
+    free(c)
+    return 0

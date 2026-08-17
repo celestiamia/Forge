@@ -10,7 +10,7 @@ pub(super) fn zero_expr(ty: &Type) -> TypedExpr {
     TypedExpr::new(kind, ty.clone())
 }
 
-pub(super) fn primitive_type(name: &str) -> Option<Type> {
+pub(crate) fn primitive_type(name: &str) -> Option<Type> {
     match name {
         "void" => Some(Type::Void),
         "bool" => Some(Type::Bool),
@@ -215,6 +215,24 @@ pub(super) fn compatible(expected: &Type, got: &Type) -> bool {
     if matches!(expected, Type::Generic { .. }) {
         return true;
     }
+    // Struct/union/enum identity is by monomorphized name; field lists may
+    // be empty when the type came from substitution rather than the ADT
+    // table.
+    if let (Type::Struct { name: en, .. }, Type::Struct { name: gn, .. }) = (expected, got)
+        && en == gn
+    {
+        return true;
+    }
+    if let (Type::Union { name: en, .. }, Type::Union { name: gn, .. }) = (expected, got)
+        && en == gn
+    {
+        return true;
+    }
+    if let (Type::Enum { name: en, .. }, Type::Enum { name: gn, .. }) = (expected, got)
+        && en == gn
+    {
+        return true;
+    }
     // Allow reference/owned values to coerce to raw pointers, and permit
     // layout-compatible 8-bit pointees (char/uint8/int8) to intermix.
     if let Type::Pointer { pointee: ep } = expected {
@@ -245,64 +263,7 @@ pub(super) fn is_layout_compatible_8bit(a: &Type, b: &Type) -> bool {
     is_8bit_integer(a) && is_8bit_integer(b)
 }
 
-pub(super) fn infer_generic_params(
-    param_tys: &[Type],
-    arg_tys: &[Type],
-) -> Option<HashMap<String, Type>> {
-    let mut mapping = HashMap::new();
-    for (p, a) in param_tys.iter().zip(arg_tys.iter()) {
-        collect_substitutions(p, a, &mut mapping)?;
-    }
-    Some(mapping)
-}
-
-pub(super) fn collect_substitutions(
-    pattern: &Type,
-    concrete: &Type,
-    map: &mut HashMap<String, Type>,
-) -> Option<()> {
-    match (pattern, concrete) {
-        (Type::Generic { name }, _) => {
-            map.insert(name.clone(), concrete.clone());
-            Some(())
-        }
-        (Type::Pointer { pointee: p }, Type::Pointer { pointee: c })
-        | (Type::Own { pointee: p }, Type::Own { pointee: c })
-        | (Type::Ref { pointee: p }, Type::Ref { pointee: c })
-        | (Type::RefMut { pointee: p }, Type::RefMut { pointee: c }) => {
-            collect_substitutions(p, c, map)
-        }
-        (Type::Slice { elem: p }, Type::Slice { elem: c }) => collect_substitutions(p, c, map),
-        (Type::Array { elem: p, size: ps }, Type::Array { elem: c, size: cs }) if ps == cs => {
-            collect_substitutions(p, c, map)
-        }
-        (Type::Tuple { fields: pf }, Type::Tuple { fields: cf }) if pf.len() == cf.len() => {
-            for (p, c) in pf.iter().zip(cf.iter()) {
-                collect_substitutions(p, c, map)?;
-            }
-            Some(())
-        }
-        (
-            Type::Function {
-                params: pp,
-                ret: pr,
-            },
-            Type::Function {
-                params: cp,
-                ret: cr,
-            },
-        ) if pp.len() == cp.len() => {
-            for (p, c) in pp.iter().zip(cp.iter()) {
-                collect_substitutions(p, c, map)?;
-            }
-            collect_substitutions(pr, cr, map)
-        }
-        (a, b) if a == b || a.is_unknown() || b.is_unknown() => Some(()),
-        _ => None,
-    }
-}
-
-pub(super) fn substitute(ty: &Type, mapping: &HashMap<String, Type>) -> Type {
+pub(crate) fn substitute(ty: &Type, mapping: &HashMap<String, Type>) -> Type {
     match ty {
         Type::Generic { name } => mapping.get(name).cloned().unwrap_or_else(|| ty.clone()),
         Type::Pointer { pointee } => Type::pointer(substitute(pointee, mapping)),
@@ -318,6 +279,21 @@ pub(super) fn substitute(ty: &Type, mapping: &HashMap<String, Type>) -> Type {
             params.iter().map(|p| substitute(p, mapping)).collect(),
             substitute(ret, mapping),
         ),
+        // A generic struct application defers instantiation until its type
+        // arguments are concrete; once they are, the monomorphized struct
+        // name can be computed.  The concrete fields are registered by the
+        // checker (which owns the ADT table) via `finalize_struct_app`.
+        Type::StructApp { base, args } => {
+            let args: Vec<Type> = args.iter().map(|a| substitute(a, mapping)).collect();
+            if args.iter().any(|a| a.is_generic() || matches!(a, Type::StructApp { .. })) {
+                Type::StructApp { base: base.clone(), args }
+            } else {
+                Type::Struct {
+                    name: crate::ty::mono_struct_name(base, &args),
+                    fields: Vec::new(),
+                }
+            }
+        }
         _ => ty.clone(),
     }
 }

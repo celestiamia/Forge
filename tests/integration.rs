@@ -1309,6 +1309,157 @@ fn tuples_dev_compiles_and_runs_x86_32() {
 }
 
 #[test]
+fn struct_ret_compiles_and_runs() {
+    let bin = compile_example("struct_ret");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run struct_ret binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "", "struct_ret produced unexpected output");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "struct_ret binary should exit with code 0"
+    );
+}
+
+#[test]
+fn struct_ret_compiles_and_runs_x86_32() {
+    let bin = compile_example_with_target("struct_ret", "x86_32-unknown-linux-gnu");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run struct_ret (x86_32) binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "", "struct_ret (x86_32) produced unexpected output");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "struct_ret (x86_32) binary should exit with code 0"
+    );
+}
+
+#[test]
+fn tuple_ret_compiles_and_runs() {
+    let bin = compile_example("tuple_ret");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run tuple_ret binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "", "tuple_ret produced unexpected output");
+    assert_eq!(
+        output.status.code(),
+        Some(7),
+        "tuple_ret binary should exit with code 7 (3+4)"
+    );
+}
+
+#[test]
+fn tuple_ret_compiles_and_runs_x86_32() {
+    let bin = compile_example_with_target("tuple_ret", "x86_32-unknown-linux-gnu");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run tuple_ret (x86_32) binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "", "tuple_ret (x86_32) produced unexpected output");
+    assert_eq!(
+        output.status.code(),
+        Some(7),
+        "tuple_ret (x86_32) binary should exit with code 7 (3+4)"
+    );
+}
+
+#[test]
+fn test_alloc32_compiles_and_runs_x86_32() {
+    // Free-list allocator on x86_32: block reuse via `free`, first-fit
+    // splitting, and byte-width dereference through heap pointers.
+    let bin = compile_example_with_target("test_alloc32", "x86_32-unknown-linux-gnu");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run test_alloc32 (x86_32) binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "", "test_alloc32 (x86_32) produced unexpected output");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "test_alloc32 (x86_32) binary should exit with code 0"
+    );
+}
+
+#[test]
+fn test_alloc32_compiles_and_runs_x86_64() {
+    let bin = compile_example("test_alloc32");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run test_alloc32 binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "", "test_alloc32 produced unexpected output");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "test_alloc32 binary should exit with code 0"
+    );
+}
+
+#[test]
+fn generics_dev_compiles_and_runs_x86_64() {
+    // Generic functions (`id[T]`, `swap[T]`) and generic structs (`Pair[T]`)
+    // monomorphize per call site: int64/f64/char instances of `id`, nested
+    // `Pair[Pair[int64]]`, and generic functions returning/consuming generic
+    // structs (`make_pair`/`sum_pair`).
+    let bin = compile_example("generics");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run generics binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "", "generics produced unexpected output");
+    assert_eq!(
+        output.status.code(),
+        Some(191),
+        "generics binary should exit with 191 = 42 + 3 + 122 + 7 + 4 + 4 + 9"
+    );
+}
+
+#[test]
+fn generics32_dev_compiles_and_runs_x86_32() {
+    // Generics must work on the x86_32 target too: structs go through the
+    // same sret/by-pointer ABI as non-generic struct code.
+    let bin = compile_example_with_target("generics32", "x86_32-unknown-linux-gnu");
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run generics32 (x86_32) binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "", "generics32 produced unexpected output");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "generics32 (x86_32) binary should exit with code 0"
+    );
+}
+
+#[test]
+fn test_gc32_rejected_on_x86_32() {
+    let result = Command::cargo_bin("forgec")
+        .unwrap()
+        .arg("examples/test_gc32.dev")
+        .arg("-o")
+        .arg("/tmp/forge_test_gc32_x86_32-unknown-linux-gnu_test/gc32")
+        .arg("--target")
+        .arg("x86_32-unknown-linux-gnu")
+        .output()
+        .unwrap();
+    assert!(
+        !result.status.success(),
+        "test_gc32 must not compile on the x86_32 target"
+    );
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(
+        stderr.contains("not supported on the x86_32 target"),
+        "expected a clean std.gc diagnostic, got: {}",
+        stderr
+    );
+}
+
+#[test]
 fn tuple16_dev_compiles_and_runs() {
     // Only run this test if qemu-system-x86_64 is available
     if std::process::Command::new("qemu-system-x86_64")

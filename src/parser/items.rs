@@ -109,6 +109,7 @@ impl Parser {
         self.expect(Token::Def)?;
         let name = self.expect_ident()?;
         let generics = self.parse_generics()?;
+        self.push_scope_generics(&generics);
         let params = self.parse_params()?;
         let ret = if self.eat(&Token::Arrow) {
             Some(self.parse_type()?)
@@ -124,6 +125,7 @@ impl Parser {
         } else {
             None
         };
+        self.pop_scope_generics(generics.len());
         Ok(Item::Function(Function {
             attrs,
             vis,

@@ -1,0 +1,7 @@
+package test_gc32
+
+extern def _dev_gc_collect() -> void
+
+pub def main() -> int32:
+    _dev_gc_collect()
+    return 0

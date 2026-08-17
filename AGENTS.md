@@ -33,7 +33,7 @@ qemu-system-x86_64 -fda boot.bin -nographic
 
 `-o` defaults to `<source>` with extension stripped. `--freestanding` flag available.
 
-`.fld` (Forge Linker Descriptor): `ARCH`/`FORMAT`/`HOSTED`/`ENTRY`/`LOAD`/`HEAP`/`MEMORY`/`SECTIONS`/`RUNTIME` in `src/linker/`. Honored: ARCH, FORMAT (elf/elf32/flat/raw; flat = 512-byte boot sector with 0x55AA, raw = bare image for multi-stage loads), HOSTED, ENTRY, LOAD (x86_16 load address, default 0x7C00, drives imm16 string fixups), HEAP (GC arena size), RUNTIME float gate. MEMORY/SECTIONS are parsed but not yet applied to layout. Helper emission stays reference-driven (importing a `_dev_*` symbol emits it), not flag-driven.
+`.fld` (Forge Linker Descriptor): `ARCH`/`FORMAT`/`HOSTED`/`ENTRY`/`LOAD`/`HEAP`/`MEMORY`/`SECTIONS`/`RUNTIME` in `src/linker/`. Honored: ARCH, FORMAT (elf/elf32/flat/raw; flat = 512-byte boot sector with 0x55AA, raw = bare image for multi-stage loads), HOSTED, ENTRY, LOAD (x86_16 load address, default 0x7C00, drives imm16 string fixups), HEAP (GC arena on x86_64 / free-list heap on x86_32, default 4 MiB), RUNTIME float gate. MEMORY/SECTIONS are parsed but not yet applied to layout. Helper emission stays reference-driven (importing a `_dev_*` symbol emits it), not flag-driven.
 
 ## Architecture
 
@@ -77,7 +77,7 @@ Single Rust crate (`forgec`), edition 2024, source in `src/`.
 
 `from std.<name> import ...` resolves to `core/<name>.dev` by walking up from source directory. Only `std.*` modules are supported. See `src/driver/loader.rs`.
 
-Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `gc`, `fmt`. (All except `gc` are cross-target; `gc` is x86_64-only.)
+Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `gc`, `fmt`. (All except `gc` are cross-target; `gc` is x86_64-only and rejected on x86_32 at codegen.)
 
 Compilation is deterministic: `merge_modules` in `src/driver/loader.rs` merges transitive imports in sorted module-path order (the load graph is a `HashMap`, whose iteration order is randomized).
 
@@ -94,15 +94,25 @@ Compilation is deterministic: `merge_modules` in `src/driver/loader.rs` merges t
 
 ## Codegen notes
 
-- Local variables are 64-bit stack slots regardless of declared type
+- Local variables are 64-bit stack slots regardless of declared type (x86_64);
+  on x86_32, real struct locals are allocated with their full byte size (min 4)
 - Width-correct load/store (8/16/32-bit) only used for pointer deref and field access
 - No optimizer — every unsafe deref emits a real memory access (effectively volatile)
 - Struct fields are laid out sequentially without padding in the first milestone
-- x86_64: System V AMD64 ABI (args in RDI, RSI, RDX, RCX, R8, R9)
+- **Real structs are address-bearing on both backends**: evaluating a struct-
+  typed expression yields the struct's *address* (inline struct var → LEA; call
+  result / block / pointer var → pointer), never its contents inline.  Struct
+  returns use return-by-pointer: the caller allocates a scratch slot and passes
+  it as a hidden first argument; the callee copies the value there and returns
+  that pointer.  Synthetic `__enum_*` structs are the exception — their values
+  are 4-byte pointers and keep scalar semantics everywhere (`is_enum_struct` in
+  `codegen/layout.rs` / `codegen32/layout.rs`).
+- x86_64: System V AMD64 ABI (args in RDI, RSI, RDX, RCX, R8, R9; struct-return
+  hidden arg shifts the rest up by one)
 - Float values are stored as 64-bit integer bit patterns in 64-bit slots/RAX
 - Integer-to-float and float-to-integer casts use **XMM7** (scratch), not XMM0 — XMM0 is used by `eval_float_bin` for binary operations and will be clobbered
 - Parser `parse_type` and `parse_type_atom` call `skip_newlines()` internally; use `parse_type_noskip()` from the `as` handler in `parse_postfix` to avoid consuming newlines that the postfix loop needs to see
-- x86_32 structs (codegen32): real struct locals are allocated with their full byte size (min 4) and are **address-bearing** — `Var` of a struct leaves the slot address in EAX; copies/initializers/assignments copy the full byte width (`copy_struct_bytes`/`copy_ptr_to_slot`/`copy_mem_to_mem` in `codegen32/`). Struct returns > 4 bytes use the i386 **sret** convention (hidden first arg = caller-allocated struct pointer at `EBP+8`; callee copies the struct there and returns that pointer in EAX; named params shift up by one 4-byte arg slot). Synthetic `__enum_*` structs are the exception: their values are 4-byte pointers to a stack temp, so they keep scalar semantics everywhere (`is_enum_struct` in `codegen32/layout.rs`). Struct *arguments* still pass only the first 4 bytes.
+- x86_32 structs (codegen32): real struct locals are allocated with their full byte size (min 4) and are **address-bearing** — `Var` of a struct leaves the slot address in EAX; copies/initializers/assignments copy the full byte width (`copy_struct_bytes`/`copy_ptr_to_slot`/`copy_mem_to_mem` in `codegen32/`). All struct returns use the i386 **sret** convention (hidden first arg = caller-allocated struct pointer at `EBP+8`; callee copies the struct there and returns that pointer in EAX; named params shift up by one 4-byte arg slot). Struct *arguments* pass the struct's address (full value accessible to the callee). Synthetic `__enum_*` structs keep scalar semantics (`is_enum_struct` in `codegen32/layout.rs`).
 
 ## Codegen16 notes (x86_16 flat/raw images)
 
@@ -123,8 +133,36 @@ Compilation is deterministic: `merge_modules` in `src/driver/loader.rs` merges t
 - **Every function frame is zeroed on return** (`emit_func` emits the clearing
   before `leave`) so dead frames cannot act as GC roots — this is what makes
   `leak_check()` detect dropped references across calls.
-- x86_32 keeps the old bump allocator (no GC); importing `std.alloc` on x86_32
-  is fine, but `std.gc` types/helpers are x86_64-only.
+- x86_32 has its own free-list allocator (`_dev_alloc`/`_dev_free` emitted in
+  `src/backend/codegen32/runtime.rs`): first-fit with splitting, 4-byte header
+  before each payload (bit 0 = USED, rest = size), lazy arena init, `HEAP`
+  directive honored (default 4 MiB).  `free` returns blocks to the list.
+  There is no collector — importing `std.gc` on x86_32 is a clean codegen
+  error (`not supported on the x86_32 target`).
+
+## Generics
+
+- Generic functions (`def f[T]`) and generic structs (`struct Pair[T]`)
+  are monomorphized per instantiation.  Sema registers concrete instances
+  (`register_mono_struct`, `infer_generic_params`, `finalize_struct_apps` in
+  `src/sema/check/mod.rs`); the lowerer mirrors this with `generic_defs`,
+  `pending_instances`, `ensure_mono_struct`, and `pattern_type` in
+  `src/lower/mod.rs`.  Both sides agree on names via
+  `ty::mono_struct_name` (`Pair[int64]` → `Pair$i64`) and `sanitize_mangle`
+  in `src/ty/mod.rs`; `sema/typed::MonoInstance` mangles generic *function*
+  instances.
+- `Type::StructApp { base, args }` (in `src/ty/mod.rs`) is a generic struct
+  application that still contains type parameters — it exists only inside a
+  generic function body and is resolved once the instance is known.
+- Call sites infer type arguments from argument types (no explicit
+  `f[int64](...)` syntax); inference unifies `T` patterns and recovers
+  `Pair[T]` arguments by matching field types against the concrete struct.
+- Parser disambiguation: `Name[Type, ...] { .. }` is a generic struct
+  literal.  `parse_postfix` scans for a matching `]`, tries to parse a type
+  list, and only treats it as a type application if every argument is a
+  definite type (primitive, in-scope generic, or compound); anything else
+  falls back to an index expression.  Function `[T]` parameters are tracked
+  in `Parser::scope_generics` (pushed per `def`).
 
 ## Inline assembly
 

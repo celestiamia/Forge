@@ -11,6 +11,16 @@ impl Context {
                 TypedExpr::new(TypedExprKind::Literal(l.clone()), ty)
             }
             Expr::Ident(name) => self.check_ident(name),
+            // A bare type application in expression position is only
+            // meaningful as the object of a struct literal; the parser
+            // produces `StructLiteral` for that case, so this is an error.
+            Expr::GenericApp { name, .. } => {
+                self.error(format!(
+                    "generic type `{}` must be used as a type annotation or struct literal, not a standalone expression",
+                    name
+                ));
+                TypedExpr::new(TypedExprKind::Literal(Literal::Null), Type::Unknown)
+            }
             Expr::Call(c) => self.check_call(c, expected),
             Expr::Field(f) => self.check_field(f),
             Expr::Index(i) => self.check_index(i),
@@ -156,8 +166,60 @@ impl Context {
             }
             Expr::Break => TypedExpr::new(TypedExprKind::Break, Type::Unknown),
             Expr::Continue => TypedExpr::new(TypedExprKind::Continue, Type::Unknown),
-            Expr::StructLiteral { name, fields } => {
-                let struct_info = self.adts.get(name).cloned();
+            Expr::StructLiteral {
+                name,
+                generic_args,
+                fields,
+            } => {
+                // A generic struct literal (`Pair[int64] { .. }`) resolves
+                // to a monomorphized instance of the base struct.
+                let resolved_args: Vec<Type> = generic_args
+                    .iter()
+                    .map(|t| self.resolve_type_expr(t))
+                    .collect();
+                let name = if resolved_args.is_empty() {
+                    name.clone()
+                } else {
+                    match self.adts.get(name).cloned() {
+                        Some(info) if info.kind == AdtKind::Struct => {
+                            if resolved_args
+                                .iter()
+                                .any(|a| a.is_generic() || matches!(a, Type::StructApp { .. }))
+                            {
+                                // Still inside a generic body; defer concrete
+                                // naming and skip strict field checking.
+                                let ty = Type::StructApp {
+                                    base: info.name.clone(),
+                                    args: resolved_args,
+                                };
+                                let field_values = fields
+                                    .iter()
+                                    .map(|(fname, expr)| {
+                                        (fname.clone(), self.check_expr(expr, None))
+                                    })
+                                    .collect();
+                                return TypedExpr::new(
+                                    TypedExprKind::StructLiteral {
+                                        name: ty.to_string(),
+                                        fields: field_values,
+                                    },
+                                    ty,
+                                );
+                            }
+                            // Concrete arguments: register the monomorphized
+                            // instance so field access resolves it by name.
+                            match self.register_mono_struct(&info, &resolved_args) {
+                                Type::Struct { name, .. } => name,
+                                _ => unreachable!(),
+                            }
+                        }
+                        _ => {
+                            self.error(format!("unknown struct type `{}`", name));
+                            name.clone()
+                        }
+                    }
+                };
+                let struct_info = self.adts.get(&name).cloned();
                 if let Some(info) = struct_info {
                     if info.kind != AdtKind::Struct {
                         self.error(format!("`{}` is not a struct type", name));
@@ -384,7 +446,9 @@ impl Context {
                     }
                     right.ty.clone()
                 } else {
-                    if !left.ty.is_unknown() && !left.ty.is_numeric() {
+                    // Generic operands (inside a generic function body) defer
+                    // their numeric checks to the monomorphized instance.
+                    if !left.ty.is_unknown() && !left.ty.is_numeric() && !left.ty.is_generic() {
                         self.error_at(
                             b.span,
                             format!(
@@ -394,7 +458,7 @@ impl Context {
                             ),
                         );
                     }
-                    if !right.ty.is_unknown() && !right.ty.is_numeric() {
+                    if !right.ty.is_unknown() && !right.ty.is_numeric() && !right.ty.is_generic() {
                         self.error_at(
                             b.span,
                             format!(
@@ -715,41 +779,49 @@ impl Context {
         let arg_tys: Vec<Type> = typed_args.iter().map(|a| a.ty.clone()).collect();
 
         // Infer and substitute generic parameters.
-        let (generic_args, ret_ty) = if sig.generics.is_empty() {
-            (None, sig.ret.clone())
+        let inferred = if sig.generics.is_empty() {
+            None
         } else {
-            match infer_generic_params(&param_tys, &arg_tys) {
-                Some(mapping) => {
-                    let generic_args: Vec<Type> = sig
-                        .generics
-                        .iter()
-                        .map(|g| mapping.get(g).cloned().unwrap_or(Type::Unknown))
-                        .collect();
-                    let ret = substitute(&sig.ret, &mapping);
-                    let mono = MonoInstance::new(
-                        method_target
-                            .as_ref()
-                            .map(|t| format!("{}::{}", t, sig.name))
-                            .unwrap_or_else(|| sig.name.clone()),
-                        generic_args.clone(),
-                    );
-                    if !self.mono_instances.contains(&mono) {
-                        self.mono_instances.push(mono);
-                    }
-                    (Some(generic_args), ret)
+            self.infer_generic_params(&param_tys, &arg_tys)
+        };
+        let (generic_args, ret_ty) = match &inferred {
+            Some(mapping) => {
+                let generic_args: Vec<Type> = sig
+                    .generics
+                    .iter()
+                    .map(|g| mapping.get(g).cloned().unwrap_or(Type::Unknown))
+                    .collect();
+                let ret = self.finalize_struct_apps(&substitute(&sig.ret, mapping));
+                let mono = MonoInstance::new(
+                    method_target
+                        .as_ref()
+                        .map(|t| format!("{}::{}", t, sig.name))
+                        .unwrap_or_else(|| sig.name.clone()),
+                    generic_args.clone(),
+                );
+                if !self.mono_instances.contains(&mono) {
+                    self.mono_instances.push(mono);
                 }
-                None => {
-                    self.error(format!(
-                        "could not infer generic arguments for `{}`",
-                        sig.name
-                    ));
-                    (None, sig.ret.clone())
-                }
+                (Some(generic_args), ret)
             }
+            None if !sig.generics.is_empty() => {
+                self.error(format!(
+                    "could not infer generic arguments for `{}`",
+                    sig.name
+                ));
+                (None, sig.ret.clone())
+            }
+            None => (None, sig.ret.clone()),
         };
 
-        // Final compatibility check.
-        for (i, (arg, p)) in typed_args.iter().zip(param_tys.iter()).enumerate() {
+        // Final compatibility check.  Once generic parameters are known the
+        // parameters are substituted so `Pair[T]` compares against the
+        // concrete `Pair$i64` argument.
+        let check_params: Vec<Type> = match &inferred {
+            Some(mapping) => param_tys.iter().map(|p| substitute(p, mapping)).collect(),
+            None => param_tys,
+        };
+        for (i, (arg, p)) in typed_args.iter().zip(check_params.iter()).enumerate() {
             if !compatible(p, &arg.ty) {
                 self.error(format!(
                     "argument {} expected `{}`, found `{}`",
@@ -808,6 +880,34 @@ impl Context {
                 .find(|(_, fld)| fld.name == f.field)
         {
             let field_ty = field.ty.clone();
+            return TypedExpr::new(
+                TypedExprKind::Field {
+                    object: Box::new(object),
+                    field: f.field.clone(),
+                    field_index: idx,
+                },
+                field_ty,
+            );
+        }
+
+        // Field access on a deferred generic struct application (`Pair[T]`
+        // inside a generic body): look up the base struct's fields and
+        // substitute the application's type arguments.
+        if let Type::StructApp { base, args } = base_ty
+            && let Some(info) = self.adts.get(base.as_str())
+            && let Some((idx, field)) = info
+                .fields
+                .iter()
+                .enumerate()
+                .find(|(_, fld)| fld.name == f.field)
+        {
+            let mapping: HashMap<String, Type> = info
+                .generics
+                .iter()
+                .cloned()
+                .zip(args.iter().cloned())
+                .collect();
+            let field_ty = substitute(&field.ty, &mapping);
             return TypedExpr::new(
                 TypedExprKind::Field {
                     object: Box::new(object),
@@ -1049,7 +1149,7 @@ impl Context {
     }
 
     pub(super) fn expect_type(&mut self, expected: &Type, got: &Type, context: &str) {
-        if !got.is_unknown() && !expected.is_unknown() && got != expected {
+        if !got.is_unknown() && !expected.is_unknown() && !compatible(expected, got) {
             self.error(format!(
                 "{} expected `{}`, found `{}`",
                 context, expected, got

@@ -275,27 +275,41 @@ pub def main() -> int32:
         let src = r#"
 package test
 
+struct Pair[T]:
+    first: T
+    second: T
+
 def identity[T](x: T) -> T:
     return x
+
+def make_pair[T](a: T, b: T) -> Pair[T]:
+    return Pair[T] { first: a, second: b }
+
+pub def main() -> int64:
+    var p: Pair[int64] = make_pair(3 as int64, 4 as int64)
+    return identity(42 as int64) + p.second
 "#;
         let source = write_temp_dev(&dir, "generic", src);
         let output = dir.path().join("out");
-        let err = compile(CompileOptions {
+        let result = compile(CompileOptions {
             source,
-            output,
+            output: output.clone(),
             target: Some("x86_64-unknown-linux-gnu".to_string()),
             freestanding: false,
             linker: None,
         });
         assert!(
-            err.is_err(),
-            "generic function should be rejected, not panic"
+            result.is_ok(),
+            "generic functions should compile, got: {:?}",
+            result.err()
         );
-        let msg = err.unwrap_err().to_string();
-        assert!(
-            msg.contains("generic function `identity` is not supported yet"),
-            "expected clean generic error, got: {}",
-            msg
+        let status = std::process::Command::new(&output)
+            .status()
+            .expect("failed to run generic program");
+        assert_eq!(
+            status.code(),
+            Some(46),
+            "generic program should exit with 46 = 42 + 4"
         );
     }
 

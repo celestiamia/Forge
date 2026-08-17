@@ -299,20 +299,159 @@ impl<'p> CodeGen<'p> {
             self.bind_label(a);
             self.asm.push(Reg::Ebp)?;
             self.asm.mov(Reg::Ebp, Reg::Esp)?;
-            let patch_off = self.asm.len() + 2; // C7 /0 imm32, offset of imm32
-            self.alloc_ptr_patch = Some(patch_off);
-            self.asm.mov(Reg::Eax, 0i32)?; // eax = &bump_ptr (patched)
-            self.asm.mov(Reg::Ecx, Mem::base(Reg::Eax))?; // current ptr
-            self.asm.mov(Reg::Edx, Reg::Ecx)?;
-            self.asm.add(Reg::Edx, Mem::base_disp(Reg::Ebp, 8))?; // new ptr = current + size
-            self.asm.mov(Mem::base(Reg::Eax), Reg::Edx)?; // store new ptr
-            self.asm.mov(Reg::Eax, Reg::Ecx)?; // return previous ptr
+            // [ebp-4] = &heap_state (anchor), [ebp-8] = request size.
+            self.asm.sub(Reg::Esp, 8i32)?;
+            self.heap_state_reg(Reg::Eax)?; // eax = &heap_state (patched)
+            self.asm.mov(Mem::base_disp(Reg::Ebp, -4), Reg::Eax)?;
+
+            // ---- lazy heap initialisation -----------------------------------
+            self.asm
+                .mov(Reg::Ecx, Mem::base_disp(Reg::Eax, HP_LIMIT as i32))?;
+            let after_init = self.asm.new_label();
+            self.asm.test(Reg::Ecx, Reg::Ecx)?;
+            self.asm.jne(after_init)?; // already initialised
+            // heap_base was pre-patched to `arena_base`; limit = base + size.
+            self.asm.mov(Reg::Edx, Mem::base_disp(Reg::Eax, HP_BASE as i32))?;
+            let heap_size = self.heap_size();
+            self.asm.mov(Reg::Ecx, heap_size as i32)?;
+            self.asm.add(Reg::Ecx, Reg::Edx)?;
+            self.asm
+                .mov(Mem::base_disp(Reg::Eax, HP_LIMIT as i32), Reg::Ecx)?; // limit
+            // Whole arena = one free block: header at base, size = arena - hdr.
+            self.asm
+                .mov(Reg::Ecx, (heap_size as i32) - H_HDR_SIZE as i32)?;
+            self.asm.mov(Mem::base(Reg::Edx), Reg::Ecx)?; // *(base) = size (free)
+            self.asm.lea(Reg::Ecx, Mem::base_disp(Reg::Edx, H_HDR_SIZE as i32))?;
+            self.asm
+                .mov(Mem::base_disp(Reg::Eax, HP_FREE_HEAD as i32), Reg::Ecx)?; // free_head = base+4
+            self.bind_label(after_init);
+
+            // ---- round request up to 4 bytes (min 4) ------------------------
+            self.asm.mov(Reg::Ecx, Mem::base_disp(Reg::Ebp, 8))?; // size
+            self.asm.add(Reg::Ecx, 3i32)?;
+            self.asm.and(Reg::Ecx, !3i32)?; // 4-byte aligned
+            let min_ok = self.asm.new_label();
+            self.asm.cmp(Reg::Ecx, 4i32)?;
+            self.asm.jcc(Cond::Ae, min_ok)?;
+            self.asm.mov(Reg::Ecx, 4i32)?;
+            self.bind_label(min_ok);
+            self.asm.mov(Mem::base_disp(Reg::Ebp, -8), Reg::Ecx)?; // store req
+
+            // ---- first-fit search over the free list -------------------------
+            let walk = self.asm.new_label();
+            let walk_next = self.asm.new_label();
+            let nofit = self.asm.new_label();
+            let done = self.asm.new_label();
+            let split = self.asm.new_label();
+            let tw_head = self.asm.new_label();
+            let tw_done = self.asm.new_label();
+            let sp_head = self.asm.new_label();
+            let sp_done = self.asm.new_label();
+
+            self.bind_label(walk);
+            self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, -4))?; // &state
+            self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Eax, HP_FREE_HEAD as i32))?; // cur
+            self.asm.xor(Reg::Edx, Reg::Edx)?; // prev = 0
+            self.asm.mov(Reg::Ecx, Mem::base_disp(Reg::Ebp, -8))?; // req
+
+            let walk_loop = self.asm.new_label();
+            self.bind_label(walk_loop);
+            self.asm.test(Reg::Eax, Reg::Eax)?;
+            self.asm.je(nofit)?; // cur == 0 -> exhausted
+            self.asm
+                .mov(Reg::Edi, Mem::base_disp(Reg::Eax, -(H_HDR_SIZE as i32)))?; // hdr
+            self.asm.mov(Reg::Esi, Reg::Edi)?;
+            self.asm.and(Reg::Esi, !3i32)?; // size
+            self.asm.mov(Reg::Ebx, Mem::base(Reg::Eax))?; // nxt = *(cur)
+            self.asm.cmp(Reg::Esi, Reg::Ecx)?; // size vs req
+            self.asm.jcc(Cond::B, walk_next)?; // too small
+
+            // split if (size - req) >= SPLIT_THRESHOLD
+            self.asm.mov(Reg::Edi, Reg::Esi)?;
+            self.asm.sub(Reg::Edi, Reg::Ecx)?; // edi = size - req
+            self.asm.cmp(Reg::Edi, SPLIT_THRESHOLD as i32)?;
+            self.asm.jcc(Cond::Ae, split)?;
+
+            // ---- take_whole: unlink cur, used hdr = size|USED, return cur ----
+            self.asm.cmp(Reg::Edx, 0i32)?;
+            self.asm.je(tw_head)?;
+            self.asm.mov(Mem::base(Reg::Edx), Reg::Ebx)?; // *(prev) = nxt
+            self.asm.jmp(tw_done)?;
+            self.bind_label(tw_head);
+            self.asm.mov(Reg::Edi, Mem::base_disp(Reg::Ebp, -4))?; // &state
+            self.asm
+                .mov(Mem::base_disp(Reg::Edi, HP_FREE_HEAD as i32), Reg::Ebx)?; // free_head = nxt
+            self.bind_label(tw_done);
+            self.asm.mov(Reg::Edi, Reg::Esi)?;
+            self.asm.or(Reg::Edi, H_USED as i32)?;
+            self.asm
+                .mov(Mem::base_disp(Reg::Eax, -(H_HDR_SIZE as i32)), Reg::Edi)?;
+            self.asm.jmp(done)?;
+
+            // ---- split: unlink cur, splice in the remainder -------------------
+            self.bind_label(split);
+            // rem = cur + HDR + req ; *(rem) = nxt ; *(rem-HDR) = size-req-HDR
+            self.asm.lea(Reg::Edi, Mem::base_disp(Reg::Eax, H_HDR_SIZE as i32))?;
+            self.asm.add(Reg::Edi, Reg::Ecx)?; // edi = rem
+            self.asm.mov(Mem::base(Reg::Edi), Reg::Ebx)?; // *(rem) = nxt
+            self.asm.sub(Reg::Esi, Reg::Ecx)?;
+            self.asm.sub(Reg::Esi, H_HDR_SIZE as i32)?; // rem size = size - req - HDR
+            self.asm
+                .mov(Mem::base_disp(Reg::Edi, -(H_HDR_SIZE as i32)), Reg::Esi)?;
+            self.asm.cmp(Reg::Edx, 0i32)?;
+            self.asm.je(sp_head)?;
+            self.asm.mov(Mem::base(Reg::Edx), Reg::Edi)?; // *(prev) = rem
+            self.asm.jmp(sp_done)?;
+            self.bind_label(sp_head);
+            self.asm.mov(Reg::Esi, Mem::base_disp(Reg::Ebp, -4))?; // &state
+            self.asm
+                .mov(Mem::base_disp(Reg::Esi, HP_FREE_HEAD as i32), Reg::Edi)?; // free_head = rem
+            self.bind_label(sp_done);
+            // used header at cur-HDR = req | USED
+            self.asm.mov(Reg::Edi, Reg::Ecx)?;
+            self.asm.or(Reg::Edi, H_USED as i32)?;
+            self.asm
+                .mov(Mem::base_disp(Reg::Eax, -(H_HDR_SIZE as i32)), Reg::Edi)?;
+            self.asm.jmp(done)?;
+
+            // ---- advance over a too-small free block --------------------------
+            self.bind_label(walk_next);
+            self.asm.mov(Reg::Edx, Reg::Eax)?; // prev = cur
+            self.asm.mov(Reg::Eax, Reg::Ebx)?; // cur = nxt
+            self.asm.jmp(walk_loop)?;
+
+            // ---- free list exhausted: return null -----------------------------
+            self.bind_label(nofit);
+            self.asm.xor(Reg::Eax, Reg::Eax)?; // NULL
+
+            self.bind_label(done);
             self.asm.leave();
             self.asm.ret()?;
         }
 
         if let Some(&f) = self.func_labels.get("_dev_free") {
             self.bind_label(f);
+            self.asm.push(Reg::Ebp)?;
+            self.asm.mov(Reg::Ebp, Reg::Esp)?;
+            self.asm.mov(Reg::Ecx, Mem::base_disp(Reg::Ebp, 8))?; // p
+            self.asm.test(Reg::Ecx, Reg::Ecx)?;
+            let ret = self.asm.new_label();
+            self.asm.je(ret)?; // free(null) is a no-op
+            // mark free: clear the USED flag bit -> hdr = size
+            self.asm
+                .mov(Reg::Edx, Mem::base_disp(Reg::Ecx, -(H_HDR_SIZE as i32)))?;
+            self.asm.and(Reg::Edx, !3i32)?;
+            self.asm
+                .mov(Mem::base_disp(Reg::Ecx, -(H_HDR_SIZE as i32)), Reg::Edx)?;
+            // prepend: next = free_head; *(p) = next; free_head = p
+            self.heap_state_reg(Reg::Eax)?; // eax = &heap_state (patched)
+            self.asm
+                .mov(Reg::Edx, Mem::base_disp(Reg::Eax, HP_FREE_HEAD as i32))?;
+            self.asm.mov(Mem::base(Reg::Ecx), Reg::Edx)?;
+            self.asm
+                .mov(Mem::base_disp(Reg::Eax, HP_FREE_HEAD as i32), Reg::Ecx)?;
+            self.bind_label(ret);
+            self.asm.leave();
             self.asm.ret()?;
         }
 

@@ -48,8 +48,12 @@ pub fn parse_module_in_dir(src: &str, base_dir: &std::path::Path) -> Result<Modu
 
 /// A recursive-descent parser for Forge `.dev` source.
 pub struct Parser {
-    tokens: Vec<TokenPos>,
-    pos: usize,
+    pub(super) tokens: Vec<TokenPos>,
+    pub(super) pos: usize,
+    /// Generic type parameters in scope while parsing the current function's
+    /// signature and body (`T` in `def f[T]`); used to disambiguate generic
+    /// struct literals (`Pair[T] { .. }`) from index expressions.
+    scope_generics: Vec<String>,
     pub(super) base_dir: std::path::PathBuf,
 }
 
@@ -58,8 +62,51 @@ impl Parser {
         Self {
             tokens,
             pos: 0,
+            scope_generics: Vec::new(),
             base_dir: std::path::PathBuf::from("."),
         }
+    }
+
+    pub(super) fn push_scope_generics(&mut self, generics: &[String]) {
+        self.scope_generics.extend(generics.iter().cloned());
+    }
+
+    pub(super) fn pop_scope_generics(&mut self, n: usize) {
+        for _ in 0..n {
+            self.scope_generics.pop();
+        }
+    }
+
+    pub(super) fn in_scope_generics(&self, name: &str) -> bool {
+        self.scope_generics.iter().any(|g| g == name)
+    }
+
+/// Find the index of the `]` matching the `[` at the cursor, skipping
+    /// newline/indent tokens.  The opening `[` has already been consumed by
+    /// the caller, so the scan starts with depth 1.  Returns `None` if the
+    /// bracket never closes.
+    pub(super) fn scan_matching_rbracket(&self) -> Option<usize> {
+        let mut depth = 1usize;
+        let mut i = self.pos;
+        while i < self.tokens.len() {
+            match self.tokens[i].token {
+                Token::Newline | Token::Indent | Token::Dedent => {}
+                Token::LBracket => depth += 1,
+                Token::RBracket => {
+                    if depth == 0 {
+                        return None;
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                }
+                Token::Eof => return None,
+                _ => {}
+            }
+            i += 1;
+        }
+        None
     }
 
     pub(super) fn peek(&self) -> &Token {

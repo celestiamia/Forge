@@ -1,0 +1,39 @@
+package test
+
+struct Point:
+    x: int64
+    y: int64
+
+def make_point(x: int64, y: int64) -> Point:
+    var p: Point
+    p.x = x
+    p.y = y
+    return p
+
+def sum_point(p: Point) -> int64:
+    return p.x + p.y
+
+def scale(p: Point, f: int64) -> Point:
+    var q: Point
+    q.x = p.x * f
+    q.y = p.y * f
+    return q
+
+pub def main() -> int64:
+    if make_point(3, 4).x != 3:
+        return 1
+    if make_point(3, 4).y != 4:
+        return 2
+    var p: Point = make_point(10, 20)
+    if p.x != 10 || p.y != 20:
+        return 3
+    if sum_point(p) != 30:
+        return 4
+    if sum_point(make_point(5, 6)) != 11:
+        return 5
+    p = scale(p, 2)
+    if p.x != 20 || p.y != 40:
+        return 6
+    if sum_point(scale(make_point(1, 2), 3)) != 9:
+        return 7
+    return 0

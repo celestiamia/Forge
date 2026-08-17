@@ -1,8 +1,61 @@
-use super::parser::parse_int;
+use super::parser::{parse_int, Parser};
+use crate::parser::r#type::is_primitive_name;
 use super::*;
 use crate::lexer::Token;
 
 impl Parser {
+    /// Try to parse a comma-separated type list (as used by generic struct
+    /// literals) starting at the cursor.  On any parse failure the position is
+    /// restored and `None` is returned so the caller can fall back to parsing
+    /// an index expression.
+    fn try_parse_type_list(&mut self) -> Option<Vec<TypeExpr>> {
+        let saved = self.pos;
+        let mut args = Vec::new();
+        match self.parse_type() {
+            Ok(t) => args.push(t),
+            Err(_) => {
+                self.pos = saved + 1;
+                return None;
+            }
+        }
+        self.skip_newlines();
+        while self.eat(&Token::Comma) {
+            self.skip_newlines();
+            match self.parse_type() {
+                Ok(t) => args.push(t),
+                Err(_) => {
+                    self.pos = saved;
+                    return None;
+                }
+            }
+            self.skip_newlines();
+        }
+        self.eat(&Token::Dedent);
+        if !self.eat(&Token::RBracket) {
+            self.pos = saved;
+            return None;
+        }
+        Some(args)
+    }
+
+    /// Whether a parsed type expression is unambiguously a type (as opposed
+    /// to a variable name used as an index): primitives, generic parameters in
+    /// scope, and any compound type forms.
+    fn type_expr_is_definite(&self, ty: &TypeExpr) -> bool {
+        match ty {
+            TypeExpr::Name(n) => is_primitive_name(n) || self.in_scope_generics(n),
+            TypeExpr::Pointer(_)
+            | TypeExpr::Slice(_)
+            | TypeExpr::Array(..)
+            | TypeExpr::Tuple(_)
+            | TypeExpr::Own(_)
+            | TypeExpr::Ref(_)
+            | TypeExpr::RefMut(_)
+            | TypeExpr::GenericApp { .. }
+            | TypeExpr::Function { .. } => true,
+        }
+    }
+
     pub(super) fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         self.parse_or()
     }
@@ -368,7 +421,9 @@ impl Parser {
                 // expression (e.g. `var x = y as int32` followed by
                 // `(p)[0] = i` used to merge into one bogus chain).
                 let continues = matches!(ahead, Token::Dot | Token::As)
-                    || (matches!(ahead, Token::LBrace) && matches!(expr, Expr::Ident(_)));
+                    || (matches!(ahead, Token::LBrace)
+                        && (matches!(expr, Expr::Ident(_))
+                            || matches!(expr, Expr::GenericApp { .. })));
                 if !continues {
                     break;
                 }
@@ -396,7 +451,42 @@ impl Parser {
                     callee: Box::new(expr),
                     args,
                 });
-            } else if self.eat(&Token::LBracket) {
+            } else if self.peek() == &Token::LBracket {
+                // `Name[Type, ...] { .. }` is a generic struct literal.  A
+                // bracket pair followed by `{` whose contents parse as a type
+                // list of definite types is treated as a type application;
+                // anything else falls back to a plain index expression.
+                let saved = self.pos;
+                self.advance();
+                if let Some(close_idx) = self.scan_matching_rbracket() {
+                    let mut k = close_idx + 1;
+                    while k < self.tokens.len()
+                        && matches!(
+                            self.tokens[k].token,
+                            Token::Newline | Token::Indent | Token::Dedent
+                        )
+                    {
+                        k += 1;
+                    }
+                    if k < self.tokens.len()
+                        && self.tokens[k].token == Token::LBrace
+                        && let Expr::Ident(base) = &expr
+                    {
+                        if let Some(args) = self.try_parse_type_list() {
+                            if args
+                                .iter()
+                                .all(|a| self.type_expr_is_definite(a))
+                            {
+                                expr = Expr::GenericApp {
+                                    name: base.clone(),
+                                    args,
+                                };
+                                continue;
+                            }
+                        }
+                    }
+                }
+                self.pos = saved + 1;
                 let index = self.parse_expr()?;
                 self.expect(Token::RBracket)?;
                 expr = Expr::Index(IndexExpr {
@@ -421,10 +511,13 @@ impl Parser {
                     object: Box::new(expr),
                     field,
                 });
-            } else if self.peek() == &Token::LBrace && matches!(expr, Expr::Ident(_)) {
+            } else if self.peek() == &Token::LBrace
+                && (matches!(expr, Expr::Ident(_)) || matches!(expr, Expr::GenericApp { .. }))
+            {
                 self.advance();
-                let name = match expr {
-                    Expr::Ident(n) => n,
+                let (name, generic_args) = match expr {
+                    Expr::Ident(n) => (n, Vec::new()),
+                    Expr::GenericApp { name, args } => (name, args),
                     _ => unreachable!(),
                 };
                 let mut fields = Vec::new();
@@ -446,7 +539,11 @@ impl Parser {
                     }
                     self.expect(Token::RBrace)?;
                 }
-                expr = Expr::StructLiteral { name, fields };
+                expr = Expr::StructLiteral {
+                    name,
+                    generic_args,
+                    fields,
+                };
             } else if self.peek() == &Token::As {
                 self.advance();
                 let ty = self.parse_type_noskip()?;

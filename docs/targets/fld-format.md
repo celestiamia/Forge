@@ -62,7 +62,7 @@ RUNTIME {
 | `HOSTED` | `true` emits the hosted `_start` runtime stub that calls the entry function; `false` targets the entry function directly. Defaults to `true`. |
 | `ENTRY` | Entry function. Defaults to `_forge_main` (the mangled `pub def main()`) when hosted, `_start` when freestanding. In hosted mode this is the function the runtime calls; in freestanding mode it is the function execution begins at. |
 | `LOAD` | Where an x86_16 `flat`/`raw` image is loaded in memory. Defaults to `0x7C00` (the classic boot-sector address). Code that embeds absolute addresses (string literals) is fixed up against this base, so a stage loaded elsewhere must declare it (e.g. a stage-2 loader at `0x9000`). |
-| `HEAP` | Size of the garbage-collected heap in bytes. Must be non-zero when `RUNTIME alloc` or `RUNTIME gc` is enabled. |
+| `HEAP` | Size of the compiler-emitted heap in bytes. Must be non-zero when `RUNTIME alloc` or `RUNTIME gc` is enabled. Backs the GC arena on x86_64 and the free-list heap on x86_32 (both default to 4 MiB). |
 | `MEMORY { }` | Named memory regions with permission flags (`r`, `w`, `x`), origin, and length. |
 | `SECTIONS { }` | Maps output sections (`.text`, `.rodata`, `.data`, `.bss`) to memory regions. |
 | `RUNTIME { }` | Capability flags for the runtime helper set. All default to `false` except `syscalls` and `float`, which default to `true`. |

@@ -83,7 +83,8 @@ free(buf)
 - **x86_64**: 4 MiB heap, first-fit free list with 8-byte block headers.
   When the free list is exhausted, a conservative mark-and-sweep collection
   runs automatically and allocation retries once.
-- **x86_32**: bump allocator; `free` is a no-op.
+- **x86_32**: 4 MiB heap, first-fit free list with 4-byte block headers;
+  `free` returns blocks to the list for reuse. There is no garbage collector.
 
 See [std.alloc](../stdlib/alloc.md) and [std.gc](../stdlib/gc.md).
 
@@ -139,8 +140,8 @@ All take `ptr[uint8]` arguments and a `uint64` byte count.
 | Feature | x86_64 | x86_32 | x86_16 |
 |---------|--------|--------|--------|
 | Pointer size | 8 bytes | 4 bytes | 2 bytes (16-bit) |
-| Heap (`std.alloc`) | First-fit + GC (4 MiB) | Bump | None |
-| GC (`std.gc`) | Yes | No | No |
+| Heap (`std.alloc`) | First-fit + GC (4 MiB) | First-fit, no GC (4 MiB) | None |
+| GC (`std.gc`) | Yes | No (clean error) | No |
 | Floats | Yes | No | No |
 
 ## Unsupported (see Known Issues)

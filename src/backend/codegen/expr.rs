@@ -69,6 +69,13 @@ impl<'p> CodeGen<'p> {
                         self.asm
                             .mov(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset))?;
                     }
+                    Type::Struct(name) if !name.starts_with("__enum_") => {
+                        // Real structs are address-bearing: the variable's
+                        // slot holds the struct itself, so evaluating it
+                        // yields its address.
+                        self.asm
+                            .lea(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset))?;
+                    }
                     _ => {
                         self.asm
                             .mov(Reg::Rax, Mem::base_disp(Reg::Rbp, slot.offset))?;
@@ -76,7 +83,7 @@ impl<'p> CodeGen<'p> {
                 }
             }
             ExprKind::Bin { op, left, right } => self.eval_bin(*op, left, right, &e.ty)?,
-            ExprKind::Call { func, args } => self.eval_call(func, args)?,
+            ExprKind::Call { func, args } => self.eval_call(func, args, &e.ty)?,
             ExprKind::Cast { expr, ty } => self.eval_cast(expr, ty)?,
             ExprKind::Gep { base, field } => {
                 self.eval_expr(base)?; // pointer to struct in RAX
@@ -333,8 +340,9 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
-    pub(super) fn eval_call(&mut self, func: &str, args: &[Expr]) -> Result<()> {
-        if args.len() > 6 {
+    pub(super) fn eval_call(&mut self, func: &str, args: &[Expr], ret_ty: &Type) -> Result<()> {
+        let sret = self.sret_struct_name(ret_ty);
+        if args.len() + usize::from(sret.is_some()) > 6 {
             bail!("functions with more than 6 arguments are not supported");
         }
         let target = *self
@@ -350,8 +358,19 @@ impl<'p> CodeGen<'p> {
             arg_slots.push(slot);
         }
 
+        // Return-by-pointer: the callee gets a hidden first argument pointing
+        // at a caller-allocated scratch slot and returns that pointer in RAX.
+        let mut base = 0;
+        if let Some(name) = &sret {
+            let size = self.struct_size(name)?;
+            let scratch = self.alloc_slot(size, 8);
+            self.asm
+                .lea(Reg::Rdi, Mem::base_disp(Reg::Rbp, scratch.offset))?;
+            base = 1;
+        }
+
         for (i, slot) in arg_slots.iter().enumerate() {
-            let reg = abi_reg(i)?;
+            let reg = abi_reg(i + base)?;
             self.asm.mov(reg, Mem::base_disp(Reg::Rbp, slot.offset))?;
         }
 

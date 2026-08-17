@@ -199,6 +199,9 @@ impl LowerCtx<'_> {
             ast::Expr::Deref(d) => self.lower_deref(d),
             ast::Expr::Ref(r) => self.lower_ref(r),
             ast::Expr::Call(c) => self.lower_call(c),
+            ast::Expr::GenericApp { name, .. } => {
+                bail!("generic type `{}` cannot be used as a standalone expression", name)
+            }
             ast::Expr::Cast(c) => self.lower_cast(c),
             ast::Expr::Field(f) => self.lower_field(f),
             ast::Expr::Index(i) => self.lower_index(i),
@@ -286,7 +289,25 @@ impl LowerCtx<'_> {
             ast::Expr::RefMut(_) => {
                 bail!("refmut expressions are not supported in the first milestone")
             }
-            ast::Expr::StructLiteral { name, fields } => self.lower_struct_literal(name, fields),
+            ast::Expr::StructLiteral {
+                name,
+                generic_args,
+                fields,
+            } => {
+                let resolved = if generic_args.is_empty() {
+                    name.clone()
+                } else {
+                    let arg_tys: Vec<crate::ty::Type> = generic_args
+                        .iter()
+                        .map(|t| {
+                            let ty = self.lower_type(t)?;
+                            Ok(self.ir_to_sema(&ty))
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    self.ensure_mono_struct(name, &arg_tys)?
+                };
+                self.lower_struct_literal(&resolved, fields)
+            }
             ast::Expr::UnsafeBlock(b) => self.lower_block_expr(b),
         }
     }
@@ -505,12 +526,56 @@ impl LowerCtx<'_> {
             .iter()
             .map(|a| self.lower_expr(a))
             .collect::<Result<Vec<_>>>()?;
+
+        // Call to a generic function: infer the concrete type arguments from
+        // the argument types and route to the monomorphized instance.
+        if let Some(def) = self.generic_defs.get(&name).cloned() {
+            let arg_tys: Vec<crate::ty::Type> = args
+                .iter()
+                .map(|a| self.ir_to_sema(&a.ty))
+                .collect();
+            let mut mapping: std::collections::HashMap<String, crate::ty::Type> =
+                std::collections::HashMap::new();
+            for (p, a) in def.patterns.iter().zip(arg_tys.iter()) {
+                if self.lower_collect(p, a, &mut mapping).is_none() {
+                    bail!("could not infer generic arguments for `{}`", name);
+                }
+            }
+            let generic_args: Vec<crate::ty::Type> = def
+                .generics
+                .iter()
+                .map(|g| mapping.get(g).cloned().unwrap_or(crate::ty::Type::Unknown))
+                .collect();
+            let mangled = self.register_instance(&name, &def, generic_args)?;
+            let ret = self
+                .funcs
+                .get(&mangled)
+                .map(|(_, r)| r.clone())
+                .unwrap_or(ir::Type::Void);
+            let ret = match &ret {
+                ir::Type::Struct(s) if !s.starts_with("__enum_") => {
+                    ir::Type::Ptr(Box::new(ret))
+                }
+                _ => ret,
+            };
+            return Ok(ir::Expr::new(ir::ExprKind::Call { func: mangled, args }, ret));
+        }
+
         let ret = self
             .funcs
             .get(&name)
             .or_else(|| self.externs.get(&name))
             .map(|(_, r)| r.clone())
             .unwrap_or(ir::Type::Void);
+        // Struct-returning calls produce a pointer to the caller's scratch
+        // slot (return-by-pointer ABI); the synthetic `__enum_*` structs are
+        // returned inline as before.
+        let ret = match &ret {
+            ir::Type::Struct(s) if !s.starts_with("__enum_") => {
+                ir::Type::Ptr(Box::new(ret))
+            }
+            _ => ret,
+        };
         Ok(ir::Expr::new(ir::ExprKind::Call { func: name, args }, ret))
     }
 

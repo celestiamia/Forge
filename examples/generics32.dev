@@ -1,0 +1,29 @@
+package generics32
+
+# Generic functions and generic structs on the x86_32 target (no floats).
+# Structs pass by pointer through sret; generic instances reuse the same
+# ABI path as hand-written struct code.
+
+struct Pair[T]:
+    first: T
+    second: T
+
+def id[T](x: T) -> T:
+    return x
+
+def make_pair[T](a: T, b: T) -> Pair[T]:
+    return Pair[T] { first: a, second: b }
+
+def sum_pair[T](p: Pair[T]) -> T:
+    return p.first + p.second
+
+pub def main() -> int64:
+    var p: Pair[int64] = make_pair(3 as int64, 4 as int64)
+    var q: Pair[int32] = make_pair(5 as int32, 6 as int32)
+    if sum_pair(p) != 7:
+        return 1
+    if sum_pair(q) != 11:
+        return 2
+    if id(1 as int64) != 1:
+        return 3
+    return 0

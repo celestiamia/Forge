@@ -83,6 +83,10 @@ pub struct CodeGen<'p> {
     struct_layouts: HashMap<String, StructLayout>,
     addr_tmp: i32,
     ret_label: u32,
+    /// Frame offset of the saved return-by-pointer target (hidden first
+    /// argument) for the function currently being emitted, if it returns a
+    /// struct by pointer.
+    sret_slot: Option<i32>,
     rand_seed_patch: Option<usize>,
     /// Code offsets of `movabs rax, <gc_state_vaddr>` immediates (64-bit) placed at
     /// the start of each GC runtime helper, patched once the `.data` segment
@@ -417,6 +421,7 @@ impl<'p> CodeGen<'p> {
             struct_layouts,
             addr_tmp: 0,
             ret_label: 0,
+            sret_slot: None,
             rand_seed_patch: None,
             gc_state_patches: Vec::new(),
             gc_enabled: false,
@@ -466,12 +471,24 @@ impl<'p> CodeGen<'p> {
         let slot = self.alloc_slot(8, 8);
         self.addr_tmp = slot.offset;
 
+        // Return-by-pointer: a hidden first argument (RDI) receives the
+        // caller's scratch slot; the remaining parameters shift up by one.
+        // Save the pointer so `return` can write the result back through it.
+        let sret = self.sret_struct_name(&f.ret).is_some();
+        self.sret_slot = None;
+        if sret {
+            let slot = self.alloc_slot(8, 8);
+            self.sret_slot = Some(slot.offset);
+            self.asm
+                .mov(Mem::base_disp(Reg::Rbp, slot.offset), Reg::Rdi)?;
+        }
+
         for (name, _ty) in &f.params {
             self.alloc_named_slot(name, 8, 8);
         }
         for (i, (name, _ty)) in f.params.iter().enumerate() {
             let slot = self.locals.get(name).unwrap();
-            let reg = abi_reg(i)?;
+            let reg = abi_reg(i + usize::from(sret))?;
             self.asm.mov(Mem::base_disp(Reg::Rbp, slot.offset), reg)?;
         }
 
@@ -538,10 +555,22 @@ impl<'p> CodeGen<'p> {
             self.alloc_named_slot(name, size, align)
         };
         if let Some(e) = init {
-            self.eval_expr(e)?;
-            self.store_scalar(slot.offset)?;
+            // Struct-typed bindings (declared as a bare non-enum struct type)
+            // are laid out inline in the slot: the initializer evaluates to
+            // the struct's address (inline struct var → LEA, call result /
+            // block / pointer var → pointer) and the full value is copied in.
+            // Pointer-typed bindings just store the pointer as a scalar.
+            if let Type::Struct(name) = ty
+                && !name.starts_with("__enum_")
+            {
+                self.eval_expr(e)?;
+                let size = self.struct_size(name)?;
+                self.copy_ptr_to_slot(slot.offset, Reg::Rax, size)?;
+            } else {
+                self.eval_expr(e)?;
+                self.store_scalar(slot.offset)?;
+            }
         }
-        let _ = ty;
         Ok(())
     }
 
@@ -561,6 +590,17 @@ impl<'p> CodeGen<'p> {
         self.lvalue_addr(lhs)?;
         self.asm
             .mov(Mem::base_disp(Reg::Rbp, self.addr_tmp), Reg::Rax)?;
+        if let Some(sname) = self.sret_struct_name(&rhs.ty) {
+            // Struct assignment: rhs evaluates to the address of the struct;
+            // copy the full value to the lvalue address.
+            self.eval_expr(rhs)?;
+            let size = self.struct_size(&sname)?;
+            self.asm.mov(Reg::Rsi, Reg::Rax)?;
+            self.asm
+                .mov(Reg::Rdi, Mem::base_disp(Reg::Rbp, self.addr_tmp))?;
+            self.copy_mem_to_mem(Reg::Rdi, Reg::Rsi, size)?;
+            return Ok(());
+        }
         self.eval_expr(rhs)?;
         self.asm
             .mov(Reg::Rdx, Mem::base_disp(Reg::Rbp, self.addr_tmp))?;
@@ -575,7 +615,23 @@ impl<'p> CodeGen<'p> {
     }
 
     fn emit_return(&mut self, e: &Expr) -> Result<()> {
-        self.eval_expr(e)?;
+        if let Some(sret_off) = self.sret_slot {
+            // The return value evaluates to the address of a struct; copy it
+            // into the caller's scratch slot (hidden first argument) and
+            // return that pointer in RAX.
+            self.eval_expr(e)?;
+            let name = self
+                .sret_struct_name(&e.ty)
+                .ok_or_else(|| anyhow::anyhow!("sret function returning non-struct value"))?;
+            let size = self.struct_size(&name)?;
+            self.asm.mov(Reg::Rsi, Reg::Rax)?;
+            self.asm
+                .mov(Reg::Rdi, Mem::base_disp(Reg::Rbp, sret_off))?;
+            self.copy_mem_to_mem(Reg::Rdi, Reg::Rsi, size)?;
+            self.asm.mov(Reg::Rax, Reg::Rdi)?;
+        } else {
+            self.eval_expr(e)?;
+        }
         self.asm.jmp(self.ret_label)?;
         Ok(())
     }

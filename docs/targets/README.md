@@ -85,8 +85,8 @@ cargo build --release --target i686-unknown-linux-gnu
 
 ### Limitations
 - ❌ No float support (`float32`, `float64`)
-- ❌ No GC (`std.gc`)
-- ✅ Bump allocator (`std.alloc`)
+- ❌ No GC (`std.gc` — importing it is a clean codegen error)
+- ✅ Free-list allocator (`std.alloc`; first-fit with splitting, 4-byte headers)
 
 ### Standard Library
 | Module | Support |

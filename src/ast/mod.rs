@@ -314,7 +314,15 @@ pub enum Expr {
     RefMut(RefExpr),
     StructLiteral {
         name: String,
+        /// Type arguments for a generic struct instantiation (`Pair[int64] { .. }`).
+        generic_args: Vec<TypeExpr>,
         fields: Vec<(String, Expr)>,
+    },
+    /// A generic type application in expression position (`Pair[int64]`);
+    /// only meaningful as the object of a struct literal.
+    GenericApp {
+        name: String,
+        args: Vec<TypeExpr>,
     },
     Tuple(Vec<Expr>),
     Array(Vec<Expr>),
@@ -347,6 +355,7 @@ impl Expr {
             Expr::Match(e) => Some(e.span),
             Expr::Range(e) => Some(e.span),
             Expr::StructLiteral { .. }
+            | Expr::GenericApp { .. }
             | Expr::Literal(_)
             | Expr::Ident(_)
             | Expr::Tuple(_)
@@ -517,6 +526,11 @@ pub enum TypeExpr {
     Own(Box<TypeExpr>),
     Ref(Box<TypeExpr>),
     RefMut(Box<TypeExpr>),
+    /// A generic struct application: `Pair[int64, f64]`.
+    GenericApp {
+        base: String,
+        args: Vec<TypeExpr>,
+    },
     Function {
         params: Vec<TypeExpr>,
         ret: Option<Box<TypeExpr>>,

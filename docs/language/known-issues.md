@@ -11,20 +11,19 @@ compiler:
 
 | Construct | Error |
 |-----------|-------|
-| Generic functions: `def identity[T](x: T) -> T` | `generic function \`identity\` is not supported yet` (at lowering) |
-| Generic structs: `struct Pair[T]: ...` | `generic struct \`Pair\` is not supported yet` |
 | `impl` blocks: `impl Point: ...` | Methods type-check; the impl itself is accepted (method calls not yet lowered) |
 | Nested struct fields: `Outer { inner: Inner { ... } }` | Supported; layouts are computed recursively |
 | Recursive structs by value: `struct A: a: A` | `struct \`A\` contains itself by value` |
 | `int128` / `uint128` | `128-bit integers are not supported by any backend yet` |
+| `std.gc` on x86_32 | `` `_dev_gc_collect` (std.gc) is not supported on the x86_32 target; std.alloc's alloc/free work, but there is no garbage collector `` (at codegen) |
 
 ## Parsed But Not Functional
 
 | Construct | Status |
 |-----------|--------|
 | `union` | "not a struct type" error; no codegen |
-| Tuples (type annotations, literals, field access `t.0`, `t.1`) | Supported end-to-end on x86_64 and x86_32 |
-| Tuple destructuring `let (a, b) = t` and `-> (T, U)` as a **return type** | Parse/typecheck, but the type is not propagated through calls (call result falls back to `int64`; use an intermediate `ref[T]` where possible) |
+| Tuples | Supported end-to-end on x86_64 and x86_32: literals, annotations, indexed field access, destructuring, and **return types** |
+| Generic signatures with `union`/`enum` types | Lowering error — `union/enum types are not supported in generic signatures yet` |
 | Fixed-size array annotations `[int32; 5]` and repeat literals `[0; 3]` | Parse error (plain `[1, 2, 3]` literals work) |
 | Slices `slice[T]`, `&arr[..]`, `&arr[1..3]` | Type error |
 | Function types `fn(int32) -> int32` | Parse error |
@@ -48,12 +47,14 @@ compiler:
 
 - **x86_32 has no float support** — any `float32`/`float64` usage fails at
   codegen. Stdlib modules that use floats cannot be imported on x86_32.
-- **x86_32 struct-by-value copies are limited** — whole-struct copies,
-  assignments, and returns work via inline slot copies / the i386 sret
-  convention (struct returns > 4 bytes go through a hidden first-arg
-  pointer).  Struct *arguments* still pass only the first 4 bytes of the
-  struct (tag/first field); passing a multi-field struct by value loses
-  every field after the first.
+- **Struct values are address-bearing on both backends** — a struct-typed
+  expression evaluates to the struct's address, not its contents.
+  x86_64: struct arguments are passed by pointer (hidden sret slot for
+  returns) so the callee sees the full struct; x86_32 uses the same scheme
+  with the i386 cdecl convention (hidden first arg = caller-allocated struct
+  pointer for returns; named parameters shift up by one 4-byte slot).
+  Synthetic `__enum_*` structs are the exception — their values are 4-byte
+  pointers and keep scalar semantics everywhere.
 - **No optimizer** — every unsafe deref emits a real memory access
   (effectively volatile); codegen is roughly `-O0` quality.
 - **Struct fields are laid out without padding** — alignment is not
@@ -63,8 +64,12 @@ compiler:
 
 ## Standard Library Limitations
 
-- `std.gc` is **x86_64 only**.
-- `std.alloc` on x86_32 is a bump allocator — `free` is a no-op.
+- `std.gc` is **x86_64 only** — importing it on x86_32 fails at codegen with a
+  clean diagnostic (the free-list allocator works, there is just no
+  collector).
+- `std.alloc` on x86_32 is a free-list allocator (first-fit with splitting,
+  4-byte block headers); `free` returns blocks to the list for reuse, but
+  there is no automatic reclamation.
 - `std.string` functions require null-terminated strings; no bounds checking.
 - `getchar` returns `-1` on EOF; `rand` is a 31-bit LCG (not cryptographic).
 - Importing a `std.*` module compiles the **entire** module file, so importing

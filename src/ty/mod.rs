@@ -72,6 +72,13 @@ pub enum Type {
     Generic {
         name: String,
     },
+    /// A generic struct application that still contains generic parameters
+    /// (e.g. `Pair[T]` inside a generic function body).  Resolved to a
+    /// concrete `Struct` once the surrounding instance is known.
+    StructApp {
+        base: String,
+        args: Vec<Type>,
+    },
     Unknown,
 }
 
@@ -152,6 +159,11 @@ impl Type {
     /// Returns true for the `Unknown` type.
     pub fn is_unknown(&self) -> bool {
         matches!(self, Type::Unknown)
+    }
+
+    /// Returns true for a generic type parameter (`T`).
+    pub fn is_generic(&self) -> bool {
+        matches!(self, Type::Generic { .. })
     }
 
     /// Returns true for integer-like types (signed/unsigned integers, `char`, `bool`, `usize`, `isize`).
@@ -313,9 +325,39 @@ impl fmt::Display for Type {
             Type::Ref { pointee } => write!(f, "&{pointee}"),
             Type::RefMut { pointee } => write!(f, "&mut {pointee}"),
             Type::Generic { name } => write!(f, "{name}"),
+            Type::StructApp { base, args } => {
+                write!(f, "{base}[")?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{arg}")?;
+                }
+                write!(f, "]")
+            }
             Type::Unknown => write!(f, "?"),
         }
     }
+}
+
+/// Characters replaced with `_` when embedding a type in a mangled name.
+const MANGLE_BAD_CHARS: &[char] = &[' ', '*', '&', '<', '>', ':', ';', ',', '(', ')', '-'];
+
+/// Sanitize a string for use inside a mangled (monomorphized) name.
+pub(crate) fn sanitize_mangle(s: &str) -> String {
+    s.replace(MANGLE_BAD_CHARS, "_")
+}
+
+/// Stable mangled name for a monomorphized generic struct instantiation,
+/// e.g. `Pair[int64, f64]` -> `Pair$i64$f64`.  Shared by sema and the
+/// lowerer so both sides agree on struct names.
+pub(crate) fn mono_struct_name(base: &str, args: &[Type]) -> String {
+    let mut name = base.to_string();
+    for arg in args {
+        name.push('$');
+        name.push_str(&sanitize_mangle(&arg.to_string()));
+    }
+    name
 }
 
 /// Interning context for types and name-to-type bindings.

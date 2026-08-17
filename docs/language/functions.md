@@ -63,6 +63,56 @@ def returns_void() -> void:
     return
 ```
 
+Struct and tuple return types work end-to-end: the caller allocates a scratch
+slot and the callee writes the result through a hidden first argument (return
+by pointer). See [Known Issues](known-issues.md) for ABI details.
+
+```dev
+def make_point(x: int64, y: int64) -> Point:
+    var p: Point
+    p.x = x
+    p.y = y
+    return p
+
+def pair() -> (int64, int64):
+    return (1, 2)
+```
+
+## Generic Functions
+
+Functions can declare type parameters and are monomorphized per call site:
+
+```dev
+def id[T](x: T) -> T:
+    return x
+
+def swap[T](a: T, b: T) -> T:
+    var t: T = b
+    return t
+
+def make_pair[T](a: T, b: T) -> Pair[T]:
+    return Pair[T] { first: a, second: b }
+
+def sum_pair[T](p: Pair[T]) -> T:
+    return p.first + p.second
+```
+
+- Concrete type arguments are **inferred from the argument types** at each
+  call site — there is no explicit call-site syntax (`id[int64](x)` is not
+  parsed)
+- A generic function instantiated with the same type arguments generates one
+  monomorphized function (mangled, e.g. `id$i64`); distinct instantiations
+  share nothing
+- Generic parameters can be used in parameter types, return types, local
+  annotations (`var t: T`), and generic struct literals (`Pair[T] { ... }`)
+- Generic functions can return and consume generic structs (`make_pair`,
+  `sum_pair` above)
+- Nested generics work: `Pair[Pair[int64]]`
+- Supported on both x86_64 and x86_32 (no floats on x86_32, as usual)
+- Limitations: no explicit type arguments at call sites; union/enum types
+  are not supported in generic signatures; generic functions cannot be
+  overloaded by name
+
 ## Main Function
 
 ```dev
@@ -110,13 +160,9 @@ Tail recursion is not optimized — deep recursion may overflow the stack.
 The following are **not** available in this milestone (see
 [Known Issues](known-issues.md)):
 
-- **Generics** — `def identity[T](x: T) -> T` parses but panics the compiler at lowering
 - **Methods / `impl` blocks** — `impl` panics the compiler; there is no `obj.method()` call syntax
 - **Function types** — `fn(int32) -> int32` annotations fail to parse
 - **Function pointers** — passing functions as values
 - **Closures / lambdas** — `|x| x + 1`
 - **Variadic functions** — `extern def printf(fmt, ...)`
 - **Default parameters**
-- **Tuples as return types** — `-> (int32, int32)` type-checks, but the
-  returned tuple type is not propagated through the call (the caller sees
-  `int64`); use an intermediate `ref[T]` binding or field access when possible

@@ -22,6 +22,18 @@ pub(super) const BASE_VADDR: u32 = 0x08048000;
 pub(super) const EHDR_SIZE: u32 = 52;
 pub(super) const PHDR_SIZE: u32 = 32;
 
+// Free-list heap (x86_32): each block carries a 4-byte header immediately
+// before its payload (bit 0 = USED, rest = size in bytes).  The runtime state
+// block lives in `.data` and holds (heap_base, heap_limit, free_head).
+pub(super) const HEAP_STATE_SIZE: usize = 16;
+pub(super) const HP_BASE: usize = 0;
+pub(super) const HP_LIMIT: usize = 4;
+pub(super) const HP_FREE_HEAD: usize = 8;
+pub(super) const H_HDR_SIZE: u32 = 4;
+pub(super) const H_USED: u32 = 1;
+pub(super) const SPLIT_THRESHOLD: u32 = 16;
+pub(super) const HEAP_ARENA_SIZE: u64 = 4 * 1024 * 1024; // 4 MiB
+
 #[derive(Clone, Debug)]
 pub(super) struct Slot {
     offset: i32,
@@ -59,10 +71,10 @@ pub struct CodeGen<'p> {
     /// (global label, string label) pairs for string-initialized constants,
     /// patched once the rodata layout is known.
     global_string_patches: Vec<(u32, u32)>,
-    /// Code offset of the `mov eax, <bump_ptr_vaddr>` immediate in `_dev_alloc`,
-    /// patched once the `.data` segment layout is known.  `None` when the program
-    /// does not use the bump allocator.
-    alloc_ptr_patch: Option<usize>,
+    /// Code offsets of `mov eax, <heap_state_vaddr>` immediates in the
+    /// `_dev_alloc`/`_dev_free` helpers, patched once the `.data` segment
+    /// layout is known.  Empty when the program does not use the heap.
+    heap_state_patches: Vec<usize>,
     loop_end_stack: Vec<u32>,
     loop_head_stack: Vec<u32>,
 }
@@ -137,6 +149,19 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
             cg.func_labels.insert("_dev_alloc".to_string(), a);
             let f = cg.asm.new_label();
             cg.func_labels.insert("_dev_free".to_string(), f);
+        }
+        // The mark-and-sweep collector is x86_64-only; the 32-bit target
+        // ships the free-list allocator without automatic reclamation.
+        if let Some(gc) = prog
+            .externs
+            .iter()
+            .find(|e| e.name.starts_with("_dev_gc_"))
+        {
+            bail!(
+                "`{}` (std.gc) is not supported on the x86_32 target; \
+                 std.alloc's alloc/free work, but there is no garbage collector",
+                gc.name
+            );
         }
         l
     } else {
@@ -248,19 +273,33 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
     let first_seg_end = text_offset + code.len() as u32 + rodata.len() as u32;
     let data_offset = align_up_u32(first_seg_end, PAGE_SIZE_32);
     let data_vaddr = BASE_VADDR + data_offset;
+    // (field reads only: `cg` is partially moved by the loops above)
+    let heap_size = cg
+        .prog
+        .config
+        .as_ref()
+        .map(|c| c.heap_size)
+        .filter(|&h| h > 0)
+        .unwrap_or(HEAP_ARENA_SIZE);
 
     let mut data: Vec<u8> = Vec::new();
     let mut bss_size: u32 = 0;
-    if let Some(alloc_patch) = cg.alloc_ptr_patch {
-        const ARENA_SIZE: u32 = 64 * 1024;
-        let bump_data_off = data.len() as u32;
-        data.extend_from_slice(&[0u8; 4]); // placeholder for the bump pointer
-        let bump_ptr_vaddr = data_vaddr + bump_data_off;
-        code[alloc_patch..alloc_patch + 4].copy_from_slice(&bump_ptr_vaddr.to_le_bytes());
+    if !cg.heap_state_patches.is_empty() {
+        // `heap_state` block (zero-initialized here; `heap_base` is pre-seeded
+        // to the start of the `.bss` heap so the runtime can lazily build the
+        // initial free list on first allocation).  Every `mov eax,
+        // <state_vaddr>` placeholder in the allocator helpers is patched.
+        let state_off = data.len() as u32;
+        data.resize(state_off as usize + HEAP_STATE_SIZE, 0u8);
+        let state_vaddr = data_vaddr + state_off;
+        for &p in &cg.heap_state_patches {
+            code[p..p + 4].copy_from_slice(&state_vaddr.to_le_bytes());
+        }
+        // The heap lives in `.bss`, immediately after `.data`.
+        bss_size = heap_size as u32;
         let arena_base = data_vaddr + data.len() as u32;
-        data[bump_data_off as usize..bump_data_off as usize + 4]
+        data[state_off as usize + HP_BASE..state_off as usize + HP_BASE + 4]
             .copy_from_slice(&arena_base.to_le_bytes());
-        bss_size = ARENA_SIZE;
     }
 
     Ok(Box::new(Elf32Writer::new(
@@ -396,7 +435,7 @@ impl<'p> CodeGen<'p> {
             sret: false,
             string_patches: Vec::new(),
             global_string_patches: Vec::new(),
-            alloc_ptr_patch: None,
+            heap_state_patches: Vec::new(),
             loop_end_stack: Vec::new(),
             loop_head_stack: Vec::new(),
         }
@@ -406,6 +445,27 @@ impl<'p> CodeGen<'p> {
         let off = self.asm.len();
         self.asm.bind(lab);
         self.label_offsets.insert(lab, off);
+    }
+
+    /// Heap arena size in bytes, from the linker script `HEAP` directive
+    /// (falling back to the 4 MiB default when absent).
+    pub(super) fn heap_size(&self) -> u64 {
+        self.prog
+            .config
+            .as_ref()
+            .map(|c| c.heap_size)
+            .filter(|&h| h > 0)
+            .unwrap_or(HEAP_ARENA_SIZE)
+    }
+
+    /// Emit `mov reg, <heap_state_vaddr>` and record the immediate's code
+    /// offset so it can be patched once the `.data` layout is known.  The
+    /// assembler encodes `mov reg, imm32` as `C7 /0` (2 bytes + imm32).
+    pub(super) fn heap_state_reg(&mut self, reg: Reg) -> Result<()> {
+        let off = self.asm.len() + 2; // C7 + modrm byte
+        self.heap_state_patches.push(off);
+        self.asm.mov(reg, 0i32)?;
+        Ok(())
     }
 
     pub(super) fn emit_func(&mut self, f: &Func) -> Result<()> {
@@ -422,14 +482,14 @@ impl<'p> CodeGen<'p> {
         let slot = self.alloc_slot(4, 4);
         self.addr_tmp = slot.offset;
 
-        // i386 sret: a struct return larger than 4 bytes is written through a
-        // hidden first argument (the caller-allocated struct pointer at
-        // EBP+8); real named parameters start one slot higher.
-        let sret = matches!(&f.ret, Type::Struct(_))
-            && !Self::is_enum_struct(&f.ret)
-            && self.value_size(&f.ret).is_some_and(|s| s > 4);
+        // i386 sret: a struct return is written through a hidden first
+        // argument (the caller-allocated struct pointer at EBP+8); real
+        // named parameters start one slot higher.
+        let sret = matches!(&f.ret, Type::Struct(_)) && !Self::is_enum_struct(&f.ret);
         self.sret = sret;
-        let arg0 = if sret { 8 } else { 0 };
+        // With sret, the hidden pointer occupies the first slot (EBP+8);
+        // named parameters shift up by one 4-byte slot (EBP+12 onward).
+        let arg0 = if sret { 4 } else { 0 };
 
         for (name, _ty) in &f.params {
             self.alloc_named_slot(name, 4, 4);
@@ -466,34 +526,36 @@ impl<'p> CodeGen<'p> {
                 let (size, align) = self.var_size_align(ty);
                 let slot = self.alloc_named_slot(name, size, align);
                 if let Some(e) = init {
-                    // Struct-typed initializers are laid out inline in the
-                    // local's slot (not via the 4-byte EAX round-trip), so
-                    // multi-field struct copies preserve every field.  The
-                    // source address is computed without going through EAX so
-                    // values larger than 4 bytes round-trip correctly.
-                    // Synthetic `__enum_*` structs are excluded: their values
-                    // are 4-byte pointers and must round-trip as scalars.
-                    if let Type::Struct(_) = &e.ty {
-                        if Self::is_enum_struct(&e.ty) {
+                    // Struct-typed bindings are laid out inline in the local's
+                    // slot (not via the 4-byte EAX round-trip), so multi-field
+                    // struct copies preserve every field.  The initializer
+                    // yields the struct's address (inline struct var → LEA;
+                    // call result / block / pointer var → pointer), and the
+                    // full value is copied into the slot.  Synthetic
+                    // `__enum_*` structs are excluded: their values are
+                    // 4-byte pointers and must round-trip as scalars.
+                    if let Type::Struct(_) = ty {
+                        if Self::is_enum_struct(ty) {
                             self.eval_expr(e)?;
                             self.store_scalar(slot.offset)?;
                             return Ok(());
                         }
-                        let src_off = match &e.kind {
-                            ExprKind::Var(n) => self
+                        if let ExprKind::Var(n) = &e.kind
+                            && let Type::Struct(_) = &e.ty
+                            && !Self::is_enum_struct(&e.ty)
+                        {
+                            let src_off = self
                                 .locals
                                 .get(n)
                                 .map(|s| s.offset)
-                                .ok_or_else(|| anyhow::anyhow!("unknown variable: {}", n))?,
-                            _ => {
-                                // Struct literal / enum variant / block: eval
-                                // leaves the source address in EAX.
-                                self.eval_expr(e)?;
-                                self.copy_ptr_to_slot(slot.offset, Reg::Eax, size)?;
-                                return Ok(());
-                            }
-                        };
-                        self.copy_struct_bytes(slot.offset, src_off, size)?;
+                                .ok_or_else(|| anyhow::anyhow!("unknown variable: {}", n))?;
+                            self.copy_struct_bytes(slot.offset, src_off, size)?;
+                        } else {
+                            // Struct literal / enum variant / block / call:
+                            // eval leaves the source address in EAX.
+                            self.eval_expr(e)?;
+                            self.copy_ptr_to_slot(slot.offset, Reg::Eax, size)?;
+                        }
                     } else {
                         self.eval_expr(e)?;
                         self.store_scalar(slot.offset)?;
@@ -519,24 +581,25 @@ impl<'p> CodeGen<'p> {
                 self.lvalue_addr(lhs)?; // address in EAX
                 self.asm
                     .mov(Mem::base_disp(Reg::Ebp, self.addr_tmp), Reg::Eax)?;
-                // Struct-typed assignments copy the full struct (the RHS
-                // evaluates to a source address in EAX) instead of a single
+                // Real struct assignments copy the full struct (the RHS
+                // evaluates to a source address in EAX — inline struct var,
+                // call result pointer, or block pointer) instead of a single
                 // 32-bit store, so multi-field structs are preserved.
-                if let Type::Struct(_) = &rhs.ty {
-                    if Self::is_enum_struct(&rhs.ty) {
-                        self.eval_expr(rhs)?; // pointer value in EAX
-                        self.asm
-                            .mov(Reg::Edx, Mem::base_disp(Reg::Ebp, self.addr_tmp))?;
-                        let width = self.lvalue_store_width(lhs);
-                        self.store_width(width, Reg::Edx, Reg::Eax)?;
-                    } else {
-                        self.eval_expr(rhs)?; // source address in EAX
-                        let size = self.value_size(&rhs.ty).unwrap_or(4).max(4);
-                        self.asm.mov(Reg::Esi, Reg::Eax)?;
-                        self.asm
-                            .mov(Reg::Edi, Mem::base_disp(Reg::Ebp, self.addr_tmp))?;
-                        self.copy_mem_to_mem(Reg::Edi, Reg::Esi, size)?;
+                // Synthetic `__enum_*` structs keep scalar semantics.
+                let real_struct = match &rhs.ty {
+                    Type::Struct(n) => !n.starts_with("__enum_"),
+                    Type::Ptr(inner) => {
+                        matches!(inner.as_ref(), Type::Struct(n) if !n.starts_with("__enum_"))
                     }
+                    _ => false,
+                };
+                if real_struct {
+                    self.eval_expr(rhs)?; // source address in EAX
+                    let size = self.struct_size_of(&rhs.ty).unwrap_or(4).max(4);
+                    self.asm.mov(Reg::Esi, Reg::Eax)?;
+                    self.asm
+                        .mov(Reg::Edi, Mem::base_disp(Reg::Ebp, self.addr_tmp))?;
+                    self.copy_mem_to_mem(Reg::Edi, Reg::Esi, size)?;
                 } else {
                     self.eval_expr(rhs)?; // value in EAX
                     self.asm
@@ -549,11 +612,21 @@ impl<'p> CodeGen<'p> {
                 self.asm.jmp(self.ret_label)?;
             }
             Stmt::Return(Some(e)) => {
-                if self.sret && matches!(&e.ty, Type::Struct(_)) && !Self::is_enum_struct(&e.ty) {
+                let sret_ret = match &e.ty {
+                    Type::Struct(n) => !n.starts_with("__enum_"),
+                    Type::Ptr(inner) => {
+                        matches!(inner.as_ref(), Type::Struct(n) if !n.starts_with("__enum_"))
+                    }
+                    _ => false,
+                };
+                if self.sret && sret_ret {
                     // i386 sret: write the struct into `*[EBP+8]` and return
                     // that caller-allocated pointer in EAX.
                     self.eval_expr(e)?; // source address in EAX
-                    let size = self.value_size(&e.ty).unwrap_or(4).max(4);
+                    let size = self
+                        .struct_size_of(&e.ty)
+                        .unwrap_or(4)
+                        .max(4);
                     self.asm
                         .mov(Mem::base_disp(Reg::Ebp, self.addr_tmp), Reg::Eax)?;
                     // copy from [*EAX] into *[EBP+8] (the caller-allocated sret slot)

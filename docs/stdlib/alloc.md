@@ -39,19 +39,24 @@ Free a previously allocated block.
 
 - **x86_64**: prepends the block to the free list; memory is reused by future
   allocations
-- **x86_32**: no-op (bump allocator — the whole arena is released at exit)
+- **x86_32**: returns the block to the free list; memory is reused by future
+  allocations
 
 ## Allocator Behavior
 
 | Target | Allocator | `free` behavior |
 |--------|-----------|-----------------|
 | x86_64 | First-fit free list with splitting, 8-byte header per block (bit 0 = used, bit 1 = mark, rest = size) | Block returned to free list |
-| x86_32 | Bump allocator | No-op |
+| x86_32 | First-fit free list with splitting, 4-byte header per block (bit 0 = used, rest = size) | Block returned to free list |
 | x86_16 | Not available | — |
 
 On x86_64 the heap is a 4 MiB `.bss` region. When the free list is exhausted,
 a conservative mark-and-sweep collection runs automatically and the allocation
 retries once before aborting. See [std.gc](gc.md).
+
+On x86_32 the heap is also a 4 MiB `.bss` region, but there is no collector —
+allocation aborts when the free list is exhausted. Importing `std.gc` on
+x86_32 fails at codegen with a clean diagnostic.
 
 ## Example
 
