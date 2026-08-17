@@ -1,7 +1,7 @@
-use super::parser::{parse_int, Parser};
-use crate::parser::r#type::is_primitive_name;
+use super::parser::{Parser, parse_int};
 use super::*;
 use crate::lexer::Token;
+use crate::parser::r#type::is_primitive_name;
 
 impl Parser {
     /// Try to parse a comma-separated type list (as used by generic struct
@@ -471,19 +471,14 @@ impl Parser {
                     if k < self.tokens.len()
                         && self.tokens[k].token == Token::LBrace
                         && let Expr::Ident(base) = &expr
+                        && let Some(args) = self.try_parse_type_list()
+                        && args.iter().all(|a| self.type_expr_is_definite(a))
                     {
-                        if let Some(args) = self.try_parse_type_list() {
-                            if args
-                                .iter()
-                                .all(|a| self.type_expr_is_definite(a))
-                            {
-                                expr = Expr::GenericApp {
-                                    name: base.clone(),
-                                    args,
-                                };
-                                continue;
-                            }
-                        }
+                        expr = Expr::GenericApp {
+                            name: base.clone(),
+                            args,
+                        };
+                        continue;
                     }
                 }
                 self.pos = saved + 1;

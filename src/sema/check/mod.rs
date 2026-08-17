@@ -254,14 +254,10 @@ impl Context {
             (Type::Slice { elem: p }, Type::Slice { elem: c }) => {
                 self.collect_substitutions(p, c, map)
             }
-            (Type::Array { elem: p, size: ps }, Type::Array { elem: c, size: cs })
-                if ps == cs =>
-            {
+            (Type::Array { elem: p, size: ps }, Type::Array { elem: c, size: cs }) if ps == cs => {
                 self.collect_substitutions(p, c, map)
             }
-            (Type::Tuple { fields: pf }, Type::Tuple { fields: cf })
-                if pf.len() == cf.len() =>
-            {
+            (Type::Tuple { fields: pf }, Type::Tuple { fields: cf }) if pf.len() == cf.len() => {
                 for (p, c) in pf.iter().zip(cf.iter()) {
                     if !self.collect_substitutions(p, c, map) {
                         return false;
@@ -269,10 +265,9 @@ impl Context {
                 }
                 true
             }
-            (
-                Type::StructApp { base: pb, args: pa },
-                Type::StructApp { base: cb, args: ca },
-            ) if pb == cb && pa.len() == ca.len() => {
+            (Type::StructApp { base: pb, args: pa }, Type::StructApp { base: cb, args: ca })
+                if pb == cb && pa.len() == ca.len() =>
+            {
                 for (x, y) in pa.iter().zip(ca.iter()) {
                     if !self.collect_substitutions(x, y, map) {
                         return false;
@@ -309,9 +304,7 @@ impl Context {
             }
             Type::Pointer { pointee } => Type::pointer(self.finalize_struct_apps(pointee)),
             Type::Slice { elem } => Type::slice(self.finalize_struct_apps(elem)),
-            Type::Array { elem, size } => {
-                Type::array(self.finalize_struct_apps(elem), *size)
-            }
+            Type::Array { elem, size } => Type::array(self.finalize_struct_apps(elem), *size),
             Type::Tuple { fields } => Type::tuple(
                 fields
                     .iter()
@@ -350,10 +343,7 @@ impl Context {
                 Type::Unknown
             }
             TypeExpr::GenericApp { base, args } => {
-                let args: Vec<Type> = args
-                    .iter()
-                    .map(|t| self.resolve_type_expr(t))
-                    .collect();
+                let args: Vec<Type> = args.iter().map(|t| self.resolve_type_expr(t)).collect();
                 let info = self.adts.get(base).cloned();
                 let Some(info) = info else {
                     self.error(format!("unknown type name `{}`", base));
@@ -380,7 +370,10 @@ impl Context {
                 // parameter (i.e. inside a generic function body); the
                 // concrete monomorphized name is computed once the instance
                 // is known.
-                if args.iter().any(|a| a.is_generic() || matches!(a, Type::StructApp { .. })) {
+                if args
+                    .iter()
+                    .any(|a| a.is_generic() || matches!(a, Type::StructApp { .. }))
+                {
                     return Type::StructApp {
                         base: base.clone(),
                         args,

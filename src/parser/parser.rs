@@ -81,7 +81,7 @@ impl Parser {
         self.scope_generics.iter().any(|g| g == name)
     }
 
-/// Find the index of the `]` matching the `[` at the cursor, skipping
+    /// Find the index of the `]` matching the `[` at the cursor, skipping
     /// newline/indent tokens.  The opening `[` has already been consumed by
     /// the caller, so the scan starts with depth 1.  Returns `None` if the
     /// bracket never closes.

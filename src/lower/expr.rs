@@ -200,7 +200,10 @@ impl LowerCtx<'_> {
             ast::Expr::Ref(r) => self.lower_ref(r),
             ast::Expr::Call(c) => self.lower_call(c),
             ast::Expr::GenericApp { name, .. } => {
-                bail!("generic type `{}` cannot be used as a standalone expression", name)
+                bail!(
+                    "generic type `{}` cannot be used as a standalone expression",
+                    name
+                )
             }
             ast::Expr::Cast(c) => self.lower_cast(c),
             ast::Expr::Field(f) => self.lower_field(f),
@@ -530,10 +533,8 @@ impl LowerCtx<'_> {
         // Call to a generic function: infer the concrete type arguments from
         // the argument types and route to the monomorphized instance.
         if let Some(def) = self.generic_defs.get(&name).cloned() {
-            let arg_tys: Vec<crate::ty::Type> = args
-                .iter()
-                .map(|a| self.ir_to_sema(&a.ty))
-                .collect();
+            let arg_tys: Vec<crate::ty::Type> =
+                args.iter().map(|a| self.ir_to_sema(&a.ty)).collect();
             let mut mapping: std::collections::HashMap<String, crate::ty::Type> =
                 std::collections::HashMap::new();
             for (p, a) in def.patterns.iter().zip(arg_tys.iter()) {
@@ -553,12 +554,16 @@ impl LowerCtx<'_> {
                 .map(|(_, r)| r.clone())
                 .unwrap_or(ir::Type::Void);
             let ret = match &ret {
-                ir::Type::Struct(s) if !s.starts_with("__enum_") => {
-                    ir::Type::Ptr(Box::new(ret))
-                }
+                ir::Type::Struct(s) if !s.starts_with("__enum_") => ir::Type::Ptr(Box::new(ret)),
                 _ => ret,
             };
-            return Ok(ir::Expr::new(ir::ExprKind::Call { func: mangled, args }, ret));
+            return Ok(ir::Expr::new(
+                ir::ExprKind::Call {
+                    func: mangled,
+                    args,
+                },
+                ret,
+            ));
         }
 
         let ret = self
@@ -571,9 +576,7 @@ impl LowerCtx<'_> {
         // slot (return-by-pointer ABI); the synthetic `__enum_*` structs are
         // returned inline as before.
         let ret = match &ret {
-            ir::Type::Struct(s) if !s.starts_with("__enum_") => {
-                ir::Type::Ptr(Box::new(ret))
-            }
+            ir::Type::Struct(s) if !s.starts_with("__enum_") => ir::Type::Ptr(Box::new(ret)),
             _ => ret,
         };
         Ok(ir::Expr::new(ir::ExprKind::Call { func: name, args }, ret))

@@ -625,8 +625,7 @@ impl<'p> CodeGen<'p> {
                 .ok_or_else(|| anyhow::anyhow!("sret function returning non-struct value"))?;
             let size = self.struct_size(&name)?;
             self.asm.mov(Reg::Rsi, Reg::Rax)?;
-            self.asm
-                .mov(Reg::Rdi, Mem::base_disp(Reg::Rbp, sret_off))?;
+            self.asm.mov(Reg::Rdi, Mem::base_disp(Reg::Rbp, sret_off))?;
             self.copy_mem_to_mem(Reg::Rdi, Reg::Rsi, size)?;
             self.asm.mov(Reg::Rax, Reg::Rdi)?;
         } else {

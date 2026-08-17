@@ -285,8 +285,14 @@ pub(crate) fn substitute(ty: &Type, mapping: &HashMap<String, Type>) -> Type {
         // checker (which owns the ADT table) via `finalize_struct_app`.
         Type::StructApp { base, args } => {
             let args: Vec<Type> = args.iter().map(|a| substitute(a, mapping)).collect();
-            if args.iter().any(|a| a.is_generic() || matches!(a, Type::StructApp { .. })) {
-                Type::StructApp { base: base.clone(), args }
+            if args
+                .iter()
+                .any(|a| a.is_generic() || matches!(a, Type::StructApp { .. }))
+            {
+                Type::StructApp {
+                    base: base.clone(),
+                    args,
+                }
             } else {
                 Type::Struct {
                     name: crate::ty::mono_struct_name(base, &args),

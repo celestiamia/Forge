@@ -311,7 +311,8 @@ impl<'p> CodeGen<'p> {
             self.asm.test(Reg::Ecx, Reg::Ecx)?;
             self.asm.jne(after_init)?; // already initialised
             // heap_base was pre-patched to `arena_base`; limit = base + size.
-            self.asm.mov(Reg::Edx, Mem::base_disp(Reg::Eax, HP_BASE as i32))?;
+            self.asm
+                .mov(Reg::Edx, Mem::base_disp(Reg::Eax, HP_BASE as i32))?;
             let heap_size = self.heap_size();
             self.asm.mov(Reg::Ecx, heap_size as i32)?;
             self.asm.add(Reg::Ecx, Reg::Edx)?;
@@ -321,7 +322,8 @@ impl<'p> CodeGen<'p> {
             self.asm
                 .mov(Reg::Ecx, (heap_size as i32) - H_HDR_SIZE as i32)?;
             self.asm.mov(Mem::base(Reg::Edx), Reg::Ecx)?; // *(base) = size (free)
-            self.asm.lea(Reg::Ecx, Mem::base_disp(Reg::Edx, H_HDR_SIZE as i32))?;
+            self.asm
+                .lea(Reg::Ecx, Mem::base_disp(Reg::Edx, H_HDR_SIZE as i32))?;
             self.asm
                 .mov(Mem::base_disp(Reg::Eax, HP_FREE_HEAD as i32), Reg::Ecx)?; // free_head = base+4
             self.bind_label(after_init);
@@ -350,7 +352,8 @@ impl<'p> CodeGen<'p> {
 
             self.bind_label(walk);
             self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Ebp, -4))?; // &state
-            self.asm.mov(Reg::Eax, Mem::base_disp(Reg::Eax, HP_FREE_HEAD as i32))?; // cur
+            self.asm
+                .mov(Reg::Eax, Mem::base_disp(Reg::Eax, HP_FREE_HEAD as i32))?; // cur
             self.asm.xor(Reg::Edx, Reg::Edx)?; // prev = 0
             self.asm.mov(Reg::Ecx, Mem::base_disp(Reg::Ebp, -8))?; // req
 
@@ -391,7 +394,8 @@ impl<'p> CodeGen<'p> {
             // ---- split: unlink cur, splice in the remainder -------------------
             self.bind_label(split);
             // rem = cur + HDR + req ; *(rem) = nxt ; *(rem-HDR) = size-req-HDR
-            self.asm.lea(Reg::Edi, Mem::base_disp(Reg::Eax, H_HDR_SIZE as i32))?;
+            self.asm
+                .lea(Reg::Edi, Mem::base_disp(Reg::Eax, H_HDR_SIZE as i32))?;
             self.asm.add(Reg::Edi, Reg::Ecx)?; // edi = rem
             self.asm.mov(Mem::base(Reg::Edi), Reg::Ebx)?; // *(rem) = nxt
             self.asm.sub(Reg::Esi, Reg::Ecx)?;

@@ -1377,7 +1377,10 @@ fn test_alloc32_compiles_and_runs_x86_32() {
         .output()
         .expect("failed to run test_alloc32 (x86_32) binary");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout, "", "test_alloc32 (x86_32) produced unexpected output");
+    assert_eq!(
+        stdout, "",
+        "test_alloc32 (x86_32) produced unexpected output"
+    );
     assert_eq!(
         output.status.code(),
         Some(0),

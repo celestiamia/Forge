@@ -152,11 +152,7 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         }
         // The mark-and-sweep collector is x86_64-only; the 32-bit target
         // ships the free-list allocator without automatic reclamation.
-        if let Some(gc) = prog
-            .externs
-            .iter()
-            .find(|e| e.name.starts_with("_dev_gc_"))
-        {
+        if let Some(gc) = prog.externs.iter().find(|e| e.name.starts_with("_dev_gc_")) {
             bail!(
                 "`{}` (std.gc) is not supported on the x86_32 target; \
                  std.alloc's alloc/free work, but there is no garbage collector",
@@ -623,10 +619,7 @@ impl<'p> CodeGen<'p> {
                     // i386 sret: write the struct into `*[EBP+8]` and return
                     // that caller-allocated pointer in EAX.
                     self.eval_expr(e)?; // source address in EAX
-                    let size = self
-                        .struct_size_of(&e.ty)
-                        .unwrap_or(4)
-                        .max(4);
+                    let size = self.struct_size_of(&e.ty).unwrap_or(4).max(4);
                     self.asm
                         .mov(Mem::base_disp(Reg::Ebp, self.addr_tmp), Reg::Eax)?;
                     // copy from [*EAX] into *[EBP+8] (the caller-allocated sret slot)

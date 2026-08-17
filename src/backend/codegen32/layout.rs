@@ -122,7 +122,8 @@ impl<'p> CodeGen<'p> {
             },
             _ => None,
         };
-        name.and_then(|n| self.struct_layouts.get(n)).map(|l| l.size.max(4))
+        name.and_then(|n| self.struct_layouts.get(n))
+            .map(|l| l.size.max(4))
     }
 
     /// Copy `size` bytes from `[src_reg]` to `[dst_reg]` using 4-byte moves

@@ -657,9 +657,7 @@ impl<'a> LowerCtx<'a> {
             ast::TypeExpr::RefMut(inner) => {
                 Ok(TyType::ref_mut(self.pattern_type(inner, generics)?))
             }
-            ast::TypeExpr::Slice(inner) => {
-                Ok(TyType::slice(self.pattern_type(inner, generics)?))
-            }
+            ast::TypeExpr::Slice(inner) => Ok(TyType::slice(self.pattern_type(inner, generics)?)),
             ast::TypeExpr::Array(inner, size) => {
                 let size = match size.as_ref() {
                     ast::Expr::Literal(ast::Literal::Int(n)) if *n >= 0 => *n as u64,
@@ -678,7 +676,10 @@ impl<'a> LowerCtx<'a> {
                     .iter()
                     .map(|t| self.pattern_type(t, generics))
                     .collect::<Result<Vec<_>>>()?;
-                if args.iter().any(|a| a.is_generic() || matches!(a, TyType::StructApp { .. })) {
+                if args
+                    .iter()
+                    .any(|a| a.is_generic() || matches!(a, TyType::StructApp { .. }))
+                {
                     Ok(TyType::StructApp {
                         base: base.clone(),
                         args,
@@ -873,7 +874,7 @@ fn expr_to_literal(expr: &ir::Expr) -> Result<ir::Literal> {
 /// `Ptr(Struct)` is unwrapped to the struct type (matching how sema types
 /// call arguments).  Struct fields are filled in from the struct registry so
 /// generic inference can unify field patterns against concrete instances.
-
+///
 /// Convert a substituted (concrete) sema type to an IR type.
 fn sema_to_ir(ty: &TyType) -> Result<ir::Type> {
     Ok(match ty {
@@ -897,7 +898,9 @@ fn sema_to_ir(ty: &TyType) -> Result<ir::Type> {
         },
         TyType::USize => ir::Type::U64,
         TyType::ISize => ir::Type::I64,
-        TyType::Pointer { pointee } | TyType::Own { pointee } | TyType::Ref { pointee }
+        TyType::Pointer { pointee }
+        | TyType::Own { pointee }
+        | TyType::Ref { pointee }
         | TyType::RefMut { pointee } => ir::Type::Ptr(Box::new(sema_to_ir(pointee)?)),
         TyType::Slice { elem } => ir::Type::Slice(Box::new(sema_to_ir(elem)?)),
         TyType::Array { elem, .. } => ir::Type::Ptr(Box::new(sema_to_ir(elem)?)),
@@ -1003,14 +1006,10 @@ impl LowerCtx<'_> {
                 Some(())
             }
             (TyType::StructApp { base, args }, TyType::Struct { name, .. }) => {
-                let sdef = self
-                    .module
-                    .items
-                    .iter()
-                    .find_map(|it| match it {
-                        ast::Item::Struct(s) if s.name == *base => Some(s),
-                        _ => None,
-                    })?;
+                let sdef = self.module.items.iter().find_map(|it| match it {
+                    ast::Item::Struct(s) if s.name == *base => Some(s),
+                    _ => None,
+                })?;
                 let sg: HashSet<String> = sdef.generics.iter().cloned().collect();
                 let subst: HashMap<String, TyType> = sdef
                     .generics
@@ -1038,9 +1037,7 @@ impl LowerCtx<'_> {
             (TyType::Pointer { pointee: p }, TyType::Pointer { pointee: c }) => {
                 self.lower_collect(p, c, map)
             }
-            (TyType::Slice { elem: p }, TyType::Slice { elem: c }) => {
-                self.lower_collect(p, c, map)
-            }
+            (TyType::Slice { elem: p }, TyType::Slice { elem: c }) => self.lower_collect(p, c, map),
             (TyType::Array { elem: p, size: ps }, TyType::Array { elem: c, size: cs })
                 if ps == cs =>
             {
@@ -1054,9 +1051,10 @@ impl LowerCtx<'_> {
                 }
                 Some(())
             }
-            (TyType::StructApp { base: pb, args: pa }, TyType::StructApp { base: cb, args: ca })
-                if pb == cb && pa.len() == ca.len() =>
-            {
+            (
+                TyType::StructApp { base: pb, args: pa },
+                TyType::StructApp { base: cb, args: ca },
+            ) if pb == cb && pa.len() == ca.len() => {
                 for (x, y) in pa.iter().zip(ca.iter()) {
                     self.lower_collect(x, y, map)?;
                 }

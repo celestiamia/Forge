@@ -297,7 +297,9 @@ impl<'p> CodeGen<'p> {
             _ => None,
         };
         let sret_slot = if let Some(name) = &sret_name {
-            let size = self.struct_size_of(&Type::Struct(name.clone())).unwrap_or(4);
+            let size = self
+                .struct_size_of(&Type::Struct(name.clone()))
+                .unwrap_or(4);
             let s = self.alloc_slot(size, 4);
             Some(s.offset)
         } else {
