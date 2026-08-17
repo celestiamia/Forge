@@ -107,8 +107,10 @@ pub struct LinkerConfig {
     pub base_address: u64,
     /// Load origin for x86_16 flat/raw stages (default 0x7C00, the BIOS
     /// boot-sector address; the `LOAD` fld directive overrides it for
-    /// multi-stage boots).
-    pub load_base: u16,
+    /// multi-stage boots).  On x86_32 raw images this is the physical
+    /// address the kernel is loaded at and absolute references are fixed
+    /// up against; it must fit 16 bits on x86_16.
+    pub load_base: u32,
     /// Heap size in bytes.  `0` means no heap.
     pub heap_size: u64,
     /// Named memory regions.
@@ -131,12 +133,14 @@ impl LinkerConfig {
                 other
             ),
         }
-        if matches!(self.format, OutputFormat::Raw) && self.arch != "x86_16" {
-            anyhow::bail!("FORMAT raw is only supported for ARCH x86_16");
+        if matches!(self.format, OutputFormat::Raw)
+            && !matches!(self.arch.as_str(), "x86_16" | "x86_32")
+        {
+            anyhow::bail!("FORMAT raw is only supported for ARCH x86_16 or x86_32");
         }
         let expected = match self.arch.as_str() {
             "x86_64" => Some("elf"),
-            "x86_32" => Some("elf32"),
+            "x86_32" => None, // elf32 (hosted) or raw (freestanding)
             "x86_16" => None, // flat (boot sector) or raw (plain image)
             _ => None,
         };
@@ -150,13 +154,26 @@ impl LinkerConfig {
                 self.format.as_str()
             );
         }
+        if self.arch == "x86_32" && !matches!(self.format, OutputFormat::Elf32 | OutputFormat::Raw)
+        {
+            anyhow::bail!(
+                "ARCH x86_32 requires FORMAT elf32 or raw (got {})",
+                self.format.as_str()
+            );
+        }
         if self.arch == "x86_16" && !matches!(self.format, OutputFormat::Flat | OutputFormat::Raw) {
             anyhow::bail!(
                 "ARCH x86_16 requires FORMAT flat or raw (got {})",
                 self.format.as_str()
             );
         }
-        if matches!(self.format, OutputFormat::Flat) && self.hosted {
+        if self.arch == "x86_16" && self.load_base > u32::from(u16::MAX) {
+            anyhow::bail!(
+                "ARCH x86_16 LOAD address 0x{:X} does not fit in 16 bits",
+                self.load_base
+            );
+        }
+        if matches!(self.format, OutputFormat::Flat | OutputFormat::Raw) && self.hosted {
             anyhow::bail!("FORMAT {} cannot be hosted", self.format.as_str());
         }
         if self.runtime.gc && !self.runtime.alloc {
@@ -391,12 +408,49 @@ mod tests {
     }
 
     #[test]
-    fn raw_format_is_x86_16_only() {
+    fn raw_format_is_x86_16_and_x86_32_only() {
         let mut c = builtin_x86_16_boot();
         c.format = OutputFormat::Raw;
         assert!(c.validate().is_ok(), "raw should be valid on x86_16");
+        let mut c32 = builtin_x86_32_linux();
+        c32.format = OutputFormat::Raw;
+        c32.hosted = false;
+        c32.entry = "_start".to_string();
+        c32.load_base = 0x100000;
+        assert!(
+            c32.validate().is_ok(),
+            "raw freestanding should be valid on x86_32"
+        );
         let mut c64 = builtin_x86_64_linux();
         c64.format = OutputFormat::Raw;
         assert!(c64.validate().is_err(), "raw should fail on x86_64");
+    }
+
+    #[test]
+    fn x86_32_raw_cannot_be_hosted() {
+        let mut c = builtin_x86_32_linux();
+        c.format = OutputFormat::Raw;
+        c.load_base = 0x100000;
+        assert!(c.validate().is_err(), "raw hosted should fail on x86_32");
+    }
+
+    #[test]
+    fn x86_32_requires_elf32_or_raw() {
+        let mut c = builtin_x86_32_linux();
+        c.format = OutputFormat::Flat;
+        assert!(c.validate().is_err(), "flat should fail on x86_32");
+        let mut c2 = builtin_x86_32_linux();
+        c2.format = OutputFormat::Elf32;
+        assert!(c2.validate().is_ok(), "elf32 should remain valid on x86_32");
+    }
+
+    #[test]
+    fn x86_16_load_must_fit_16_bits() {
+        let mut c = builtin_x86_16_boot();
+        c.load_base = 0x10000;
+        assert!(c.validate().is_err(), "0x10000 should fail on x86_16");
+        let mut c2 = builtin_x86_16_boot();
+        c2.load_base = 0x8000;
+        assert!(c2.validate().is_ok(), "0x8000 should be valid on x86_16");
     }
 }

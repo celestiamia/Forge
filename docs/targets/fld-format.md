@@ -58,11 +58,11 @@ RUNTIME {
 | Directive | Description |
 |-----------|-------------|
 | `ARCH` | Codegen backend: `x86_64`, `x86_32` (ELF32), or `x86_16` (flat boot). **Required.** |
-| `FORMAT` | Output format: `elf`, `elf32`, `flat`, or `raw`. **Required.** `flat` produces a 512-byte boot sector (padded, `0x55AA` signature); `raw` produces the bare image (multi-sector stages loaded by a boot sector). Both are x86_16-only. |
+| `FORMAT` | Output format: `elf`, `elf32`, `flat`, or `raw`. **Required.** `flat` produces a 512-byte boot sector (padded, `0x55AA` signature) and is x86_16-only; `raw` produces a bare image. `raw` is accepted for `x86_16` (multi-sector boot stages loaded by a boot sector) **and** for `x86_32` (a flat binary kernel loaded by a stage-2 loader at the address given by `LOAD`). |
 | `HOSTED` | `true` emits the hosted `_start` runtime stub that calls the entry function; `false` targets the entry function directly. Defaults to `true`. |
 | `ENTRY` | Entry function. Defaults to `_forge_main` (the mangled `pub def main()`) when hosted, `_start` when freestanding. In hosted mode this is the function the runtime calls; in freestanding mode it is the function execution begins at. |
-| `LOAD` | Where an x86_16 `flat`/`raw` image is loaded in memory. Defaults to `0x7C00` (the classic boot-sector address). Code that embeds absolute addresses (string literals) is fixed up against this base, so a stage loaded elsewhere must declare it (e.g. a stage-2 loader at `0x9000`). |
-| `HEAP` | Size of the compiler-emitted heap in bytes. Must be non-zero when `RUNTIME alloc` or `RUNTIME gc` is enabled. Backs the GC arena on x86_64 and the free-list heap on x86_32 (both default to 4 MiB). |
+| `LOAD` | Load address for x86_16 `flat`/`raw` images (absolute string-address fixup base; default `0x7C00`). For x86_32 `raw`, the link base of the flat binary — the stage-2 loader reads the image bytes to this address and jumps here. |
+| `HEAP` | Size of the compiler-emitted heap in bytes. Must be non-zero when `RUNTIME alloc` or `RUNTIME gc` is enabled. Backs the GC arena on x86_64 (`gc`/`alloc`) and the free-list heap on x86_32 (`alloc`; `gc` is a clean error on x86_32). |
 | `MEMORY { }` | Named memory regions with permission flags (`r`, `w`, `x`), origin, and length. |
 | `SECTIONS { }` | Maps output sections (`.text`, `.rodata`, `.data`, `.bss`) to memory regions. |
 | `RUNTIME { }` | Capability flags for the runtime helper set. All default to `false` except `syscalls` and `float`, which default to `true`. |
@@ -103,8 +103,8 @@ The configuration is validated before codegen; violations are hard errors:
 - `ARCH` must be `x86_64`, `x86_32`, or `x86_16`.
 - Architecture and format must match: `x86_64` ⇒ `elf`, `x86_32` ⇒ `elf32`,
   `x86_16` ⇒ `flat` or `raw`.
-- `FORMAT raw` is accepted only for `x86_16`.
-- `LOAD` is accepted only for x86_16 `flat`/`raw` targets.
+- `FORMAT raw` is accepted only for `x86_16` and `x86_32`.
+- `LOAD` is accepted for x86_16 `flat`/`raw` (default `0x7C00`) and required for x86_32 `raw` (the kernel link base); it is rejected for `elf`/`elf32` and hosted targets.
 - Flat binaries cannot be hosted.
 - `RUNTIME gc = true` requires `RUNTIME alloc = true`.
 - `RUNTIME alloc` or `gc` requires `HEAP size > 0`.

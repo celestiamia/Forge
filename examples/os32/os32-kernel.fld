@@ -1,0 +1,10 @@
+# ForgeOS32 kernel descriptor: freestanding x86_32 raw image loaded at
+# 0x100000 (1 MiB) by the stage-2 loader, which switches the CPU to 32-bit
+# protected mode before jumping to `_start`.  `LOAD` is the physical address
+# the image is loaded at; every absolute reference (strings, globals) is
+# fixed up against it.  See docs/targets/fld-format.md.
+ARCH x86_32
+FORMAT raw
+HOSTED false
+ENTRY _start
+LOAD 0x100000

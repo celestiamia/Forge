@@ -17,10 +17,16 @@ pub(super) use crate::backend::ir::{
 pub(super) use crate::backend::x86::{Assembler, Cond, Mem, Reg};
 pub(super) use crate::obj::ObjectWriter;
 pub(super) use crate::obj::elf32::Elf32Writer;
+pub(super) use crate::obj::flat::FlatWriter;
 
 pub(super) const BASE_VADDR: u32 = 0x08048000;
 pub(super) const EHDR_SIZE: u32 = 52;
 pub(super) const PHDR_SIZE: u32 = 32;
+const PAGE_SIZE_32: u32 = 0x1000;
+
+/// `_dev_*` runtime helpers the freestanding x86_32 backend can emit.  Only
+/// the ones the program declares `extern` are emitted (reference-driven).
+pub(super) const FREESTANDING_FUNCS: [&str; 3] = ["_dev_outb", "_dev_inb", "_dev_halt"];
 
 // Free-list heap (x86_32): each block carries a 4-byte header immediately
 // before its payload (bit 0 = USED, rest = size in bytes).  The runtime state
@@ -82,6 +88,21 @@ pub struct CodeGen<'p> {
 pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
     let struct_layouts = compute_struct_layouts(&prog.structs)?;
     let mut cg = CodeGen::new(prog, struct_layouts);
+
+    // Raw images (freestanding x86_32 kernels) are loaded at a fixed
+    // physical address chosen at build time; every absolute reference is
+    // fixed up against the `LOAD` base instead of an ELF virtual address.
+    let raw = prog.obj_format.as_deref() == Some("raw");
+    let base = if raw {
+        prog.config.as_ref().map(|c| c.load_base).unwrap_or(0)
+    } else {
+        BASE_VADDR
+    };
+    let text_offset = if raw {
+        0 // no ELF headers in a raw image
+    } else {
+        EHDR_SIZE + PHDR_SIZE * 2
+    };
 
     for f in &prog.funcs {
         let lab = cg.asm.new_label();
@@ -168,9 +189,18 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
             .as_ref()
             .map(|c| c.entry.as_str())
             .unwrap_or("_start");
-        *cg.func_labels.get(entry_name).ok_or_else(|| {
+        let entry = *cg.func_labels.get(entry_name).ok_or_else(|| {
             anyhow::anyhow!("freestanding mode requires a {} function", entry_name)
-        })?
+        })?;
+        // Freestanding runtime helpers: the ones the program declares
+        // `extern` get a label here and are emitted at the end of the
+        // image (see `emit_freestanding_runtime`).
+        for name in FREESTANDING_FUNCS {
+            if prog.externs.iter().any(|e| e.name == name) {
+                cg.func_labels.insert(name.to_string(), cg.asm.new_label());
+            }
+        }
+        entry
     };
 
     for f in &prog.funcs {
@@ -179,6 +209,8 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
 
     if prog.hosted {
         cg.emit_runtime(start_label)?;
+    } else {
+        cg.emit_freestanding_runtime()?;
     }
 
     let rodata_start = cg.asm.new_label();
@@ -245,18 +277,16 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
     let mut code = bytes[..split].to_vec();
     let mut rodata = bytes[split..].to_vec();
 
-    let text_offset = EHDR_SIZE + PHDR_SIZE * 2;
-    let entry_vaddr =
-        BASE_VADDR + text_offset + *cg.label_offsets.get(&start_label).unwrap_or(&0) as u32;
+    let entry_vaddr = base + text_offset + *cg.label_offsets.get(&start_label).unwrap_or(&0) as u32;
 
     for (patch_off, label) in &cg.string_patches {
         let label_off = *cg.label_offsets.get(label).unwrap_or(&0) as u32;
-        let abs = BASE_VADDR + text_offset + label_off;
+        let abs = base + text_offset + label_off;
         code[*patch_off..*patch_off + 4].copy_from_slice(&abs.to_le_bytes());
     }
 
     let rodata_start_off = *cg.label_offsets.get(&rodata_start).unwrap_or(&0);
-    let rodata_vaddr = BASE_VADDR + text_offset + code.len() as u32;
+    let rodata_vaddr = base + text_offset + code.len() as u32;
     for (g_lab, s_lab) in cg.global_string_patches {
         let g_off = *cg.label_offsets.get(&g_lab).unwrap_or(&0);
         let s_off = *cg.label_offsets.get(&s_lab).unwrap_or(&0);
@@ -265,10 +295,11 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
         rodata[slot..slot + 4].copy_from_slice(&addr.to_le_bytes());
     }
 
-    const PAGE_SIZE_32: u32 = 0x1000;
     let first_seg_end = text_offset + code.len() as u32 + rodata.len() as u32;
-    let data_offset = align_up_u32(first_seg_end, PAGE_SIZE_32);
-    let data_vaddr = BASE_VADDR + data_offset;
+    // Raw images have no page-aligned segments; 16-byte alignment keeps the
+    // data region tidy without wasting a page between code and data.
+    let data_offset = align_up_u32(first_seg_end, if raw { 16 } else { PAGE_SIZE_32 });
+    let data_vaddr = base + data_offset;
     // (field reads only: `cg` is partially moved by the loops above)
     let heap_size = cg
         .prog
@@ -298,13 +329,24 @@ pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
             .copy_from_slice(&arena_base.to_le_bytes());
     }
 
-    Ok(Box::new(Elf32Writer::new(
-        code,
-        rodata,
-        data,
-        bss_size,
-        entry_vaddr,
-    )))
+    if raw {
+        // Flat raw image: [code][rodata][data][zeroed bss].  The loader
+        // copies it verbatim to the LOAD address, so `.bss` is materialized
+        // as zero bytes instead of a NOBITS section.
+        let mut image = code;
+        image.extend_from_slice(&rodata);
+        image.extend_from_slice(&data);
+        image.resize(image.len() + bss_size as usize, 0);
+        Ok(Box::new(FlatWriter::new(image, false)))
+    } else {
+        Ok(Box::new(Elf32Writer::new(
+            code,
+            rodata,
+            data,
+            bss_size,
+            entry_vaddr,
+        )))
+    }
 }
 
 mod expr;

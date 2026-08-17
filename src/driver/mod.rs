@@ -121,6 +121,197 @@ mod tests {
         path
     }
 
+    fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        haystack.windows(needle.len()).position(|w| w == needle)
+    }
+
+    #[test]
+    fn x86_16_pmode_stub_and_lba_builtins_emit() {
+        let src = r#"
+package test
+
+extern def _dev_enter_pmode(lo: u16, hi: u16) -> void
+extern def _dev_bios_disk_read_lba(drive: u16, lba_lo: u16, lba_hi: u16, count: u16, es: u16, bx: u16) -> u16
+
+@freestanding
+pub def _start() -> void:
+    _dev_enter_pmode(0x0000, 0x0010)
+    var s: u16 = _dev_bios_disk_read_lba(0x80, 4, 0, 8, 0x1000, 0)
+"#;
+        let dir = tempfile::tempdir().unwrap();
+        let source = write_temp_dev(&dir, "pmode", src);
+        let output = dir.path().join("loader.raw");
+        let fld = dir.path().join("loader.fld");
+        std::fs::write(
+            &fld,
+            "ARCH x86_16\nFORMAT raw\nHOSTED false\nENTRY _start\nLOAD 0x9000\n",
+        )
+        .unwrap();
+        let out = compile(CompileOptions {
+            source,
+            output: output.clone(),
+            target: None,
+            freestanding: false,
+            linker: Some(fld),
+        })
+        .unwrap();
+        let bytes = fs::read(&out).unwrap();
+
+        // lgdt [abs16]
+        assert!(find_bytes(&bytes, &[0x0F, 0x01, 0x16]).is_some());
+        // mov eax, cr0 / or eax, 1 / mov cr0, eax
+        assert!(find_bytes(&bytes, &[0x66, 0x0F, 0x20, 0xC0]).is_some());
+        assert!(find_bytes(&bytes, &[0x66, 0x83, 0xC8, 0x01]).is_some());
+        assert!(find_bytes(&bytes, &[0x66, 0x0F, 0x22, 0xC0]).is_some());
+        // far jump 66 EA <imm32> <sel 0x08>
+        let fj = find_bytes(&bytes, &[0x66, 0xEA]).expect("far jump missing");
+        assert_eq!(&bytes[fj + 6..fj + 8], &[0x08, 0x00]);
+        // trampoline: mov ds/es/ss, ax
+        assert!(find_bytes(&bytes, &[0x8E, 0xD8]).is_some());
+        assert!(find_bytes(&bytes, &[0x8E, 0xC0]).is_some());
+        assert!(find_bytes(&bytes, &[0x8E, 0xD0]).is_some());
+        // flat GDT descriptors
+        assert!(
+            find_bytes(&bytes, &[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x9A, 0xCF, 0x00]).is_some(),
+            "code descriptor missing"
+        );
+        assert!(
+            find_bytes(&bytes, &[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x92, 0xCF, 0x00]).is_some(),
+            "data descriptor missing"
+        );
+        // GDTR limit 23 followed by a base that points at the GDT, which
+        // starts with the null descriptor immediately before the code
+        // descriptor.
+        let code_desc = find_bytes(&bytes, &[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x9A, 0xCF, 0x00])
+            .expect("code descriptor missing");
+        assert!(
+            find_bytes(&bytes, &[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x92, 0xCF, 0x00]).is_some(),
+            "data descriptor missing"
+        );
+        let gdt_off = code_desc - 8;
+        assert_eq!(
+            &bytes[gdt_off..gdt_off + 8],
+            &[0; 8],
+            "null descriptor missing"
+        );
+        let gdtr = find_bytes(&bytes, &[0x17, 0x00]).expect("GDTR missing");
+        let base = u32::from_le_bytes(bytes[gdtr + 2..gdtr + 6].try_into().unwrap());
+        assert_eq!(
+            base,
+            0x9000 + gdt_off as u32,
+            "GDTR base must point at the GDT"
+        );
+        // far-jump target must be the trampoline (first instruction after
+        // the far jump is mov ax, 0x10 with a 32-bit operand size)
+        let tramp = fj + 8;
+        let target = u32::from_le_bytes(bytes[fj + 2..fj + 6].try_into().unwrap());
+        assert_eq!(
+            target,
+            0x9000 + tramp as u32,
+            "far jump must land on the trampoline"
+        );
+        assert_eq!(&bytes[tramp..tramp + 4], &[0x66, 0xB8, 0x10, 0x00]);
+        // LBA read: DAP built on the stack, packet size 0x10 pushed last
+        assert!(find_bytes(&bytes, &[0x68, 0x10, 0x00]).is_some());
+        // INT 13h AH=42h
+        assert!(find_bytes(&bytes, &[0xB4, 0x42, 0xCD, 0x13]).is_some());
+    }
+
+    #[test]
+    fn x86_32_raw_kernel_compiles_with_load_base_fixups() {
+        let src = r#"
+package test
+
+extern def _dev_outb(port: u16, val: u8) -> void
+extern def _dev_halt() -> void
+
+@freestanding
+pub def _start() -> void:
+    var msg: ptr[char] = "ForgeOS32" as ptr[char]
+    unsafe:
+        var c: char = msg[0]
+        _dev_outb(0x3F8, c as u8)
+    _dev_halt()
+"#;
+        let dir = tempfile::tempdir().unwrap();
+        let source = write_temp_dev(&dir, "kernel32", src);
+        let output = dir.path().join("kernel.raw");
+        let fld = dir.path().join("kernel.fld");
+        std::fs::write(
+            &fld,
+            "ARCH x86_32\nFORMAT raw\nHOSTED false\nENTRY _start\nLOAD 0x100000\n",
+        )
+        .unwrap();
+        let out = compile(CompileOptions {
+            source,
+            output: output.clone(),
+            target: None,
+            freestanding: false,
+            linker: Some(fld),
+        })
+        .unwrap();
+        let bytes = fs::read(&out).unwrap();
+
+        // Not an ELF: starts with the entry prologue (push ebp; mov ebp, esp).
+        assert_eq!(&bytes[..3], &[0x55, 0x89, 0xE5]);
+        // String lives in the image...
+        let s = find_bytes(&bytes, b"ForgeOS32").expect("string literal missing");
+        // ...and the `mov eax, imm32` fixup points at LOAD base + offset.
+        let target = 0x100000u32 + s as u32;
+        assert!(
+            find_bytes(&bytes, &target.to_le_bytes()).is_some(),
+            "string address fixup against LOAD base missing"
+        );
+        // Freestanding helpers: cdecl frame; mov dx,[ebp+8]; mov al,[ebp+12];
+        // out dx,al; leave; ret
+        assert!(find_bytes(&bytes, &[0x66, 0x8B, 0x55, 0x08]).is_some());
+        assert!(find_bytes(&bytes, &[0x8A, 0x45, 0x0C]).is_some());
+        assert!(find_bytes(&bytes, &[0xEE, 0xC9, 0xC3]).is_some());
+        // _dev_halt: cli; hlt
+        assert!(find_bytes(&bytes, &[0xFA, 0xF4]).is_some());
+    }
+
+    #[test]
+    fn x86_32_raw_rejects_hosted_and_large_x86_16_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = write_temp_dev(
+            &dir,
+            "kernel32",
+            "package test\npub def main() -> int32:\n    return 0\n",
+        );
+        let fld = dir.path().join("bad.fld");
+        std::fs::write(
+            &fld,
+            "ARCH x86_32\nFORMAT raw\nHOSTED true\nENTRY _forge_main\nLOAD 0x100000\n",
+        )
+        .unwrap();
+        let err = compile(CompileOptions {
+            source: source.clone(),
+            output: dir.path().join("o1"),
+            target: None,
+            freestanding: false,
+            linker: Some(fld.clone()),
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("cannot be hosted"));
+
+        let fld2 = dir.path().join("bad2.fld");
+        std::fs::write(
+            &fld2,
+            "ARCH x86_16\nFORMAT raw\nHOSTED false\nENTRY _start\nLOAD 0x10000\n",
+        )
+        .unwrap();
+        let err = compile(CompileOptions {
+            source,
+            output: dir.path().join("o2"),
+            target: None,
+            freestanding: false,
+            linker: Some(fld2),
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("16 bits"));
+    }
+
     #[test]
     fn compiles_minimal_program_x86_32() {
         let src = r#"

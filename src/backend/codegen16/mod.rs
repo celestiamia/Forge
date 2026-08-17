@@ -55,7 +55,7 @@ pub(super) use asm::*;
 pub(super) use program::BUILTIN_FUNCS;
 
 impl<'p> CodeGen16<'p> {
-    pub(super) fn new(prog: &'p Program, load_base: u16) -> Self {
+    pub(super) fn new(prog: &'p Program, load_base: u32) -> Self {
         Self {
             prog,
             asm: Encoder::new(load_base),

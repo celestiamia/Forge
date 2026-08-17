@@ -33,7 +33,7 @@ qemu-system-x86_64 -fda boot.bin -nographic
 
 `-o` defaults to `<source>` with extension stripped. `--freestanding` flag available.
 
-`.fld` (Forge Linker Descriptor): `ARCH`/`FORMAT`/`HOSTED`/`ENTRY`/`LOAD`/`HEAP`/`MEMORY`/`SECTIONS`/`RUNTIME` in `src/linker/`. Honored: ARCH, FORMAT (elf/elf32/flat/raw; flat = 512-byte boot sector with 0x55AA, raw = bare image for multi-stage loads), HOSTED, ENTRY, LOAD (x86_16 load address, default 0x7C00, drives imm16 string fixups), HEAP (GC arena on x86_64 / free-list heap on x86_32, default 4 MiB), RUNTIME float gate. MEMORY/SECTIONS are parsed but not yet applied to layout. Helper emission stays reference-driven (importing a `_dev_*` symbol emits it), not flag-driven.
+`.fld` (Forge Linker Descriptor): `ARCH`/`FORMAT`/`HOSTED`/`ENTRY`/`LOAD`/`HEAP`/`MEMORY`/`SECTIONS`/`RUNTIME` in `src/linker/`. Honored: ARCH, FORMAT (elf/elf32/flat/raw; flat = 512-byte boot sector with 0x55AA, raw = bare image for multi-stage loads), HOSTED, ENTRY, LOAD (x86_16 load address, default 0x7C00, drives imm16 string fixups; for x86_32 `FORMAT raw` it is the kernel link base, default 0x100000, and is where the stage-2 loader places the image — see `examples/os32`), HEAP (GC arena on x86_64 / free-list heap on x86_32, default 4 MiB), RUNTIME float gate. MEMORY/SECTIONS are parsed but not yet applied to layout. Helper emission stays reference-driven (importing a `_dev_*` symbol emits it), not flag-driven.
 
 ## Architecture
 
@@ -59,6 +59,7 @@ Single Rust crate (`forgec`), edition 2024, source in `src/`.
 - `x86_64-unknown-linux-gnu` / `native` → hosted, x86_64, ELF64
 - `x86_32-unknown-linux-gnu` → hosted, x86_32, ELF32 (no float support)
 - `x86_16-boot` → freestanding, x86_16, flat
+- `x86_32` raw binary → freestanding, x86_32, `FORMAT raw` (boot-to-32-bit chain, e.g. `examples/os32`; `LOAD` is the kernel link base, default `0x100000`)
 
 ## Forge language quirks
 

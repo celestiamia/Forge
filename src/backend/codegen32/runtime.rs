@@ -1,6 +1,46 @@
 use super::*;
 
 impl<'p> CodeGen<'p> {
+    /// Emit the freestanding runtime helpers the program declared `extern`
+    /// (see `FREESTANDING_FUNCS`).  These are minimal port-I/O and halt
+    /// primitives: no Linux syscalls, no BIOS.  They take their arguments
+    /// from the stack with a regular cdecl frame (`push ebp; mov ebp,esp`
+    /// prologue) because the caller pushes real values at the call site.
+    pub(super) fn emit_freestanding_runtime(&mut self) -> Result<()> {
+        if let Some(&lab) = self.func_labels.get("_dev_outb") {
+            self.bind_label(lab);
+            // push ebp; mov ebp, esp
+            // mov dx, [ebp+8]   (port)
+            // mov al, [ebp+12]  (value)
+            // out dx, al
+            // leave; ret
+            self.asm.append_bytes(&[0x55, 0x89, 0xE5]);
+            self.asm.append_bytes(&[0x66, 0x8B, 0x55, 0x08]);
+            self.asm.append_bytes(&[0x8A, 0x45, 0x0C]);
+            self.asm.append_bytes(&[0xEE]);
+            self.asm.append_bytes(&[0xC9, 0xC3]);
+        }
+        if let Some(&lab) = self.func_labels.get("_dev_inb") {
+            self.bind_label(lab);
+            // push ebp; mov ebp, esp
+            // mov dx, [ebp+8]   (port)
+            // in al, dx
+            // movzx eax, al
+            // leave; ret
+            self.asm.append_bytes(&[0x55, 0x89, 0xE5]);
+            self.asm.append_bytes(&[0x66, 0x8B, 0x55, 0x08]);
+            self.asm.append_bytes(&[0xEC]);
+            self.asm.append_bytes(&[0x0F, 0xB6, 0xC0]);
+            self.asm.append_bytes(&[0xC9, 0xC3]);
+        }
+        if let Some(&lab) = self.func_labels.get("_dev_halt") {
+            self.bind_label(lab);
+            // cli; hlt
+            self.asm.append_bytes(&[0xFA, 0xF4]);
+        }
+        Ok(())
+    }
+
     pub(super) fn emit_runtime(&mut self, start_label: u32) -> Result<()> {
         let e = *self.func_labels.get("_dev_exit").unwrap();
         self.bind_label(e);

@@ -24,7 +24,7 @@ impl Parser {
         let mut heap_size: u64 = 0;
         // Origin for x86_16 flat/raw images; the BIOS loads boot sectors at
         // 0x7C00, other stages can override with `LOAD`.
-        let mut load_base: u16 = 0x7C00;
+        let mut load_base: u32 = 0x7C00;
         let mut regions: Vec<MemoryRegion> = Vec::new();
         let mut sections: Vec<SectionMapping> = Vec::new();
         let mut runtime = RuntimeConfig::default();
@@ -231,15 +231,16 @@ impl Parser {
         }
     }
 
-    /// `LOAD <hex>` — where an x86_16 flat/raw stage is loaded in memory.
-    fn parse_load_base(&mut self) -> Result<u16, String> {
+    /// `LOAD <hex>` — where an x86_16 flat/raw stage or an x86_32 raw kernel
+    /// image is loaded in memory.
+    fn parse_load_base(&mut self) -> Result<u32, String> {
         let tok = self.peek().clone();
         if let Tk::Number(n) = tok {
             self.advance();
-            if n > u64::from(u16::MAX) {
-                return Err(format!("LOAD address {} does not fit in 16 bits", n));
+            if n > u64::from(u32::MAX) {
+                return Err(format!("LOAD address {} does not fit in 32 bits", n));
             }
-            Ok(n as u16)
+            Ok(n as u32)
         } else {
             Err("LOAD expects a hexadecimal address".to_string())
         }

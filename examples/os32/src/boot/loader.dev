@@ -1,0 +1,71 @@
+package os32.loader
+
+# ForgeOS32 stage-2 loader, pure Forge.
+#
+# The stage-1 boot sector loads this image to 0:0x9000 and far-jumps to it
+# (see os32-loader.fld: `LOAD 0x9000` makes the compiler emit absolute
+# string addresses against 0x9000).  This loader reads the 32-bit kernel -
+# image LBA sectors 3-10 (after boot at LBA 0 and this loader at LBA 1-2),
+# 8 x 512 bytes, at most 4096 bytes - into a low-memory staging buffer at
+# 0x8000 via INT 13h AH=42h (`_dev_bios_disk_read_lba`), then calls
+# `_dev_enter_pmode` to enable A20, install a flat GDT, switch to 32-bit
+# protected mode, and jump to the kernel at 0x100000.
+#
+# The kernel is NOT read directly into 0x100000: SeaBIOS's AH=42h PIO
+# transfer addresses its buffer through a 16-bit ES:DI pair (ES = buf>>4,
+# DI = buf & 15), so it can only write within the low 1 MiB - a
+# 0x100000+ buffer silently wraps.  The mode-switch stub therefore copies
+# the 4096-byte staging buffer from 0x8000 to 0x100000 while running in
+# flat 32-bit mode with A20 enabled, before jumping to the kernel.  The
+# kernel's own stack is parked by that stub at 0x70000, so nothing
+# collides with this loader (at 0x9000, stack top 0x7C00), the staging
+# buffer (0x8000-0x8FFF) or the VGA text buffer (0xB8000).
+
+extern def _dev_bios_teletype(c: char) -> void
+extern def _dev_load_char(p: ptr[char]) -> char
+extern def _dev_halt() -> void
+extern def _dev_bios_disk_read_lba(drive: u16, lba_lo: u16, lba_hi: u16, count: u16, es: u16, bx: u16) -> u16
+extern def _dev_enter_pmode(lo: u16, hi: u16) -> void
+
+@freestanding
+pub def _start() -> void:
+    var tries: u16 = 3
+    var status: u16 = 0
+    puts("ForgeOS32: loading kernel")
+    while tries != 0:
+        status = _dev_bios_disk_read_lba(0x80, 3, 0, 8, 0x0800, 0x0000)
+        if status == 0:
+            tries = 0
+        else:
+            tries = tries - 1
+    if status != 0:
+        puts(": disk error ")
+        put_hex16(status)
+        _dev_halt()
+    puts(": ok\n")
+    _dev_enter_pmode(0x0000, 0x0010)
+
+def put_hex_digit(d: u16) -> void:
+    if d < 10:
+        _dev_bios_teletype(((48 as u16) + d) as char)
+    else:
+        _dev_bios_teletype(((55 as u16) + d) as char)
+
+def put_hex16(v: u16) -> void:
+    var place: u16 = 4096
+    var i: u16 = 0
+    while i < 4:
+        var digit: u16 = v / place
+        put_hex_digit(digit)
+        v = v % place
+        place = place / 16
+        i = i + 1
+
+def puts(msg: ptr[char]) -> void:
+    unsafe:
+        var p: ptr[char] = msg
+        var c: char = _dev_load_char(p)
+        while c != 0:
+            _dev_bios_teletype(c)
+            p = p + 1
+            c = _dev_load_char(p)

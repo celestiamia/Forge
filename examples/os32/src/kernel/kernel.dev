@@ -1,0 +1,83 @@
+package os32.kernel
+
+# ForgeOS32 kernel: 32-bit protected mode, pure Forge.
+#
+# Compiled as a freestanding x86_32 raw image (see os32-kernel.fld) and
+# entered through the stage-2 loader's protected-mode switch: flat 4 GiB
+# segments (CS=0x08, DS/ES/SS=0x10), stack parked at 0x70000, paging off,
+# running at the physical LOAD address 0x100000.
+#
+# There is no BIOS anymore: output goes to the VGA text buffer (0xB8000)
+# via plain pointer stores and to COM1 via the `_dev_outb`/`_dev_inb`
+# port-I/O helpers.  The conventional memory size is read straight from
+# the BIOS data area at 0x413, which is just RAM once we are here.
+
+extern def _dev_outb(port: u16, val: u8) -> void
+extern def _dev_inb(port: u16) -> u8
+extern def _dev_halt() -> void
+
+@freestanding
+pub def _start() -> void:
+    serial_init()
+    puts("ForgeOS32: hello from 32-bit protected mode\n")
+    puts("conv mem: ")
+    put_hex32(mem_bytes())
+    puts(" B\n")
+    vga_puts("ForgeOS32: 32-bit protected mode")
+    _dev_halt()
+
+def mem_bytes() -> u32:
+    unsafe:
+        var p: ptr[u16] = 0x413 as ptr[u16]
+        return (p[0] as u32) * 1024
+
+def serial_init() -> void:
+    _dev_outb(0x3F8 + 1, 0)       # IER: no interrupts
+    _dev_outb(0x3F8 + 3, 0x80)    # LCR: enable divisor latch
+    _dev_outb(0x3F8, 1)           # divisor low (115200 baud)
+    _dev_outb(0x3F8 + 1, 0)       # divisor high
+    _dev_outb(0x3F8 + 3, 0x03)    # LCR: 8N1, latch off
+    _dev_outb(0x3F8 + 2, 0xC7)    # FCR: enable + clear FIFOs
+
+def serial_putc(c: char) -> void:
+    var lsr: u8 = _dev_inb(0x3F8 + 5)
+    while (lsr & 0x20) == 0:      # wait for the transmitter to be empty
+        lsr = _dev_inb(0x3F8 + 5)
+    _dev_outb(0x3F8, c as u8)
+
+def puts(msg: ptr[char]) -> void:
+    unsafe:
+        var p: ptr[char] = msg
+        var c: char = p[0]
+        while c != 0:
+            serial_putc(c)
+            p = p + 1
+            c = p[0]
+
+def vga_puts(msg: ptr[char]) -> void:
+    unsafe:
+        var p: ptr[char] = 0xB8000 as ptr[char]
+        var q: ptr[char] = msg
+        var c: char = q[0]
+        while c != 0:
+            p[0] = c
+            p[1] = 0x07 as char
+            p = p + 2
+            q = q + 1
+            c = q[0]
+
+def put_hex_digit(d: u32) -> void:
+    if d < 10:
+        serial_putc(((48 as u32) + d) as char)
+    else:
+        serial_putc(((55 as u32) + d) as char)
+
+def put_hex32(v: u32) -> void:
+    var place: u32 = 0x10000000
+    var i: u32 = 0
+    while i < 8:
+        var digit: u32 = v / place
+        put_hex_digit(digit)
+        v = v % place
+        place = place / 16
+        i = i + 1

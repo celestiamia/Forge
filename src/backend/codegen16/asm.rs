@@ -8,10 +8,11 @@ pub(crate) struct Encoder {
     short_fixups: Vec<(u32, usize, u8)>,
     rel16_fixups: Vec<(u32, usize)>,
     imm16_fixups: Vec<(u32, usize)>,
+    imm32_fixups: Vec<(u32, usize)>,
     next_label: u32,
     /// Memory address the image is loaded at; absolute addresses (strings,
-    /// data) are computed against this base.
-    load_base: u16,
+    /// data, the protected-mode trampoline) are computed against this base.
+    load_base: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,13 +85,14 @@ pub(crate) enum Cond {
 
 #[allow(dead_code)]
 impl Encoder {
-    pub(super) fn new(load_base: u16) -> Self {
+    pub(super) fn new(load_base: u32) -> Self {
         Self {
             bytes: Vec::new(),
             labels: HashMap::new(),
             short_fixups: Vec::new(),
             rel16_fixups: Vec::new(),
             imm16_fixups: Vec::new(),
+            imm32_fixups: Vec::new(),
             next_label: 1,
             load_base,
         }
@@ -219,10 +221,18 @@ impl Encoder {
                 .labels
                 .get(lab)
                 .ok_or_else(|| anyhow!("undefined imm16 label {}", lab))?;
-            let addr = (u32::from(self.load_base)
-                + (target + delta_before(target, &widened)) as u32) as u16;
+            let addr = (self.load_base + (target + delta_before(target, &widened)) as u32) as u16;
             let p = off + delta_before(*off, &widened);
             out[p..p + 2].copy_from_slice(&addr.to_le_bytes());
+        }
+        for (lab, off) in &self.imm32_fixups {
+            let target = *self
+                .labels
+                .get(lab)
+                .ok_or_else(|| anyhow!("undefined imm32 label {}", lab))?;
+            let addr = self.load_base + (target + delta_before(target, &widened)) as u32;
+            let p = off + delta_before(*off, &widened);
+            out[p..p + 4].copy_from_slice(&addr.to_le_bytes());
         }
 
         Ok(out)
@@ -244,6 +254,10 @@ impl Encoder {
         self.bytes.extend_from_slice(&v.to_le_bytes());
     }
 
+    pub(super) fn emit_imm32(&mut self, v: u32) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+
     pub(super) fn modrm(&mut self, mode: u8, reg: u8, rm: u8) {
         self.emit(((mode & 3) << 6) | ((reg & 7) << 3) | (rm & 7));
     }
@@ -254,6 +268,11 @@ impl Encoder {
 
     pub(super) fn push(&mut self, r: Reg16) {
         self.emit(0x50 + r as u8);
+    }
+
+    pub(super) fn push_imm16(&mut self, v: u16) {
+        self.emit(0x68);
+        self.emit_imm16(v);
     }
 
     pub(super) fn pop(&mut self, r: Reg16) {
@@ -280,6 +299,24 @@ impl Encoder {
         let off = self.bytes.len();
         self.emit_imm16(0);
         self.imm16_fixups.push((lab, off));
+    }
+
+    /// Emit a 2-byte placeholder immediate patched to `load_base + label`
+    /// (16-bit absolute address).  Used for raw disp16 operands such as
+    /// `lgdt [abs16]`.
+    pub(super) fn imm16_label(&mut self, lab: u32) {
+        let off = self.bytes.len();
+        self.bytes.extend_from_slice(&[0, 0]);
+        self.imm16_fixups.push((lab, off));
+    }
+
+    /// Emit a 4-byte placeholder immediate patched to `load_base + label`
+    /// (32-bit absolute address).  Used by the protected-mode trampoline
+    /// (far-jump target, GDTR base, 32-bit stack pointer).
+    pub(super) fn imm32_label(&mut self, lab: u32) {
+        let off = self.bytes.len();
+        self.bytes.extend_from_slice(&[0, 0, 0, 0]);
+        self.imm32_fixups.push((lab, off));
     }
 
     pub(super) fn mov8_imm(&mut self, r: Reg8, imm: u8) {
