@@ -313,6 +313,74 @@ pub def _start() -> void:
     }
 
     #[test]
+    fn x86_64_raw_flat_binary_emits_packed_kernel_no_elf_header() {
+        // Phase 0 of the 64-bit boot chain: `ARCH x86_64 FORMAT raw` must emit a
+        // flat (packed) binary loaded at `LOAD`, NOT an ELF64.  x86_64 references
+        // string literals / globals through RIP-relative addressing, so a raw
+        // kernel is naturally relocatable — no LOAD-relative absolute fixups are
+        // required for the common case.
+        let src = r#"
+package test
+
+@freestanding
+pub def _start() -> void:
+    var msg: ptr[char] = "ForgeOS64" as ptr[char]
+    var g: ptr[char] = msg
+    unsafe:
+        var c: char = g[7]
+        c = c
+"#;
+        let dir = tempfile::tempdir().unwrap();
+        let source = write_temp_dev(&dir, "k64", src);
+        let output = dir.path().join("kernel.raw");
+        let fld = dir.path().join("k64.fld");
+        std::fs::write(
+            &fld,
+            "ARCH x86_64\nFORMAT raw\nHOSTED false\nENTRY _start\nLOAD 0x100000\n",
+        )
+        .unwrap();
+        let out = compile(CompileOptions {
+            source,
+            output: output.clone(),
+            target: None,
+            freestanding: false,
+            linker: Some(fld),
+        })
+        .unwrap();
+        let bytes = fs::read(&out).unwrap();
+
+        // Not an ELF64: no 7f 45 4c 46 magic and the entry begins with the
+        // System V AMD64 prologue (push rbp; mov rbp, rsp).
+        assert!(
+            !bytes.starts_with(&[0x7F, 0x45, 0x4C, 0x46]),
+            "x86_64 raw output must not be an ELF64"
+        );
+        assert_eq!(&bytes[..3], &[0x55, 0x48, 0x89]);
+        assert_eq!(bytes[3], 0xE5, "expected `mov rbp, rsp` after `push rbp`");
+
+        // String literal present in the packed image.
+        find_bytes(&bytes, b"ForgeOS64").expect("string literal missing from x86_64 raw image");
+
+        // Packed layout: no ELF/program-header overhead (the same source as the
+        // x86_32 raw kernel emits in well under 256 bytes here).
+        assert!(
+            bytes.len() < 256,
+            "x86_64 raw image unexpectedly large (got {} bytes)",
+            bytes.len()
+        );
+
+        // No LOAD-relative absolute 8-byte address leaks into a local's RIP-
+        // relative access: the string's runtime address is reached through
+        // `lea rax, [rip+disp]`, so scanning for `0x100000 + offset` must fail.
+        let s = find_bytes(&bytes, b"ForgeOS64").unwrap();
+        let abs = (0x100000u64 + s as u64).to_le_bytes();
+        assert!(
+            find_bytes(&bytes, &abs).is_none(),
+            "x86_64 raw must use RIP-relative, not LOAD-relative, addressing"
+        );
+    }
+
+    #[test]
     fn compiles_minimal_program_x86_32() {
         let src = r#"
 package test

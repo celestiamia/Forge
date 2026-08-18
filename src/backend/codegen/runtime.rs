@@ -32,6 +32,44 @@ impl<'p> CodeGen<'p> {
         Ok(())
     }
 
+    /// Emit the freestanding `_dev_*` runtime helpers the program declared
+    /// `extern` for a raw (non-hosted) x86_64 image, mirroring the x86_32
+    /// backend's `emit_freestanding_runtime`.  Only the helpers the program
+    /// references get a label (reference-driven, see `FREESTANDING_FUNCS`),
+    /// and only those labels are emitted here.  Bytes are hand-authored and
+    /// validated by disassembly (see `tests`).
+    pub(super) fn emit_freestanding_runtime(&mut self) -> Result<()> {
+        // `_dev_outb(port: u16, val: u8)`: System V AMD64 passes port in RDI,
+        // value in RSI.  Emit raw bytes (no sub-register forms in the encoder):
+        // push rbp; mov rbp,rsp; mov edx,edi (-> dx = port); mov al,sil
+        // (val, REX 0x40 to reach SIL); out dx,al; leave; ret.
+        if let Some(&lab) = self.func_labels.get("_dev_outb") {
+            self.bind_label(lab);
+            self.asm.append_bytes(&[0x55, 0x48, 0x89, 0xE5]);    // push rbp; mov rbp,rsp
+            self.asm.append_bytes(&[0x89, 0xFA]);                // mov edx,edi
+            self.asm.append_bytes(&[0x40, 0x8A, 0xC6]);         // mov al,sil
+            self.asm.append_bytes(&[0xEE]);                     // out dx,al
+            self.asm.append_bytes(&[0xC9, 0xC3]);                // leave; ret
+        }
+        if let Some(&lab) = self.func_labels.get("_dev_inb") {
+            self.bind_label(lab);
+            // `_dev_inb(port: u16) -> u8`: port is the low half of RDI (System V
+            // zero-extends 16-bit args), so mov edx,edi puts the port in DX;
+            // in al,dx; movzx eax,al (return slot is EAX); leave; ret.
+            self.asm.append_bytes(&[0x55, 0x48, 0x89, 0xE5]);    // push rbp; mov rbp,rsp
+            self.asm.append_bytes(&[0x89, 0xFA]);                // mov edx,edi
+            self.asm.append_bytes(&[0xEC]);                     // in al,dx
+            self.asm.append_bytes(&[0x0F, 0xB6, 0xC0]);         // movzx eax,al
+            self.asm.append_bytes(&[0xC9, 0xC3]);                // leave; ret
+        }
+        // `_dev_halt()`: cli; hlt
+        if let Some(&lab) = self.func_labels.get("_dev_halt") {
+            self.bind_label(lab);
+            self.asm.append_bytes(&[0xFA, 0xF4]);
+        }
+        Ok(())
+    }
+
     fn emit_dev_write(&mut self) -> Result<()> {
         let w = *self.func_labels.get("_dev_write").unwrap();
         self.bind_label(w);

@@ -25,6 +25,11 @@ pub(super) const BASE_VADDR: u64 = 0x400000;
 pub(super) const EHDR_SIZE: u64 = 64;
 pub(super) const PHDR_SIZE: u64 = 56;
 
+/// `_dev_*` port-I/O / control helpers the freestanding x86_64 backend can
+/// emit (only the ones the program declares `extern` are emitted, mirroring
+/// the x86_32 backend's `FREESTANDING_FUNCS`).
+pub(super) const FREESTANDING_FUNCS: [&str; 3] = ["_dev_outb", "_dev_inb", "_dev_halt"];
+
 // Default size of the garbage-collected heap, reserved as zero-initialized
 // `.bss`.  The heap is a single contiguous region managed by a free-list
 // allocator with conservative mark-and-sweep collection.  Overridden by the
@@ -102,7 +107,11 @@ pub struct CodeGen<'p> {
 pub fn compile_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
     match prog.obj_format.as_deref() {
         Some("flat") => compile_flat_program(prog, true),
-        Some("raw") => compile_flat_program(prog, false),
+        // Raw flat binaries: x86_16 boot stages go through the 16-bit
+        // `compile_flat_program`; x86_64 (freestanding kernel) is emitted by
+        // the ELF codegen path which flatt into a flat image when `raw`.
+        Some("raw") if prog.arch.as_deref() == Some("x86_16") => compile_flat_program(prog, false),
+        Some("raw") => compile_elf_program(prog),
         Some("elf") => compile_elf_program(prog),
         other => bail!("unsupported output format `{}`", other.unwrap_or("(none)")),
     }
@@ -138,6 +147,21 @@ pub(super) fn compile_flat_program(
 pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter>> {
     let struct_layouts = compute_struct_layouts(&prog.structs)?;
     let mut cg = CodeGen::new(prog, struct_layouts);
+
+    // A freestanding `FORMAT raw` x86_64 image (e.g. a kernel loaded by a stage-2
+    // boot loader) is linked at the `LOAD` base rather than the default ELF
+    // `BASE_VADDR`, and is emitted without an ELF/program-header prefix.  Mirrors
+    // the x86_32 raw path in `codegen32/mod.rs`.
+    let raw = prog.obj_format.as_deref() == Some("raw");
+    let base = if raw {
+        prog.config
+            .as_ref()
+            .map(|c| c.load_base as u64)
+            .unwrap_or(0)
+    } else {
+        BASE_VADDR
+    };
+    let text_offset = if raw { 0u64 } else { EHDR_SIZE + PHDR_SIZE * 2 };
 
     for f in &prog.funcs {
         let lab = cg.asm.new_label();
@@ -242,9 +266,19 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
             .as_ref()
             .map(|c| c.entry.as_str())
             .unwrap_or("_start");
-        *cg.func_labels.get(entry_name).ok_or_else(|| {
+        let entry = *cg.func_labels.get(entry_name).ok_or_else(|| {
             anyhow::anyhow!("freestanding mode requires a {} function", entry_name)
-        })?
+        })?;
+        // Freestanding runtime helpers: the ones the program declares
+        // `extern` get a label here and are emitted at the end of the image
+        // (see `emit_freestanding_runtime`).
+        for name in FREESTANDING_FUNCS {
+            if prog.externs.iter().any(|e| e.name == name) {
+                cg.func_labels
+                    .insert(name.to_string(), cg.asm.new_label());
+            }
+        }
+        entry
     };
 
     for f in &prog.funcs {
@@ -253,6 +287,8 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
 
     if prog.hosted {
         cg.emit_runtime(start_label)?;
+    } else {
+        cg.emit_freestanding_runtime()?;
     }
 
     let rodata_start = cg.asm.new_label();
@@ -325,12 +361,10 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
     let mut code = bytes[..split].to_vec();
     let mut rodata = bytes[split..].to_vec();
 
-    let text_offset = EHDR_SIZE + PHDR_SIZE * 2;
-    let entry_vaddr =
-        BASE_VADDR + text_offset + *cg.label_offsets.get(&start_label).unwrap_or(&0) as u64;
+    let entry_vaddr = base + text_offset + *cg.label_offsets.get(&start_label).unwrap_or(&0) as u64;
 
     let rodata_start_off = *cg.label_offsets.get(&rodata_start).unwrap_or(&0);
-    let rodata_vaddr = BASE_VADDR + text_offset + code.len() as u64;
+    let rodata_vaddr = base + text_offset + code.len() as u64;
     for (g_lab, s_lab) in string_patches {
         let g_off = *cg.label_offsets.get(&g_lab).unwrap_or(&0);
         let s_off = *cg.label_offsets.get(&s_lab).unwrap_or(&0);
@@ -339,9 +373,17 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         rodata[slot..slot + 8].copy_from_slice(&addr.to_le_bytes());
     }
 
-    let first_seg_end = text_offset + code.len() as u64 + rodata.len() as u64;
-    let data_offset = align_up_u64(first_seg_end, PAGE_SIZE);
-    let data_vaddr = BASE_VADDR + data_offset;
+    // Raw flat images are packed (no ELF header, no page-alignment gap between
+    // segments); ELF images keep the RX/RW page split enforced by Elf64Writer.
+    let data_offset = if raw {
+        text_offset + code.len() as u64 + rodata.len() as u64
+    } else {
+        align_up_u64(
+            text_offset + code.len() as u64 + rodata.len() as u64,
+            PAGE_SIZE,
+        )
+    };
+    let data_vaddr = base + data_offset;
 
     let mut data: Vec<u8> = Vec::new();
     if let Some(patch_off) = cg.rand_seed_patch {
@@ -376,13 +418,24 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
             .copy_from_slice(&rd_end.to_le_bytes());
     }
 
-    Ok(Box::new(Elf64Writer::new(
-        code,
-        rodata,
-        data,
-        bss_size,
-        entry_vaddr,
-    )))
+    if raw {
+        // Flat binary kernel: sections laid out end-to-end at the LOAD base,
+        // with .bss zero-filled in the image (the boot loader copies only the
+        // file bytes, so there is no page-mapped zero memory to fall back on).
+        let mut image = code;
+        image.extend_from_slice(&rodata);
+        image.extend_from_slice(&data);
+        image.resize(image.len() + bss_size as usize, 0);
+        Ok(Box::new(FlatWriter::new(image, false)))
+    } else {
+        Ok(Box::new(Elf64Writer::new(
+            code,
+            rodata,
+            data,
+            bss_size,
+            entry_vaddr,
+        )))
+    }
 }
 
 pub(super) const PAGE_SIZE: u64 = 0x1000;
