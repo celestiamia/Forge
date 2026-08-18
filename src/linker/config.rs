@@ -134,30 +134,20 @@ impl LinkerConfig {
             ),
         }
         if matches!(self.format, OutputFormat::Raw)
-            && !matches!(self.arch.as_str(), "x86_16" | "x86_32")
+            && !matches!(self.arch.as_str(), "x86_16" | "x86_32" | "x86_64")
         {
-            anyhow::bail!("FORMAT raw is only supported for ARCH x86_16 or x86_32");
-        }
-        let expected = match self.arch.as_str() {
-            "x86_64" => Some("elf"),
-            "x86_32" => None, // elf32 (hosted) or raw (freestanding)
-            "x86_16" => None, // flat (boot sector) or raw (plain image)
-            _ => None,
-        };
-        if let Some(expected) = expected
-            && self.format.as_str() != expected
-        {
-            anyhow::bail!(
-                "ARCH {} requires FORMAT {} (got {})",
-                self.arch,
-                expected,
-                self.format.as_str()
-            );
+            anyhow::bail!("FORMAT raw is only supported for ARCH x86_16, x86_32, or x86_64");
         }
         if self.arch == "x86_32" && !matches!(self.format, OutputFormat::Elf32 | OutputFormat::Raw)
         {
             anyhow::bail!(
                 "ARCH x86_32 requires FORMAT elf32 or raw (got {})",
+                self.format.as_str()
+            );
+        }
+        if self.arch == "x86_64" && !matches!(self.format, OutputFormat::Elf | OutputFormat::Raw) {
+            anyhow::bail!(
+                "ARCH x86_64 requires FORMAT elf or raw (got {})",
                 self.format.as_str()
             );
         }
