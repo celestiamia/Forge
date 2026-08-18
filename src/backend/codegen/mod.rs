@@ -28,7 +28,18 @@ pub(super) const PHDR_SIZE: u64 = 56;
 /// `_dev_*` port-I/O / control helpers the freestanding x86_64 backend can
 /// emit (only the ones the program declares `extern` are emitted, mirroring
 /// the x86_32 backend's `FREESTANDING_FUNCS`).
-pub(super) const FREESTANDING_FUNCS: [&str; 3] = ["_dev_outb", "_dev_inb", "_dev_halt"];
+pub(super) const FREESTANDING_FUNCS: [&str; 10] = [
+    "_dev_outb",
+    "_dev_inb",
+    "_dev_halt",
+    "_dev_outw",
+    "_dev_inw",
+    "_dev_outl",
+    "_dev_inl",
+    "_dev_iret",
+    "_dev_sti",
+    "_dev_cli",
+];
 
 // Default size of the garbage-collected heap, reserved as zero-initialized
 // `.bss`.  The heap is a single contiguous region managed by a free-list

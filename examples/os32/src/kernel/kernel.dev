@@ -8,13 +8,11 @@ package os32.kernel
 # running at the physical LOAD address 0x100000.
 #
 # There is no BIOS anymore: output goes to the VGA text buffer (0xB8000)
-# via plain pointer stores and to COM1 via the `_dev_outb`/`_dev_inb`
+# via plain pointer stores and to COM1 via the outb/inb
 # port-I/O helpers.  The conventional memory size is read straight from
 # the BIOS data area at 0x413, which is just RAM once we are here.
 
-extern def _dev_outb(port: u16, val: u8) -> void
-extern def _dev_inb(port: u16) -> u8
-extern def _dev_halt() -> void
+from std.hal import outb, inb, halt
 
 @freestanding
 pub def _start() -> void:
@@ -24,7 +22,7 @@ pub def _start() -> void:
     put_hex32(mem_bytes())
     puts(" B\n")
     vga_puts("ForgeOS32: 32-bit protected mode")
-    _dev_halt()
+    halt()
 
 def mem_bytes() -> u32:
     unsafe:
@@ -32,18 +30,18 @@ def mem_bytes() -> u32:
         return (p[0] as u32) * 1024
 
 def serial_init() -> void:
-    _dev_outb(0x3F8 + 1, 0)       # IER: no interrupts
-    _dev_outb(0x3F8 + 3, 0x80)    # LCR: enable divisor latch
-    _dev_outb(0x3F8, 1)           # divisor low (115200 baud)
-    _dev_outb(0x3F8 + 1, 0)       # divisor high
-    _dev_outb(0x3F8 + 3, 0x03)    # LCR: 8N1, latch off
-    _dev_outb(0x3F8 + 2, 0xC7)    # FCR: enable + clear FIFOs
+    outb(0x3F8 + 1, 0)       # IER: no interrupts
+    outb(0x3F8 + 3, 0x80)    # LCR: enable divisor latch
+    outb(0x3F8, 1)           # divisor low (115200 baud)
+    outb(0x3F8 + 1, 0)       # divisor high
+    outb(0x3F8 + 3, 0x03)    # LCR: 8N1, latch off
+    outb(0x3F8 + 2, 0xC7)    # FCR: enable + clear FIFOs
 
 def serial_putc(c: char) -> void:
-    var lsr: u8 = _dev_inb(0x3F8 + 5)
+    var lsr: u8 = inb(0x3F8 + 5)
     while (lsr & 0x20) == 0:      # wait for the transmitter to be empty
-        lsr = _dev_inb(0x3F8 + 5)
-    _dev_outb(0x3F8, c as u8)
+        lsr = inb(0x3F8 + 5)
+    outb(0x3F8, c as u8)
 
 def puts(msg: ptr[char]) -> void:
     unsafe:

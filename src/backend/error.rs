@@ -71,9 +71,6 @@ pub enum CodegenError {
     #[error("function {name} has more than 6 arguments (not yet supported)")]
     TooManyArguments { name: String },
 
-    #[error("inline assembly not implemented for this target")]
-    AsmNotImplemented,
-
     #[error("floating point not implemented for this target")]
     FloatNotImplemented,
 }

@@ -67,6 +67,60 @@ impl<'p> CodeGen<'p> {
             self.bind_label(lab);
             self.asm.append_bytes(&[0xFA, 0xF4]);
         }
+        // `_dev_outw(port: u16, val: u16)`: RDI=port, RSI=val (System V).
+        // mov edx,edi (port -> DX); mov eax,esi (val -> EAX); out dx,ax (0x66 prefix
+        // forces 16-bit operand in 64-bit mode).
+        if let Some(&lab) = self.func_labels.get("_dev_outw") {
+            self.bind_label(lab);
+            self.asm.append_bytes(&[0x55, 0x48, 0x89, 0xE5]); // push rbp; mov rbp,rsp
+            self.asm.append_bytes(&[0x89, 0xFA]);              // mov edx,edi
+            self.asm.append_bytes(&[0x89, 0xF0]);              // mov eax,esi
+            self.asm.append_bytes(&[0x66, 0xEF]);              // out dx,ax
+            self.asm.append_bytes(&[0xC9, 0xC3]);              // leave; ret
+        }
+        // `_dev_inw(port: u16) -> u16`: RDI=port.  mov edx,edi; in ax,dx;
+        // movzx eax,ax (return slot is EAX).
+        if let Some(&lab) = self.func_labels.get("_dev_inw") {
+            self.bind_label(lab);
+            self.asm.append_bytes(&[0x55, 0x48, 0x89, 0xE5]); // push rbp; mov rbp,rsp
+            self.asm.append_bytes(&[0x89, 0xFA]);              // mov edx,edi
+            self.asm.append_bytes(&[0x66, 0xED]);              // in ax,dx
+            self.asm.append_bytes(&[0x0F, 0xB7, 0xC0]);         // movzx eax,ax
+            self.asm.append_bytes(&[0xC9, 0xC3]);              // leave; ret
+        }
+        // `_dev_outl(port: u16, val: u32)`: RDI=port, RSI=val.
+        // mov edx,edi; mov eax,esi; out dx,eax (native 32-bit in 64-bit mode).
+        if let Some(&lab) = self.func_labels.get("_dev_outl") {
+            self.bind_label(lab);
+            self.asm.append_bytes(&[0x55, 0x48, 0x89, 0xE5]); // push rbp; mov rbp,rsp
+            self.asm.append_bytes(&[0x89, 0xFA]);              // mov edx,edi
+            self.asm.append_bytes(&[0x89, 0xF0]);              // mov eax,esi
+            self.asm.append_bytes(&[0xEF]);                    // out dx,eax
+            self.asm.append_bytes(&[0xC9, 0xC3]);              // leave; ret
+        }
+        // `_dev_inl(port: u16) -> u32`: RDI=port.  mov edx,edi; in eax,dx; ret.
+        if let Some(&lab) = self.func_labels.get("_dev_inl") {
+            self.bind_label(lab);
+            self.asm.append_bytes(&[0x55, 0x48, 0x89, 0xE5]); // push rbp; mov rbp,rsp
+            self.asm.append_bytes(&[0x89, 0xFA]);              // mov edx,edi
+            self.asm.append_bytes(&[0xED]);                    // in eax,dx
+            self.asm.append_bytes(&[0xC9, 0xC3]);              // leave; ret
+        }
+        // `_dev_iret()`: iret (0xCF)
+        if let Some(&lab) = self.func_labels.get("_dev_iret") {
+            self.bind_label(lab);
+            self.asm.append_bytes(&[0xCF]);
+        }
+        // `_dev_sti()`: sti (0xFB)
+        if let Some(&lab) = self.func_labels.get("_dev_sti") {
+            self.bind_label(lab);
+            self.asm.append_bytes(&[0xFB]);
+        }
+        // `_dev_cli()`: cli (0xFA)
+        if let Some(&lab) = self.func_labels.get("_dev_cli") {
+            self.bind_label(lab);
+            self.asm.append_bytes(&[0xFA]);
+        }
         Ok(())
     }
 

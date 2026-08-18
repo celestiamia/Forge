@@ -26,7 +26,18 @@ const PAGE_SIZE_32: u32 = 0x1000;
 
 /// `_dev_*` runtime helpers the freestanding x86_32 backend can emit.  Only
 /// the ones the program declares `extern` are emitted (reference-driven).
-pub(super) const FREESTANDING_FUNCS: [&str; 3] = ["_dev_outb", "_dev_inb", "_dev_halt"];
+pub(super) const FREESTANDING_FUNCS: [&str; 10] = [
+    "_dev_outb",
+    "_dev_inb",
+    "_dev_halt",
+    "_dev_outw",
+    "_dev_inw",
+    "_dev_outl",
+    "_dev_inl",
+    "_dev_iret",
+    "_dev_sti",
+    "_dev_cli",
+];
 
 // Free-list heap (x86_32): each block carries a 4-byte header immediately
 // before its payload (bit 0 = USED, rest = size in bytes).  The runtime state

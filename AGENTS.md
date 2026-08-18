@@ -169,7 +169,13 @@ Compilation is deterministic: `merge_modules` in `src/driver/loader.rs` merges t
 
 ## Inline assembly
 
-`asm!()` template accepted by the parser; x86_16 backend assembles verbatim template text. Other targets error at codegen.
+Forge intentionally does **not** implement `asm!()` or any inline assembly
+syntax.  Hardware primitives (port I/O, interrupt control, PIC arbitration)
+are exposed entirely through compiler-emitted `_dev_*` runtime helpers that
+are declared `extern` in `core/hal.dev` and wrapped by typed `pub` functions
+in the `std.hal` module.  The parser still accepts `asm!()` calls (for
+forward compatibility), but any `asm!()` expression produces a compile-time
+error on all targets.
 
 ## What not to touch
 
@@ -177,12 +183,13 @@ Compilation is deterministic: `merge_modules` in `src/driver/loader.rs` merges t
 - `src/ty/mod.rs` `Type` enum is the source of truth for type names — sema and lowerer both route through it
 - Type names `i128`/`uint128` are mapped in sema (`typing.rs`) but rejected at lowering with "128-bit integers are not supported by any backend yet"
 - `.gitignore` comments warn: do NOT gitignore bare `core` (would exclude the `core/` stdlib dir)
+- Inline assembly (`asm!()`) — not implemented and not planned; use the `std.hal` module's `int()`, `outb()`, `inb()`, etc. wrappers instead
 
 ## Cross-target parity
 
 When adding a feature to the x86_64 backend, mirror it in `codegen32/` + `x86/` so the `x86_32-unknown-linux-gnu` target stays in parity. The 32-bit target does not support floats — stdlib modules using `f64` will break x86_32 tests.
 
-The x86_64 freestanding runtime (`src/backend/codegen/runtime.rs`, `FREESTANDING_FUNCS` in `src/backend/codegen/mod.rs`) mirrors `codegen32`'s: only the `_dev_*` helpers a freestanding `FORMAT raw` image references get emitted (reference-driven). Both backends expose `_dev_outb`, `_dev_inb`, and `_dev_halt`.
+The x86_64 freestanding runtime (`src/backend/codegen/runtime.rs`, `FREESTANDING_FUNCS` in `src/backend/codegen/mod.rs`) mirrors `codegen32`'s: only the `_dev_*` helpers a freestanding `FORMAT raw` image references get emitted (reference-driven). Both backends expose `_dev_outb`, `_dev_inb`, `_dev_outw`, `_dev_inw`, `_dev_outl`, `_dev_inl`, `_dev_iret`, `_dev_sti`, `_dev_cli`, and `_dev_halt`.  The x86_16 backend exposes the same byte/word helpers via `BUILTIN_FUNCS` in `src/backend/codegen16/program.rs` but does not support `_dev_outl`/`_dev_inl` (32-bit types are rejected by `type_info`).  `INT nn` is emitted inline via `ExprKind::IntImm` rather than as a runtime call — the lowerer desugars `_dev_int(<literal>)` calls.
 
 ## Parser gotchas
 

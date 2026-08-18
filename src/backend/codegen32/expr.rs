@@ -110,6 +110,9 @@ impl<'p> CodeGen<'p> {
                 };
                 self.asm.mov(Reg::Eax, off as i32)?;
             }
+            ExprKind::IntImm(n) => {
+                self.asm.append_bytes(&[0xCD, *n]);
+            }
         }
         Ok(())
     }

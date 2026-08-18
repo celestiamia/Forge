@@ -524,6 +524,35 @@ impl LowerCtx<'_> {
             ast::Expr::Ident(n) => n.clone(),
             _ => bail!("only direct function calls are supported in the first milestone"),
         };
+
+        // `_dev_int(n)` is desugared to `INT nn`: the x86 INT instruction only
+        // accepts an 8-bit immediate operand, so the argument must be a
+        // compile-time constant literal in 0..=255.  If it is, we lower to
+        // `ExprKind::IntImm(n)` which each backend emits as `0xCD, n`; otherwise
+        // we emit a clear compile-time error.
+        if name == "_dev_int" {
+            if c.args.len() != 1 {
+                bail!("`int()` requires exactly 1 argument, got {}", c.args.len());
+            }
+            if let ast::Expr::Literal(ast::Literal::Int(n)) = c.args[0] {
+                if (0..=255).contains(&n) {
+                    return Ok(ir::Expr::new(
+                        ir::ExprKind::IntImm(n as u8),
+                        ir::Type::Void,
+                    ));
+                }
+                bail!(
+                    "`int()` vector {} is out of range (0-255); \
+                     the x86 INT instruction only accepts an 8-bit immediate",
+                    n
+                );
+            }
+            bail!(
+                "`int()` requires a compile-time-constant interrupt vector (0-255); \
+                 the x86 INT instruction has no register-indirect form"
+            );
+        }
+
         let args = c
             .args
             .iter()

@@ -2,7 +2,7 @@ use super::*;
 
 /// `_dev_*` runtime helpers the 16-bit backend can emit.  Only the ones the
 /// program actually calls are emitted (tracked via [`CodeGen16::referenced`]).
-pub const BUILTIN_FUNCS: [&str; 13] = [
+pub const BUILTIN_FUNCS: [&str; 20] = [
     "_dev_bios_teletype",
     "_dev_serial_putc",
     "_dev_load_char",
@@ -16,6 +16,16 @@ pub const BUILTIN_FUNCS: [&str; 13] = [
     "_dev_bios_disk_read_lba",
     "_dev_enter_pmode",
     "_dev_enter_long_mode",
+    // Port I/O (byte and word — native 16-bit widths)
+    "_dev_outb",
+    "_dev_inb",
+    "_dev_outw",
+    "_dev_inw",
+    // Interrupt control (STI/CLI/IRET are single-byte opcodes; INT nn is
+    // emitted inline by the lowerer via ExprKind::IntImm, not via a call).
+    "_dev_iret",
+    "_dev_sti",
+    "_dev_cli",
 ];
 
 impl<'p> CodeGen16<'p> {
@@ -593,6 +603,58 @@ impl<'p> CodeGen16<'p> {
                     self.asm.emit_slice(&[0x00; 8]); // null
                     self.asm.emit_slice(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x9A, 0xCF, 0x00]); // code32
                     self.asm.emit_slice(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x92, 0xCF, 0x00]); // data32
+                }
+                "_dev_outw" => {
+                    // push bp; mov bp,sp; mov dx,[bp+6]; mov ax,[bp+4]; out dx,ax; ret
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    self.asm.load16_bp(Reg16::Dx, 6);  // port
+                    self.asm.load16_bp(Reg16::Ax, 4);  // value
+                    self.asm.out_dx_ax();
+                    self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
+                    self.asm.pop(Reg16::Bp);
+                    self.asm.ret();
+                }
+                "_dev_inw" => {
+                    // push bp; mov bp,sp; mov dx,[bp+4]; in ax,dx; ret
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    self.asm.load16_bp(Reg16::Dx, 4);  // port
+                    self.asm.in_ax_dx();
+                    self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
+                    self.asm.pop(Reg16::Bp);
+                    self.asm.ret();
+                }
+                "_dev_iret" => {
+                    self.asm.iret();
+                }
+                "_dev_sti" => {
+                    self.asm.sti();
+                }
+                "_dev_cli" => {
+                    self.asm.cli();
+                }
+                "_dev_outb" => {
+                    // push bp; mov bp,sp; mov dx,[bp+6]; mov al,[bp+4]; out dx,al; ret
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    self.asm.load16_bp(Reg16::Dx, 6);  // port
+                    self.asm.load8_bp(Reg8::Al, 4);    // value
+                    self.asm.out_dx_al();
+                    self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
+                    self.asm.pop(Reg16::Bp);
+                    self.asm.ret();
+                }
+                "_dev_inb" => {
+                    // push bp; mov bp,sp; mov dx,[bp+4]; in al,dx; xor ah,ah; ret
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    self.asm.load16_bp(Reg16::Dx, 4);  // port
+                    self.asm.in_al_dx();
+                    self.asm.xor_ah_ah();
+                    self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
+                    self.asm.pop(Reg16::Bp);
+                    self.asm.ret();
                 }
                 other => bail!("unknown builtin {}", other),
             }

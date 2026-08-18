@@ -75,6 +75,9 @@ impl<'p> CodeGen16<'p> {
                 };
                 self.asm.mov16_imm(Reg16::Ax, off);
             }
+            ExprKind::IntImm(n) => {
+                self.asm.int(*n);
+            }
         }
         Ok(())
     }

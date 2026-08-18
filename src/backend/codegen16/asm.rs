@@ -561,6 +561,26 @@ impl Encoder {
         self.emit(0xEE);
     }
 
+    pub(super) fn sti(&mut self) {
+        self.emit(0xFB);
+    }
+
+    pub(super) fn iret(&mut self) {
+        self.emit(0xCF);
+    }
+
+    pub(super) fn in_al_dx(&mut self) {
+        self.emit(0xEC);
+    }
+
+    pub(super) fn in_ax_dx(&mut self) {
+        self.emit(0xED);
+    }
+
+    pub(super) fn out_dx_ax(&mut self) {
+        self.emit(0xEF);
+    }
+
     pub(super) fn db(&mut self, bytes: &[u8]) {
         self.bytes.extend_from_slice(bytes);
     }

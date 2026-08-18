@@ -1,0 +1,137 @@
+package std.hal
+
+# Hardware I/O and interrupt-control primitives for freestanding targets
+# (x86_16 boot sectors, x86_32 kernels, x86_64 kernels).
+#
+# These are thin wrappers around compiler-emitted `_dev_*` helpers.  Port I/O
+# uses width-correct OUT/IN sequences; interrupt control emits STI/CLI/IRET;
+# software interrupts require a compile-time-constant vector (the `_dev_int`
+# call is desugared by the compiler to an inline `INT nn` instruction).  PIC
+# initialisation is implemented in Forge via the `outb` helpers.
+#
+# This module is intended for freestanding targets only.  On hosted Linux
+# targets the `_dev_*` port-I/O helpers are not emitted, so calling functions
+# from this module will fail at compile time.  Use `std.io` for hosted I/O.
+#
+# Only the helpers that the program actually references get emitted by the
+# compiler (reference-driven), so importing this module is harmless on targets
+# where the helpers are available even if you only use a subset.
+
+# ---------------------------------------------------------------------------
+# Port I/O: byte (8-bit) — already present in every backend
+# ---------------------------------------------------------------------------
+extern def _dev_outb(port: u16, val: u8) -> void
+extern def _dev_inb(port: u16) -> u8
+
+# ---------------------------------------------------------------------------
+# Port I/O: word (16-bit) and dword (32-bit)
+# ---------------------------------------------------------------------------
+extern def _dev_outw(port: u16, val: u16) -> void
+extern def _dev_inw(port: u16) -> u16
+
+# ---------------------------------------------------------------------------
+# Interrupt control
+# ---------------------------------------------------------------------------
+# `_dev_int(n)` is special: the compiler detects calls to it with a literal
+# argument and desugars them to an inline `INT nn` instruction (opcode CD ib).
+# Passing anything other than a constant 0..=255 is a compile-time error.
+extern def _dev_int(n: int32) -> void
+extern def _dev_iret() -> void
+extern def _dev_sti() -> void
+extern def _dev_cli() -> void
+extern def _dev_halt() -> void
+
+# ---------------------------------------------------------------------------
+# I/O port constants
+# ---------------------------------------------------------------------------
+const COM1_BASE: u16 = 0x3F8
+const COM2_BASE: u16 = 0x2F8
+const COM3_BASE: u16 = 0x3E8
+const COM4_BASE: u16 = 0x2E8
+
+const PIC_MASTER_CMD: u16 = 0x20
+const PIC_MASTER_DATA: u16 = 0x21
+const PIC_SLAVE_CMD: u16 = 0xA0
+const PIC_SLAVE_DATA: u16 = 0xA1
+
+# ---------------------------------------------------------------------------
+# Byte (8-bit) port I/O
+# ---------------------------------------------------------------------------
+
+# Write a byte to an I/O port.
+pub def outb(port: u16, val: u8) -> void
+    _dev_outb(port, val)
+
+# Read a byte from an I/O port.
+pub def inb(port: u16) -> u8
+    return _dev_inb(port)
+
+# ---------------------------------------------------------------------------
+# Word (16-bit) port I/O
+# ---------------------------------------------------------------------------
+
+# Write a 16-bit value to an I/O port (OUT DX, AX).
+pub def outw(port: u16, val: u16) -> void
+    _dev_outw(port, val)
+
+# Read a 16-bit value from an I/O port (IN AX, DX).
+pub def inw(port: u16) -> u16
+    return _dev_inw(port)
+
+# ---------------------------------------------------------------------------
+# Interrupt control
+# ---------------------------------------------------------------------------
+
+# Software interrupt.  This is NOT a function — it is desugared by the
+# compiler to an inline `INT nn` instruction (opcode 0xCD).  `n` must be
+# a compile-time-constant literal in 0..=255, because the x86 INT instruction
+# only accepts an 8-bit immediate operand.
+#
+# Usage: `from std.hal import _dev_int` then `_dev_int(0x80)` — the compiler
+# emits `INT 0x80` directly, no function call is generated.
+
+# Return from hardware interrupt handler (IRET).
+pub def iret() -> void
+    _dev_iret()
+
+# Enable maskable hardware interrupts (STI).
+pub def sti() -> void
+    _dev_sti()
+
+# Disable maskable hardware interrupts (CLI).  Often used before reprogramming
+# the PIC or modifying IDT entries.
+pub def cli() -> void
+    _dev_cli()
+
+# Halt the CPU indefinitely.  Disables interrupts first to enter a safe
+# spin-halt state (CLI; HLT loop).
+pub def halt() -> void
+    _dev_halt()
+
+# ---------------------------------------------------------------------------
+# PIC 8259A arbitration (master + slave cascade)
+# ---------------------------------------------------------------------------
+
+# Initialise and remap the master and slave 8259 PICs so that IRQs 0-15 map
+# to interrupt vectors 0x20-0x27 (master) and 0x28-0x2F (slave).  Call this
+# after entering protected or long mode, before enabling interrupts with sti().
+# Uses literal port addresses (module-level consts are not visible inside
+# function bodies in the current module system).
+pub def pic_init() -> void
+    outb(0x20, 0x11)     # ICW1: edge, cascade, ICW4 (master)
+    outb(0xA0, 0x11)     # ICW1 (slave)
+    outb(0x21, 0x20)     # ICW2: master base = 0x20
+    outb(0xA1, 0x28)     # ICW2: slave base = 0x28
+    outb(0x21, 0x04)     # ICW3: master cascade on IR2
+    outb(0xA1, 0x02)     # ICW3: slave cascade identity
+    outb(0x21, 0x01)     # ICW4: 8086 mode, normal EOI
+    outb(0xA1, 0x01)
+    outb(0x21, 0x00)     # OCW1: unmask all on master
+    outb(0xA1, 0x00)     # OCW1: unmask all on slave
+
+# Send End-of-Interrupt for the given IRQ line.  On slave IRQs (>= 8) an
+# additional EOI is sent to the slave PIC.
+pub def pic_send_eoi(irq: u8) -> void
+    if irq >= 8:
+        outb(0xA0, 0x20)  # EOI to slave
+    outb(0x20, 0x20)      # EOI to master

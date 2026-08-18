@@ -278,6 +278,10 @@ pub enum ExprKind {
         ty: Type,
         field: usize,
     },
+    /// `INT nn` — software interrupt with an 8-bit compile-time-constant vector.
+    /// Produced by desugaring `_dev_int(<literal>)` in the lowerer; emitted as
+    /// `0xCD, n` by every backend.
+    IntImm(u8),
 }
 
 #[derive(Clone, Debug)]

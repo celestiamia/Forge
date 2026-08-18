@@ -18,6 +18,18 @@ pub(super) use crate::backend::ir::{
 /// responsible for padding to a boot sector and appending the signature.
 pub fn compile_program(prog: &Program) -> Result<Vec<u8>> {
     let load_base = prog.config.as_ref().map(|c| c.load_base).unwrap_or(0x7C00);
+    // The 16-bit backend does not support 32-bit types (u32/i32), so 32-bit
+    // port I/O helpers cannot be emitted.  Reject them early with a clear
+    // error.  (std.hal deliberately omits these on all targets.)
+    for name in &["_dev_outl", "_dev_inl"] {
+        if prog.externs.iter().any(|e| &*e.name == *name) {
+            bail!(
+                "`{}` (std.hal) is not supported on the x86_16 target; \
+                 the 16-bit backend cannot represent 32-bit values",
+                name
+            );
+        }
+    }
     let mut cg = CodeGen16::new(prog, load_base);
     cg.emit_program()?;
     cg.finish()
