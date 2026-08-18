@@ -1,0 +1,15 @@
+# ForgeOS64 stage-2 loader descriptor: x86_16 raw image loaded at 0x9000 by the
+# stage-1 boot sector (see os64-loader.fld docs; LOAD makes the compiler emit
+# absolute string addresses against 0x9000).  Reads the 64-bit kernel (image LBA
+# sectors 3-10) into a low-memory staging buffer at 0x8000 via INT 13h AH=42h
+# (`_dev_read_lba`), then calls `_dev_enter_long_mode` to enable A20, build
+# 4-level identity page tables covering 0..1 GiB, install 32-bit + 64-bit GDTs,
+# switch to 32-bit protected mode, enable PAE/EFER.LME/CR0.PG, land in 64-bit
+# long mode, and jump to the kernel at its LOAD address 0x100000.  The mode-
+# switch stub itself relocates the 4096-byte staging buffer from 0x8000 to
+# 0x100000 while still in flat 32-bit mode with A20 enabled, before the jump.
+ARCH x86_16
+FORMAT raw
+HOSTED false
+ENTRY _start
+LOAD 0x9000

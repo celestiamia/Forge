@@ -1,0 +1,9 @@
+# ForgeOS64 kernel descriptor: freestanding x86_64 raw image.  Linked at
+# 0x100000 (1 MiB, the kernel link base the stage-2 loader switches to) and
+# entered through `_dev_enter_long_mode(0, 0x0010)`.  `LOAD` fixes every
+# absolute reference (strings, globals, function pointers) against 0x100000.
+ARCH x86_64
+FORMAT raw
+HOSTED false
+ENTRY _start
+LOAD 0x100000

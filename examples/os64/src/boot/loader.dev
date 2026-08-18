@@ -1,0 +1,52 @@
+package os64.loader
+
+# ForgeOS64 stage-2 loader, pure Forge.
+#
+# Loaded by the stage-1 boot sector to 0:0x9000 and jumped to (see
+# os64-loader.fld: `LOAD 0x9000` makes the compiler emit absolute string
+# addresses against 0x9000).  Reads the 64-bit kernel -- image LBA sectors
+# 3-10 (after boot at LBA 0 and this loader at LBA 1-2), 8 x 512 bytes, at most
+# 4096 bytes -- into a low-memory staging buffer at 0x8000 via INT 13h AH=42h
+# (`_dev_bios_disk_read_lba`), then calls `_dev_enter_long_mode` to enable A20,
+# build identity page tables (0..1 GiB), install 32-bit + 64-bit GDTs, and
+# switch the CPU to 64-bit long mode, landing at the kernel's `_start` (linked
+# at 0x100000, so entry_lo=0, entry_hi=0x0010).
+#
+# The kernel is NOT read directly into 0x100000: SeaBIOS's AH=42h PIO transfer
+# addresses its buffer through a 16-bit ES:DI pair (ES = buf>>4, DI = buf&15),
+# so it can only write within the low 1 MiB -- a 0x100000+ buffer silently
+# wraps.  The mode-switch stub in `_dev_enter_long_mode` itself copies the
+# 4096-byte staging buffer from 0x8000 to 0x100000 while running in flat 32-bit
+# mode with A20 enabled, before jumping to the kernel.
+
+extern def _dev_bios_teletype(c: char) -> void
+extern def _dev_load_char(p: ptr[char]) -> char
+extern def _dev_halt() -> void
+extern def _dev_bios_disk_read_lba(drive: u16, lba_lo: u16, lba_hi: u16, count: u16, es: u16, bx: u16) -> u16
+extern def _dev_enter_long_mode(lo: u16, hi: u16) -> void
+
+@freestanding
+pub def _start() -> void:
+    var tries: u16 = 3
+    var status: u16 = 0
+    puts("ForgeOS64: loading kernel")
+    while tries != 0:
+        status = _dev_bios_disk_read_lba(0x80, 3, 0, 8, 0x0800, 0x0000)
+        if status == 0:
+            tries = 0
+        else:
+            tries = tries - 1
+    if status != 0:
+        puts(": disk error\n")
+        _dev_halt()
+    puts(": ok\n")
+    _dev_enter_long_mode(0x0000, 0x0010)
+
+def puts(msg: ptr[char]) -> void:
+    unsafe:
+        var p: ptr[char] = msg
+        var c: char = _dev_load_char(p)
+        while c != 0:
+            _dev_bios_teletype(c)
+            p = p + 1
+            c = _dev_load_char(p)
