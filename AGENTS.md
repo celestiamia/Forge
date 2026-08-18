@@ -59,7 +59,8 @@ Single Rust crate (`forgec`), edition 2024, source in `src/`.
 - `x86_64-unknown-linux-gnu` / `native` → hosted, x86_64, ELF64
 - `x86_32-unknown-linux-gnu` → hosted, x86_32, ELF32 (no float support)
 - `x86_16-boot` → freestanding, x86_16, flat
-- `x86_32` raw binary → freestanding, x86_32, `FORMAT raw` (boot-to-32-bit chain, e.g. `examples/os32`; `LOAD` is the kernel link base, default `0x100000`)
+ - `x86_32` raw binary → freestanding, x86_32, `FORMAT raw` (boot-to-32-bit chain, e.g. `examples/os32`; `LOAD` is the kernel link base, default `0x100000`)
+- `x86_64` raw binary → freestanding, x86_64, `FORMAT raw` (boot-to-64-bit chain, e.g. `examples/os64`; `LOAD` is the kernel link base, default `0x100000`)
 
 ## Forge language quirks
 
@@ -69,6 +70,7 @@ Single Rust crate (`forgec`), edition 2024, source in `src/`.
 - `pub def main()` → mangled to `_forge_main` in hosted targets (runtime `_start` calls it)
 - Hosted runtime helpers (`_dev_puts`, `_dev_exit`, etc.) declared `extern` in `core/*.dev`; the compiler emits them in `src/backend/codegen/runtime.rs`. The GC heap helpers (`_dev_alloc`, `_dev_free`, `_dev_gc_*`) live in `src/backend/codegen/gc.rs`
 - `@freestanding` attribute bypasses hosted runtime requirements
+- codegen16 runtime stubs (in `src/backend/codegen16/program.rs`, `BUILTIN_FUNCS`) are inline machine code, not calls into `core/`; the stage-1 boot sector uses them directly: `_dev_bios_teletype`, `_dev_serial_putc`, `_dev_load_char`, `_dev_bios_key`, `_dev_bios_disk_reset`, `_dev_bios_disk_read` (CHS), `_dev_bios_disk_read_lba` (INT 13h AH=42h), `_dev_jump`, and the mode-switch stubs `_dev_enter_pmode` (16→32) and `_dev_enter_long_mode` (16→32→64). `_dev_enter_long_mode(lo, hi)` runs the whole switch itself: A20, 16→32 GDT + CR0.PE, a 32-bit trampoline that relocates the kernel staging buffer (0x8000→0x100000) and stashes the entry at 0x8FF8, 4-level identity page tables covering 0..1 GiB (PDPT[0]=0x83, which also satisfies the PAE 3-level transition window), CR3/CR4.PAE/EFER.LME via `wrmsr`, a 64-bit GDT + `lgdt`, CR0.PG, a `far jmp` to a 64-bit code segment, and the trampoline `mov rax,0x90000; mov rax,[0x8FF8]; jmp rax`. It is exercised by `examples/os64`. Before switching, it probes CPUID for long-mode support: it reads leaf `0x80000000` and only tests leaf `0x80000001` if its max-extended-leaf is `>= 0x80000001` (a 32-bit-only CPU omits that leaf, whose absent EDX returns leaf-0/vendor data with a spuriously-set bit 29), then checks the `LM` bit (EDX bit 29). On a 32-bit-only CPU it emits `No 64-bit CPU\r\n` over COM1 (port 0x3F8) -- the os64 boot chain's console under `-nographic` -- and halts, rather than triple-faulting.
 - Power operator (`**`) requires integer operands; desugars to `__forge_pow` runtime call (loop-based, integer-only)
 - Floor division (`//`) is floor-toward-negative-infinity; floor division by zero panics at runtime
 - `unsafe` blocks bypass pointer safety checks
@@ -179,6 +181,8 @@ Compilation is deterministic: `merge_modules` in `src/driver/loader.rs` merges t
 ## Cross-target parity
 
 When adding a feature to the x86_64 backend, mirror it in `codegen32/` + `x86/` so the `x86_32-unknown-linux-gnu` target stays in parity. The 32-bit target does not support floats — stdlib modules using `f64` will break x86_32 tests.
+
+The x86_64 freestanding runtime (`src/backend/codegen/runtime.rs`, `FREESTANDING_FUNCS` in `src/backend/codegen/mod.rs`) mirrors `codegen32`'s: only the `_dev_*` helpers a freestanding `FORMAT raw` image references get emitted (reference-driven). Both backends expose `_dev_outb`, `_dev_inb`, and `_dev_halt`.
 
 ## Parser gotchas
 
