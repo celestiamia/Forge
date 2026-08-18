@@ -2,7 +2,7 @@ use super::*;
 
 /// `_dev_*` runtime helpers the 16-bit backend can emit.  Only the ones the
 /// program actually calls are emitted (tracked via [`CodeGen16::referenced`]).
-pub const BUILTIN_FUNCS: [&str; 12] = [
+pub const BUILTIN_FUNCS: [&str; 13] = [
     "_dev_bios_teletype",
     "_dev_serial_putc",
     "_dev_load_char",
@@ -15,6 +15,7 @@ pub const BUILTIN_FUNCS: [&str; 12] = [
     "_dev_jump",
     "_dev_bios_disk_read_lba",
     "_dev_enter_pmode",
+    "_dev_enter_long_mode",
 ];
 
 impl<'p> CodeGen16<'p> {
@@ -387,7 +388,211 @@ impl<'p> CodeGen16<'p> {
                     self.asm
                         .emit_slice(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x9A, 0xCF, 0x00]);
                     self.asm
-                        .emit_slice(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x92, 0xCF, 0x00]);
+                        .emit_slice(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x92, 0xCF, 0x00]); // data32
+                }
+                "_dev_enter_long_mode" => {
+                    // Switch from real mode all the way to 64-bit long mode
+                    // and jump to a kernel entry.  Args: entry_lo, entry_hi
+                    // (the 32-bit entry point split because 16-bit Forge cannot
+                    // hold such constants; e.g. an x86_64 raw kernel linked at
+                    // 0x100000 is entered as `_dev_enter_long_mode(0, 0x0010)`).
+                    //
+                    // Lays down the 16-bit prologue of `_dev_enter_pmode` (A20,
+                    // 32-bit flat GDT, CR0.PE, far jmp 0x08 -> 32-bit trampoline),
+                    // then in the 32-bit trampoline copies the staging buffer
+                    // (0x8000, where the BIOS read the kernel) to the kernel's
+                    // link address 0x100000, stashes the entry at 0x8FF8, builds
+                    // 4-level identity page tables, enables PAE/EFER.LME/CR0.PG,
+                    // loads a 64-bit GDT, and far-jumps to a 64-bit trampoline
+                    // that reads the stashed entry and jumps there.
+                    //
+                    // Page structures live at fixed, 4 KiB-aligned low addresses
+                    // (QEMU zeroes RAM at reset): PML4@0xA000, PDPT@0xB000,
+                    // 64-bit GDT@0xC000, its gdtr@0xC018, the entry stash@0x8FF8
+                    // (in the staging region, freed by the rep movsd above).
+                    //
+                    // PDPT[0]=0x83 is a 1 GiB page covering 0..1 GiB.  This is
+                    // what makes the transition correct: with LME+PAE+PG the CPU
+                    // briefly runs in PAE 3-level mode (CR3 read as PDPT) until
+                    // the far jmp loads the 64-bit code segment; reading PDPT[0]
+                    // as a PDE then also yields a 2 MiB page @0, so both the
+                    // `jmp` after CR0.PG and the 64-bit trampoline resolve.  The
+                    // 4-level walk (PML4[0] -> PDPT -> 1 GiB page) covers them
+                    // once IA-32e mode is active.
+                    self.asm.push(Reg16::Bp);
+                    self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
+                    // Detect a 64-bit-capable CPU before attempting the switch.
+                    // CPUID.80000001:EDX[bit 29] (LM) is set only when the CPU
+                    // implements long mode.  On a 32-bit-only CPU the switch
+                    // below would #GP and triple-fault with no diagnostics, so
+                    // print "No 64-bit CPU" via the BIOS teletype and halt.
+                    let no_lm_msg =
+                        self.string_label("No 64-bit CPU\r\n\0");
+                    let err = self.asm.new_label();
+                    // Robust long-mode detection: first read the max extended CPUID
+                    // leaf (0x80000000) and only test the LM bit when leaf
+                    // 0x80000001 is actually supported.  On a 32-bit-only CPU
+                    // that leaf is absent and returns leaf-0/vendor EDX, whose bit 29
+                    // is spuriously set -- without this guard we'd dive into the
+                    // switch and triple-fault on any 32-bit host/CPU model.
+                    let switch = self.asm.new_label();
+                    self.asm.emit_slice(&[0x66, 0xB8]); // mov eax, 0x80000000
+                    self.asm.emit_imm32(0x80000000);
+                    self.asm.emit_slice(&[0x0F, 0xA2]); // cpuid
+                    self.asm.emit_slice(&[0x66, 0x3D]); // cmp eax, 0x80000001
+                    self.asm.emit_imm32(0x80000001);
+                    self.asm.jcc_short_lab(0x72, err); // jb err (unsigned below)
+                    self.asm.emit_slice(&[0x66, 0xB8]); // mov eax, 0x80000001
+                    self.asm.emit_imm32(0x80000001);
+                    self.asm.emit_slice(&[0x0F, 0xA2]); // cpuid
+                    self.asm.emit_slice(&[0x66, 0xF7, 0xC2]); // test edx, imm32 (1<<29 = LM)
+                    self.asm.emit_imm32(1 << 29);
+                    self.asm.je_short_lab(err); // jz err (LM clear)
+                    // All jumps to `err` are short (it is bound immediately below),
+                    // so the short-jump widener is never exercised here.
+                    self.asm.jmp_short_lab(switch); // skip the error block on success
+                    self.asm.bind(err);
+                    // BIOS teletopy loop: print "No 64-bit CPU", then halt.  This
+                    // matches the stage-2 loader's `_dev_bios_teletopy` channel
+                    // (int 0x10, VGA) used for all early-boot diagnostics and is
+                    // visible on a VGA/CGA display.  DS=0 (set by _start's segment
+                    // setup) so the string's 16-bit absolute address reads the
+                    // image directly.
+                    self.asm.emit_slice(&[0xBE]); // mov si, imm16 (msg address)
+                    self.asm.imm16_label(no_lm_msg);
+                    let msg_loop = self.asm.new_label();
+                    let halt = self.asm.new_label();
+                    self.asm.bind(msg_loop);
+                    self.asm.emit_slice(&[0xAC]); // lodsb
+                    self.asm.emit_slice(&[0x3C, 0x00]); // cmp al,0
+                    self.asm.je_short_lab(halt);
+                    self.asm.emit_slice(&[0xB4, 0x0E]); // mov ah,0x0E (teletopy)
+                    self.asm.emit_slice(&[0xB3, 0x07]); // mov bl,0x07
+                    self.asm.emit_slice(&[0xB7, 0x00]); // mov bh,0
+                    self.asm.emit_slice(&[0xCD, 0x10]); // int 0x10 (VGA)
+                    self.asm.jmp_short_lab(msg_loop);
+                    self.asm.bind(halt);
+                    self.asm.emit_slice(&[0xFA]); // cli
+                    self.asm.emit_slice(&[0xF4]); // hlt
+                    self.asm.jmp_short_lab(halt); // spin
+                    // --- long mode IS supported: begin the switch ---
+                    self.asm.bind(switch);
+                    // Fast A20: in al,0x92; or al,2; out 0x92,al.
+                    self.asm.emit_slice(&[0xE4, 0x92]);
+                    self.asm.emit_slice(&[0x0C, 0x02]);
+                    self.asm.emit_slice(&[0xE6, 0x92]);
+                    // GDTR for the 16->32 GDT (gdt32), loaded inline below.
+                    let gdtr32 = self.asm.new_label();
+                    self.asm.emit_slice(&[0x0F, 0x01, 0x16]); // lgdt [moffs16]
+                    self.asm.imm16_label(gdtr32);
+                    // mov eax,cr0; or eax,1; mov cr0,eax   (CR0.PE)
+                    self.asm.emit_slice(&[0x66, 0x0F, 0x20, 0xC0]);
+                    self.asm.emit_slice(&[0x66, 0x83, 0xC8, 0x01]);
+                    self.asm.emit_slice(&[0x66, 0x0F, 0x22, 0xC0]);
+                    // far jmp 66 EA <imm32 trampoline> <0x08>
+                    let tramp32 = self.asm.new_label();
+                    self.asm.emit_slice(&[0x66, 0xEA]);
+                    self.asm.imm32_label(tramp32);
+                    self.asm.emit_slice(&[0x08, 0x00]);
+                    // --- 32-bit trampoline (CS = 0x08, D = 1, base 0) ---
+                    self.asm.bind(tramp32);
+                    self.asm.emit_slice(&[0x66, 0xB8, 0x10, 0x00]); // mov ax, 0x10
+                    self.asm.emit_slice(&[0x8E, 0xD8]); // mov ds, ax
+                    self.asm.emit_slice(&[0x8E, 0xC0]); // mov es, ax
+                    self.asm.emit_slice(&[0x8E, 0xD0]); // mov ss, ax
+                    self.asm.emit_slice(&[0x8E, 0xE0]); // mov fs, ax
+                    self.asm.emit_slice(&[0x8E, 0xE8]); // mov gs, ax
+                    self.asm.emit_slice(&[0xBC]); // mov esp, imm32
+                    self.asm.emit_imm32(0x00090000); // ring-0 stack (below VGA)
+                    // Relocate the kernel from staging (0x8000) to 0x100000.
+                    self.asm.emit_slice(&[0xBE]); // mov esi, 0x8000
+                    self.asm.emit_imm32(0x00008000);
+                    self.asm.emit_slice(&[0xBF]); // mov edi, 0x100000
+                    self.asm.emit_imm32(0x00100000);
+                    self.asm.emit_slice(&[0xB9]); // mov ecx, 1024 (8 sectors)
+                    self.asm.emit_imm32(1024);
+                    self.asm.emit_slice(&[0xF3, 0xA5]); // rep movsd
+                    // eax = (entry_hi << 16) | entry_lo, then stash to 0x8FF8
+                    self.asm.emit_slice(&[0x66, 0x8B, 0x45, 0x04]); // mov ax,[bp+4]
+                    self.asm.emit_slice(&[0xC1, 0xE0, 0x10]); // shl eax, 16
+                    self.asm.emit_slice(&[0x66, 0x8B, 0x45, 0x06]); // mov ax,[bp+6]
+                    self.asm.emit_slice(&[0x89, 0x05, 0xF8, 0x8F, 0x00, 0x00]); // mov [0x8FF8],eax
+                    // PML4 @ 0xA000: [0] -> PDPT @ 0xB000 (P|RW); rest 0.
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x00, 0xA0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0x0000B003);
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x08, 0xA0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0);
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x10, 0xA0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0);
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x18, 0xA0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0);
+                    // PDPT @ 0xB000: [0] = 1 GiB page @ 0 (P|RW|PS) -- see note.
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x00, 0xB0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0x00000083);
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x08, 0xB0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0);
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x10, 0xB0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0);
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x18, 0xB0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0);
+                    // CR3 = PML4; CR4 |= PAE; EFER.LME = 1.
+                    self.asm.emit_slice(&[0xB8]); // mov eax, 0xA000
+                    self.asm.emit_imm32(0x0000A000);
+                    self.asm.emit_slice(&[0x0F, 0x22, 0xD8]); // mov cr3, eax
+                    self.asm.emit_slice(&[0x0F, 0x20, 0xE0]); // mov eax, cr4
+                    self.asm.emit_slice(&[0x83, 0xC8, 0x20]); // or eax, 0x20 (PAE)
+                    self.asm.emit_slice(&[0x0F, 0x22, 0xE0]); // mov cr4, eax
+                    self.asm.emit_slice(&[0xB9]); // mov ecx, 0xC0000080 (EFER)
+                    self.asm.emit_imm32(0xC0000080);
+                    self.asm.emit_slice(&[0x0F, 0x32]); // rdmsr
+                    self.asm.emit_slice(&[0x81, 0xC8, 0x00, 0x01, 0x00, 0x00]); // or eax,0x100 (LME)
+                    self.asm.emit_slice(&[0x0F, 0x30]); // wrmsr
+                    // 64-bit GDT @ 0xC000 (null, code64 0x08, data64 0x10).
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x00, 0xC0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0);
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x04, 0xC0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0);
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x08, 0xC0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0x0000FFFF); // code64 lo
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x0C, 0xC0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0x00AF9A00); // code64 hi
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x10, 0xC0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0x0000FFFF); // data64 lo
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x14, 0xC0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0x008F9200); // data64 hi
+                    // gdtr64 @ 0xC018: limit 0x17, base 0xC000, upper zeros.
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x18, 0xC0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0xC0000017);
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x1C, 0xC0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0);
+                    self.asm.emit_slice(&[0xC7, 0x05, 0x20, 0xC0, 0x00, 0x00]);
+                    self.asm.emit_imm32(0);
+                    self.asm.emit_slice(&[0x0F, 0x01, 0x15]); // lgdt [moffs32] -> [0xC018]
+                    self.asm.emit_imm32(0x0000C018);
+                    // CR0 |= PG, then far jmp 0x08 (64-bit code) -> tramp64.
+                    self.asm.emit_slice(&[0x0F, 0x20, 0xC0]); // mov eax, cr0
+                    self.asm.emit_slice(&[0x0D, 0x00, 0x00, 0x00, 0x80]); // or eax,0x80000000
+                    self.asm.emit_slice(&[0x0F, 0x22, 0xC0]); // mov cr0, eax
+                    let tramp64 = self.asm.new_label();
+                    self.asm.emit_slice(&[0xEA]); // far jmp 0x08:tramp64 (32-bit offset)
+                    self.asm.imm32_label(tramp64);
+                    self.asm.emit_slice(&[0x08, 0x00]);
+                    // --- 64-bit trampoline (CS = 0x08, L = 1, base 0) ---
+                    self.asm.bind(tramp64);
+                    self.asm.emit_slice(&[0x48, 0xBC]); // mov rax, 0x90000
+                    self.asm.emit_imm32(0x00090000);
+                    self.asm.emit_imm32(0);
+                    self.asm.emit_slice(&[0x48, 0x8B, 0x04, 0x25, 0xF8, 0x8F, 0x00, 0x00]); // mov rax,[0x8FF8]
+                    self.asm.emit_slice(&[0xFF, 0xE0]); // jmp rax
+                    // --- 16->32 GDT (inline) + GDTR32, read by the lgdt above ---
+                    self.asm.bind(gdtr32);
+                    self.asm.emit_imm16(23); // limit = 3 * 8 - 1
+                    let gdt32 = self.asm.new_label();
+                    self.asm.imm32_label(gdt32); // base = gdt32 (load_base + off)
+                    self.asm.bind(gdt32);
+                    self.asm.emit_slice(&[0x00; 8]); // null
+                    self.asm.emit_slice(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x9A, 0xCF, 0x00]); // code32
+                    self.asm.emit_slice(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x92, 0xCF, 0x00]); // data32
                 }
                 other => bail!("unknown builtin {}", other),
             }
@@ -452,5 +657,130 @@ impl<'p> CodeGen16<'p> {
             _ => {}
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `_dev_enter_long_mode` must emit the validated 16->32->64 switch bytes:
+    /// the 32-bit trampoline (CR3/CR4/PAE/EFER.LME via wrmsr/lgdt/CR0.PG/far
+    /// jmp to a 64-bit code segment) and the validated 64-bit trampoline
+    /// `mov rax,0x90000; mov rax,[0x8FF8]; jmp rax` plus the 1 GiB PDPT page
+    /// (0x83) that makes the PAE-3-level transition window resolve.
+    #[test]
+    fn long_mode_builtin_emits_validated_bytes() {
+        let start = Func {
+            name: "_start".to_string(),
+            params: vec![],
+            ret: Type::Void,
+            body: vec![Stmt::Expr(Expr::new(
+                ExprKind::Call {
+                    func: "_dev_enter_long_mode".to_string(),
+                    args: vec![
+                        Expr::new(ExprKind::Lit(Literal::Int(0)), Type::U16),
+                        Expr::new(ExprKind::Lit(Literal::Int(0x10)), Type::U16),
+                    ],
+                },
+                Type::Void,
+            ))],
+        };
+        let prog = Program {
+            name: "t".to_string(),
+            structs: vec![],
+            enums: vec![],
+            globals: vec![],
+            externs: vec![],
+            funcs: vec![start],
+            hosted: false,
+            target: Some("x86_16".to_string()),
+            arch: Some("x86_16".to_string()),
+            obj_format: Some("flat".to_string()),
+            config: None,
+        };
+        let bytes = compile_program(&prog).expect("compile");
+
+        let find = |sub: &[u8]| bytes.windows(sub.len()).position(|w| w == sub);
+
+        // cpuid 0x80000000; cmp eax,0x80000001; jb -> error block.  The error
+        // block sits adjacent to the checks (all branches to it are short), so a
+        // 32-bit-only CPU prints "No 64-bit CPU" and halts instead of triple-
+        // faulting in the long-mode switch.
+        assert!(
+            find(&[0x66, 0xB8, 0x00, 0x00, 0x00, 0x80, 0x0F, 0xA2]).is_some(),
+            "missing CPUID max-extended-leaf probe (0x80000000)"
+        );
+        assert!(
+            find(&[0x66, 0x3D, 0x01, 0x00, 0x00, 0x80, 0x72]).is_some(),
+            "missing: cmp eax,0x80000001; jb err (32-bit CPU guard)"
+        );
+        assert!(
+            find(&[0x66, 0xF7, 0xC2, 0x00, 0x00, 0x00, 0x20]).is_some(),
+            "missing: test edx, (1<<29) (LM bit) -- 0x66 0xF7 0xC2 (test r32,imm32), not 0x81 (xor)"
+        );
+        assert!(find("No 64-bit CPU\r\n\0".as_bytes()).is_some(), "missing 32-bit CPU guard message");
+        // The error block prints the message via BIOS teletopy (int 0x10, VGA),
+        // matching the stage-2 loader's `_dev_bios_teletopy` channel: lodsb; cmp
+        // al,0; je halt; mov ah,0x0E; mov bl,0x07; mov bh,0; int 0x10; jmp loop;
+        // then cli; hlt; spin.  Single-VGA-channel keeps the output un-doubled
+        // under `-nographic` (which mirrors both VGA and COM1 to stdio).
+        assert!(find(&[0xAC, 0x3C, 0x00]).is_some(), "missing lodsb + cmp al,0 message loop");
+        assert!(
+            find(&[0xB4, 0x0E, 0xB3, 0x07, 0xB7, 0x00, 0xCD, 0x10]).is_some(),
+            "missing BIOS teletopy int 0x10 in the guard error block"
+        );
+
+        // 16-bit prologue (success path): lgdt [abs16]; CR0.PE; 32-bit far jmp.
+        assert!(
+            find(&[0x0F, 0x01, 0x16]).is_some(),
+            "missing 16->32 lgdt"
+        );
+        assert!(find(&[0x66, 0xEA]).is_some(), "missing far jmp 66 EA to 32-bit trampoline");
+        assert!(
+            find(&[0x66, 0x0F, 0x22, 0xC0]).is_some(),
+            "missing 16-bit-prologue CR0.PE (mov cr0,eax)"
+        );
+        // 32-bit trampoline: CR3 = PML4 (mov eax,0xA000; mov cr3,eax).
+        assert!(
+            find(&[0xB8, 0x00, 0xA0, 0x00, 0x00, 0x0F, 0x22, 0xD8]).is_some(),
+            "missing CR3 <- 0xA000 setup"
+        );
+        // CR4 |= PAE (mov eax,cr4; or eax,0x20; mov cr4,eax).
+        assert!(
+            find(&[0x0F, 0x20, 0xE0, 0x83, 0xC8, 0x20, 0x0F, 0x22, 0xE0]).is_some(),
+            "missing CR4 PAE enable"
+        );
+        // EFER.LME via wrmsr: ecx=IA32_EFER (0xC0000080), rdmsr; or eax,0x100;
+        // wrmsr.  (0xC0000080 -- NOT 0x40000080, which leaves LME clear and
+        // makes the far jmp to a 64-bit code segment #GP / triple-fault.)
+        assert!(
+            find(&[0xB9, 0x80, 0x00, 0x00, 0xC0]).is_some(),
+            "missing mov ecx,0xC0000080 (EFER); got the wrong MSR and LME stays clear"
+        );
+        assert!(
+            find(&[0x81, 0xC8, 0x00, 0x01, 0x00, 0x00, 0x0F, 0x30]).is_some(),
+            "missing EFER.LME via wrmsr"
+        );
+        // 1 GiB PDPT page covering 0..1 GiB (identity map) -- makes the PAE
+        // 3-level transition window resolve as a 2 MiB PDE.
+        assert!(
+            find(&[0xC7, 0x05, 0x00, 0xB0, 0x00, 0x00, 0x83, 0x00, 0x00, 0x00]).is_some(),
+            "missing 1 GiB PDPT[0]=0x83 page"
+        );
+        // lgdt [moffs32] (loads the 64-bit GDT) + CR0 |= PG + far jmp to 64-bit CS.
+        assert!(
+            find(&[0x0F, 0x20, 0xC0, 0x0D, 0x00, 0x00, 0x00, 0x80, 0x0F, 0x22, 0xC0, 0xEA]).is_some(),
+            "missing CR0.PG + far jmp to 64-bit code"
+        );
+        // Validated 64-bit trampoline: mov rax,0x90000; mov rax,[0x8FF8]; jmp rax.
+        assert!(
+            find(&[0x48, 0xBC, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00]).is_some(),
+            "missing mov rax,0x90000"
+        );
+        assert!(
+            find(&[0x48, 0x8B, 0x04, 0x25, 0xF8, 0x8F, 0x00, 0x00, 0xFF, 0xE0]).is_some(),
+            "missing validated mov rax,[0x8FF8]; jmp rax trampoline"
+        );
     }
 }
