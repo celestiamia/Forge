@@ -354,6 +354,80 @@ fn guess_dev_compiles_and_runs() {
     );
 }
 
+// Build the 1.44 MB ForgeOS64 floppy image (boot.bin -> LBA 0, loader.raw -> LBA
+// 1, kernel.raw -> LBA 3).  `img` is the full floppy image; its parent dir is the
+// build directory used for the stage binaries.
+fn build_os64_image(img: &std::path::Path) {
+    let out_dir = img.parent().expect("img must have a parent dir");
+    Command::cargo_bin("forgec")
+        .unwrap()
+        .arg("examples/os64/src/boot/boot.dev")
+        .arg("-o")
+        .arg(out_dir.join("boot.bin"))
+        .arg("--target")
+        .arg("x86_16-boot")
+        .assert()
+        .success();
+    Command::cargo_bin("forgec")
+        .unwrap()
+        .arg("examples/os64/src/boot/loader.dev")
+        .arg("-o")
+        .arg(out_dir.join("loader.raw"))
+        .arg("--linker")
+        .arg("examples/os64/os64-loader.fld")
+        .assert()
+        .success();
+    Command::cargo_bin("forgec")
+        .unwrap()
+        .arg("examples/os64/src/kernel/kernel.dev")
+        .arg("-o")
+        .arg(out_dir.join("kernel.raw"))
+        .arg("--linker")
+        .arg("examples/os64/os64-kernel.fld")
+        .assert()
+        .success();
+    fs::write(img, vec![0u8; 1_474_560]).expect("failed to create os64.img");
+    for (file, seek) in [
+        (out_dir.join("boot.bin"), 0u64),
+        (out_dir.join("loader.raw"), 1u64),
+        (out_dir.join("kernel.raw"), 3u64),
+    ] {
+        std::process::Command::new("dd")
+            .arg(format!("if={}", file.display()))
+            .arg(format!("of={}", img.display()))
+            .arg("bs=512")
+            .arg(format!("seek={}", seek))
+            .arg("conv=notrunc")
+            .arg("status=none")
+            .status()
+            .expect("failed to run dd");
+    }
+}
+
+// Spawn `qemu-system-x86_64` on the os64 floppy image with the given CPU model,
+// wait `secs` for any guest output to land, kill it, and hand the captured COM1
+// (stdio) output to `assert_fn`.
+fn run_os64_qemu<F: FnOnce(&str)>(img: &std::path::Path, cpu: &str, secs: u64, assert_fn: F) {
+    let mut qemu = std::process::Command::new("qemu-system-x86_64");
+    qemu.arg("-accel")
+        .arg("tcg,thread=multi")
+        .arg("-cpu")
+        .arg(cpu)
+        .arg("-drive")
+        .arg(format!("file={},format=raw,if=ide", img.display()))
+        .arg("-nographic")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = qemu.spawn().expect("failed to spawn qemu-system-x86_64");
+    std::thread::sleep(std::time::Duration::from_secs(secs));
+    let _ = child.kill();
+    let output = child
+        .wait_with_output()
+        .expect("failed to read qemu output");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_fn(&stdout);
+}
+
 #[test]
 fn rps_dev_compiles_and_runs() {
     let bin = compile_example("rps");
@@ -662,6 +736,99 @@ fn os32_boot_chain_reaches_kernel() {
         "kernel did not report conventional memory; qemu stdout: {:?}",
         stdout
     );
+}
+
+#[test]
+fn os64_boot_chain_enters_long_mode() {
+    // ForgeOS64 boot test: stage-1 boot sector, stage-2 LBA loader, and a
+    // 64-bit long-mode kernel linked against a custom LOAD base.  This
+    // exercises the x86_16 boot sector, the INT 13h AH=42h LBA read, the
+    // real-to-protected-to-long-mode switch (`_dev_enter_long_mode`: A20, GDT,
+    // CR0.PE, the 32-bit trampoline that relocates the kernel staging buffer
+    // from 0x8000 -> 0x100000, 4-level identity page tables with the 1 GiB
+    // PDPT page that resolves the PAE 3-level transition window, EFER.LME,
+    // CR0.PG, the 64-bit GDT, and the `mov rax,[0x8FF8]; jmp rax` trampoline),
+    // and x86_64 raw codegen.  Only requires qemu-system-x86_64.
+    if std::process::Command::new("qemu-system-x86_64")
+        .arg("-version")
+        .output()
+        .is_err()
+    {
+        eprintln!("Skipping ForgeOS64 test: qemu-system-x86_64 not found");
+        return;
+    }
+
+    let out_dir = std::env::temp_dir()
+        .join(format!("forge_os64_test_{}", std::process::id()));
+    let _ = fs::create_dir_all(&out_dir);
+    let img = out_dir.join("os64.img");
+
+    // Mirrors examples/os64/build.sh: boot.bin -> LBA 0, loader.raw -> LBA 1,
+    // kernel.raw -> LBA 3 (so the loader reads LBA 3-10).
+    build_os64_image(&img);
+
+    run_os64_qemu(&img, "qemu64", 5, |stdout| {
+        assert!(
+            stdout.contains("ForgeOS64: loading kernel"),
+            "stage-2 loader did not start; qemu stdout: {:?}",
+            stdout
+        );
+        assert!(
+            stdout.contains("ForgeOS64: hello from 64-bit long mode"),
+            "kernel did not boot into 64-bit long mode; qemu stdout: {:?}",
+            stdout
+        );
+    });
+}
+
+#[test]
+fn os64_32bit_cpu_guard_halts() {
+    // On a 32-bit-only CPU model (no long mode), the stage-2 loader's
+    // `_dev_enter_long_mode` must detect the absence of the LM bit and print
+    // "No 64-bit CPU" over COM1 (so it is observable under `-nographic`),
+    // then halt -- instead of triple-faulting and rebooting in a loop.
+    if std::process::Command::new("qemu-system-x86_64")
+        .arg("-version")
+        .output()
+        .is_err()
+    {
+        eprintln!("Skipping ForgeOS64 32-bit-guard test: qemu-system-x86_64 not found");
+        return;
+    }
+
+    let out_dir = std::env::temp_dir()
+        .join(format!("forge_os64_32bit_{}", std::process::id()));
+    let _ = fs::create_dir_all(&out_dir);
+    let img = out_dir.join("os64.img");
+
+    build_os64_image(&img);
+
+    run_os64_qemu(&img, "qemu32", 5, |stdout| {
+        // The stage-2 loader ran (it prints this via BIOS teletopy before
+        // calling `_dev_enter_long_mode`), so control reached the guard.
+        assert!(
+            stdout.contains("ForgeOS64: loading kernel"),
+            "stage-2 loader did not start; qemu stdout: {:?}",
+            stdout
+        );
+        // The guard fired on the 32-bit-only CPU and began printing "No 64-bit
+        // CPU" to VGA (int 0x10).  Under `-nographic` QEMU mirrors VGA text to
+        // stdio, but the final bytes are lost to the stdio block-buffer on
+        // SIGKILL (the guest halts immediately after the message), so match the
+        // reliably-flushed prefix.  The full message bytes are pinned by the
+        // `long_mode_builtin_emits_validated_bytes` lib test and by a nasm probe
+        // (probe3.asm) run under `-cpu qemu32/pentium/486`.
+        assert!(
+            stdout.contains("No 64-bit"),
+            "32-bit-only CPU did not hit the long-mode guard; qemu stdout: {:?}",
+            stdout
+        );
+        assert!(
+            !stdout.contains("hello from 64-bit long mode"),
+            "64-bit kernel ran on a 32-bit-only CPU model (guard failed); qemu stdout: {:?}",
+            stdout
+        );
+    });
 }
 
 #[test]
@@ -1317,7 +1484,10 @@ fn linker_script_custom_hosted_entry() {
 }
 
 #[test]
-fn linker_script_rejects_raw_format_on_x86_64() {
+fn linker_script_rejects_hosted_raw_on_x86_64() {
+    // `FORMAT raw` is now a valid arch for x86_64, but a *hosted* raw binary
+    // is meaningless (raw images have no runtime / ELF loader to call into), so
+    // the generic "FORMAT raw cannot be hosted" gate still rejects it.
     let out_dir = std::env::temp_dir().join(format!("forge_fld_raw_test_{}", std::process::id()));
     let _ = fs::create_dir_all(&out_dir);
     let fld = out_dir.join("raw.fld");
@@ -1329,9 +1499,55 @@ fn linker_script_rejects_raw_format_on_x86_64() {
         .arg(out_dir.join("out"))
         .arg("--linker")
         .arg(&fld);
-    cmd.assert().failure().stderr(predicates::str::contains(
-        "FORMAT raw is only supported for ARCH x86_16",
-    ));
+    cmd.assert()
+        .failure()
+        .stderr(predicates::str::contains("FORMAT raw cannot be hosted"));
+}
+
+#[test]
+fn freestanding_raw_on_x86_64_compiles_to_flat_binary() {
+    // Phase 0 of the 64-bit boot chain: a freestanding x86_64 program emitted as
+    // a flat raw binary at a `LOAD` base — no ELF64 header, packed sections.
+    let out_dir = std::env::temp_dir().join(format!("forge_fld_raw64_test_{}", std::process::id()));
+    let _ = fs::create_dir_all(&out_dir);
+    let src = out_dir.join("k64.dev");
+    fs::write(
+        &src,
+        r#"
+package test
+
+@freestanding
+pub def _start() -> void:
+    var msg: ptr[char] = "ForgeOS64" as ptr[char]
+    var g: ptr[char] = msg
+    unsafe:
+        var c: char = g[7]
+        c = c
+"#,
+    )
+    .unwrap();
+    let fld = out_dir.join("k64.fld");
+    fs::write(
+        &fld,
+        "ARCH x86_64\nFORMAT raw\nHOSTED false\nENTRY _start\nLOAD 0x100000\n",
+    )
+    .unwrap();
+
+    let bin = out_dir.join("kernel.raw");
+    let mut cmd = Command::cargo_bin("forgec").unwrap();
+    cmd.arg(&src).arg("-o").arg(&bin).arg("--linker").arg(&fld);
+    cmd.assert().success();
+
+    let bytes = fs::read(&bin).unwrap();
+    // No ELF64 magic and the entry is the System V AMD64 prologue
+    // (`push rbp`; `mov rbp, rsp`).
+    assert!(!bytes.starts_with(&[0x7F, 0x45, 0x4C, 0x46]));
+    assert_eq!(&bytes[..3], &[0x55, 0x48, 0x89]);
+    assert_eq!(bytes[3], 0xE5);
+    assert!(
+        bytes.windows(b"ForgeOS64".len()).any(|w| w == b"ForgeOS64"),
+        "string literal missing from flat binary"
+    );
 }
 
 #[test]
