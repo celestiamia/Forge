@@ -15,6 +15,7 @@ or direct Linux syscalls.
 | [`std.alloc`](alloc.md) | Heap allocation | `alloc`, `free` |
 | [`std.fmt`](fmt.md) | Formatting | `format_i32`, `format_f64` |
 | [`std.volatile`](volatile.md) | Volatile memory | `load_u8`...`load_u64`, `store_u8`...`store_i64`, barriers |
+| [`std.hal`](hal.md) | Hardware I/O (freestanding) | `outb`/`inb`/`outw`/`inw`, inline `INT nn`, `sti`/`cli`/`iret`/`halt`, `pic_init`/`pic_send_eoi` |
 | [`std.gc`](gc.md) | Garbage collection (x86_64) | `collect`, `leak_check`, `alloc_count`, `heap_live`, ... |
 | `std.runtime` | Runtime | `abort`, `exit` |
 
@@ -41,6 +42,7 @@ Imports merge into a flat namespace — imported names are used directly (no
 | `std.alloc` | ✅ | ✅ | ❌ |
 | `std.fmt` | ✅ | ✅ | ✅ |
 | `std.volatile` | ✅ | ✅ | ✅ |
+| `std.hal` | ✅ | ✅ | ✅ (word/byte I/O; no `_dev_outl`/`_dev_inl`) |
 | `std.gc` | ✅ | ❌ | ❌ |
 | `std.runtime` | ✅ | ✅ | ❌ |
 

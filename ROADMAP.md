@@ -37,9 +37,28 @@ re-litigate them:
         `Option.Some(x)`), `match`/`case` on variant values, payload
         destructuring, and discriminants across x86_64 and x86_32
 - [x] **Tuples** — literals, types, field-access (`t.0`, `t.1`) on x86_64 and
-        x86_32 (return-type propagation through calls is a remaining item below)
+        x86_32, plus tuple **return types** through calls
 - [x] **Compound assignment** `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`,
         `<<=`, `>>=`
+- [x] **Generics end-to-end** — generic functions and structs
+        (`def f[T]`, `struct Pair[T]`) monomorphized per instantiation, type
+        arguments inferred at call sites, nested applications
+        (`Pair[Pair[int64]]`) on x86_64 and x86_32
+- [x] **x86_32 free-list heap** — first-fit `std.alloc` with splitting,
+        4-byte headers, `free` reuse, `HEAP` directive honored (no collector;
+        `std.gc` is a clean error)
+- [x] **x86_32 struct-by-value returns** — full copies, assignments, and sret
+        returns (hidden first arg, caller-allocated result pointer)
+- [x] **16→32 boot chain** — real-mode boot sector + LBA stage-2 loader,
+        `_dev_enter_pmode` protected-mode switch, x86_32 `FORMAT raw` kernel
+        (`examples/os32`, `examples/targets/x86_32-raw.fld`)
+- [x] **16→32→64 boot chain** — `_dev_enter_long_mode` (A20, GDTs, trampoline,
+        identity paging, LM probe with graceful fallback), x86_64 `FORMAT raw`
+        freestanding binaries (`examples/os64`)
+- [x] **`std.hal`** — port I/O (`outb`/`inb`/`outw`/`inw`), inline `INT nn`,
+        `sti`/`cli`/`iret`/`halt`, PIC 8259A init/EOI for freestanding targets
+- [x] **Embedded stdlib** — `std.*` imports fall back to the `core/` modules
+        embedded in the `forgec` binary when no `core/` is on disk
 
 ## Compiler stability & diagnostics
 
@@ -50,33 +69,31 @@ re-litigate them:
 - [ ] `--quiet` / exit status semantics for non-hosted/freestanding builds
 - [ ] Stable `--help` / `--version`
 
-## Language completeness (parsed but not yet functional)
+## Language completeness (partial or not yet functional)
 
-These are accepted by the grammar/type-checker today but rejected at lowering
-or codegen:
+These are missing pieces — some parsed but rejected at lowering/codegen,
+some partially working with gaps:
 
 - [ ] **Fixed-size array types** `[T; N]` and repeat literals `[0; N]`
-- [ ] **Tuple return-type propagation** — `-> (T, U)` checks out, but the type
-        is not carried back to the caller (result falls back to `int64`); tuple
-        destructuring assignment `let (a, b) = t` and destructuring tuple-typed
-        parameters
+- [ ] **Tuples** — literals, types, field access, destructuring assignment,
+        and return types work end-to-end on x86_64/x86_32; remaining:
+        destructuring tuple-typed parameters
 - [ ] **`@packed` / `@align(N)`** actually affect struct layout
 - [ ] **Slices** `slice[T]`, `&arr[..]`, `&arr[1..3]`
 - [ ] **Function types** `fn(...) -> ...` (and function-pointer values)
 - [ ] **`refmut[T]` / `&mut x`**, **`own[T]`** ownership model
 - [ ] **Byte-string literals** `b"..."`
 - [ ] **`@export`, `@inline`, `@noreturn`, `@naked`** attributes
-- [ ] **Generic functions & structs** (monomorphization exists in sema but is
-      not yet wired to lowering/codegen)
 
 ## Generics & ADT evolution
 
-- [ ] Finish generics: monomorphize at lowering, instantiate per call site,
-      support generic methods on `impl` blocks
+- [ ] Generic methods on `impl` blocks (free generic functions and structs
+      are done — monomorphized per instantiation at lowering)
 - [ ] Default type parameters, associated types
 - [ ] Trait/`interface` system (method resolution on `impl`) — method calls
       are not yet lowered even though impls type-check
 - [ ] Struct update syntax / `..rest`
+- [ ] Generic enums (`enum E[T]`), `@c_enum` attributes
 
 ## Optimizer & codegen quality
 
@@ -90,15 +107,18 @@ or codegen:
 - [ ] `--freestanding` flag available on all targets
 - [ ] Function args beyond the ABI register limit (>6 for x86_64; >1 for
       x86_16) currently rejected
-- [ ] `asm!()` for x86_64 / x86_32 (x86_16 only today)
 - [ ] Float support on **x86_32** (currently x86_64-only)
-- [ ] Struct-by-value returns & copies on x86_32 (currently truncates to first
-      slot) — see `docs/language/known-issues.md`
+- [ ] `_dev_outl`/`_dev_inl` on x86_16 (32-bit port I/O; word/byte-only today)
+- [ ] `asm!()` is intentionally **not** supported on any target — hardware
+      primitives go through `std.hal` (see `docs/language/known-issues.md`)
 
 ## Standard library
 
+- [x] `std.alloc` on x86_32: free-list allocator (first-fit with splitting,
+      4-byte headers, `free` reuse, `HEAP` honored)
+- [x] `std.hal` (port I/O, inline `INT nn`, interrupt control, PIC
+      arbitration) for freestanding targets
 - [ ] `std.gc` on x86_32 / 16 (x86_64-only today)
-- [ ] `std.alloc` on x86_32: a real `free` instead of a no-op bump allocator
 - [ ] Bounds checking in `std.string` (null-terminated, unchecked)
 - [ ] Deterministic `rand` (currently a 31-bit LCG) + better PRNG
 - [ ] Qualified module access `mymodule.foo()` / re-exports
@@ -109,6 +129,8 @@ or codegen:
 ## Module system
 
 - [x] `from std.<name> import ...` (loads `core/<name>.dev`)
+- [x] Embedded stdlib fallback — `std.*` imports use the `core/` modules
+      embedded in the `forgec` binary when no on-disk `core/` is found
 - [ ] **Qualified access** (`std.io.puts`) — flat namespace today
 - [ ] Re-exports / `pub use`
 - [ ] Versioning / conditional compilation gates (`@cfg`-like)
@@ -119,6 +141,9 @@ or codegen:
 - [x] `x86_64-unknown-linux-gnu` (hosted, ELF64)
 - [x] `x86_32-unknown-linux-gnu` (hosted, ELF32)
 - [x] `x86_16-boot` / raw stage images (flat, real-mode)
+- [x] `x86_32` raw kernel — boot-to-32-bit chain (`examples/os32`)
+- [x] `x86_64` raw kernel — boot-to-64-bit chain (`examples/os64`,
+      `_dev_enter_long_mode`)
 - [ ] Custom targets via `.fld` (parsed) — apply `MEMORY`/`SECTIONS` to layout
 - [ ] macOS `x86_64-apple-darwin` (Mach-O) — **planned**
 - [ ] Windows `x86_64-pc-windows-gnu` (COFF) — **planned**

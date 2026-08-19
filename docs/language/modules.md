@@ -44,6 +44,12 @@ then `../utils.dev`, then `../../utils.dev`, and so on up the tree.
 `std.*` imports resolve to `core/<name>.dev` using the same walk-up strategy.
 The compiler finds the `core/` directory above the source file.
 
+If no on-disk `core/` directory is found anywhere up the tree, `std.*`
+imports fall back to the standard library **embedded in the `forgec`
+binary** (`src/embed.rs`). The packaged compiler is fully self-contained —
+no `core/` checkout is needed — and an on-disk `core/` always takes
+precedence when present.
+
 ## Standard Library
 
 Standard library modules live in `core/` and are imported as `std.*`:

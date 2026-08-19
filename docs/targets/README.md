@@ -9,6 +9,8 @@ Forge supports multiple compilation targets with different capabilities.
 | `x86_64-unknown-linux-gnu` | x86_64 | ELF64 | ✅ | Native Linux apps |
 | `x86_32-unknown-linux-gnu` | i686 | ELF32 | ✅ | 32-bit Linux apps |
 | `x86_16-boot` | 8086 | Flat (512B) / raw stage images | ❌ | Boot sectors, multi-stage OSes |
+| `x86_32` raw (`.fld`) | i686 | Raw flat binary (`FORMAT raw`) | ❌ | 32-bit kernels in boot chains (e.g. `examples/os32`) |
+| `x86_64` raw (`.fld`) | x86_64 | Raw flat binary (`FORMAT raw`) | ❌ | 64-bit kernels in boot chains (e.g. `examples/os64`) |
 
 ## Common Flags
 
@@ -51,7 +53,7 @@ Direct Linux syscalls via `syscall` instruction:
 - `socket` (41), `connect` (42)
 
 ### Standard Library
-Full support: `std.io`, `std.mem`, `std.string`, `std.math`, `std.alloc`, `std.fmt`, `std.volatile`, `std.gc`
+Full support: `std.io`, `std.mem`, `std.string`, `std.math`, `std.alloc`, `std.fmt`, `std.volatile`, `std.gc`, `std.hal` (freestanding)
 
 ## x86_32 Linux
 
@@ -98,7 +100,25 @@ cargo build --release --target i686-unknown-linux-gnu
 | `std.alloc` | ✅ |
 | `std.fmt` | ✅ |
 | `std.volatile` | ✅ |
+| `std.hal` | ✅ (freestanding) |
 | `std.gc` | ❌ |
+
+## Raw Kernel Images (Boot Chains)
+
+Beyond the three built-in presets, `.fld` linker descriptors select `FORMAT
+raw` for **x86_32 and x86_64** — a bare flat binary (no ELF, no boot
+signature) linked at the `LOAD` address (default `0x100000`) and loaded by a
+stage-2 loader:
+
+- **x86_32** — boot-to-32-bit chain: see [`examples/os32`](../examples/os32.md)
+  and `examples/targets/x86_32-raw.fld`
+- **x86_64** — boot-to-64-bit chain (16→32→64 long-mode switch via
+  `_dev_enter_long_mode`): see [`examples/os64`](../examples/os64.md)
+
+Both raw formats are freestanding: the reference-driven `_dev_*` helpers
+(`_dev_outb`, `_dev_inb`, `_dev_outw`, `_dev_inw`, `_dev_outl`, `_dev_inl`,
+`_dev_iret`, `_dev_sti`, `_dev_cli`, `_dev_halt`) are exposed through
+[`std.hal`](../stdlib/hal.md).
 
 ## x86_16 Real Mode
 
@@ -151,6 +171,7 @@ qemu-system-x86_64 -fda boot.bin -nographic
 | `std.alloc` | ❌ |
 | `std.fmt` | ✅ |
 | `std.volatile` | ✅ |
+| `std.hal` | ✅ (word/byte I/O, `INT nn`, PIC; no `_dev_outl`/`_dev_inl`) |
 | `std.gc` | ❌ |
 | `std.runtime` | ❌ |
 

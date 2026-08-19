@@ -36,9 +36,14 @@ forgec [OPTIONS] <SOURCE>
 `--linker` accepts a custom target described by a `.fld` (Forge Linker
 Descriptor) file — see the [`.fld` format reference](../targets/fld-format.md)
 and the ready-made scripts in `examples/targets/`.  The three triples above are
-the built-in presets.  On x86_16, a `.fld` can also select `FORMAT raw` for
-bare multi-stage images (no boot signature) and set the stage's `LOAD`
-address — see the [ForgeOS example](../examples/os.md).
+the built-in presets.  A `.fld` can also select `FORMAT raw` for bare
+multi-stage images (no boot signature):
+
+- on x86_16 — multi-sector boot stages with a per-stage `LOAD` address
+  (see the [ForgeOS example](../examples/os.md))
+- on x86_32 and x86_64 — freestanding flat kernels linked at `LOAD`
+  (default `0x100000`) for boot-to-32-bit and boot-to-64-bit chains
+  (see [os32](../examples/os32.md) and [os64](../examples/os64.md))
 
 ## Examples
 

@@ -34,7 +34,7 @@ compiler:
 | `@export`, `@inline`, `@noreturn`, `@naked` | Unknown attribute errors (only `@freestanding`, `@packed`, `@align`, `@c_enum`, `@extern` are accepted) |
 | `@packed`, `@align(N)`, `@c_enum` | Accepted but have **no effect** on layout or codegen yet |
 | Compound assignment `+=`, `-=`, etc. | Supported end-to-end (desugar `x += 1` to `x = x + 1`; see [Syntax](syntax.md)) |
-| `asm!()` on x86_64 / x86_32 | Codegen error — inline assembly works only on the `x86_16-boot` target |
+| `asm!()` | Compile-time error on **all** targets — inline assembly is intentionally not supported (the parser accepts the syntax for forward compatibility only); use the `std.hal` module's port-I/O, interrupt, and PIC wrappers instead |
 
 ## Parser Notes
 

@@ -29,8 +29,9 @@ external toolchain. One binary, straight to machine code.
 ## Features
 
 - **Native codegen, no toolchain** — emits machine code and object format (ELF64, ELF32, or flat binary) directly from Rust
-- **Three targets** — x86_64 and x86_32 Linux executables, plus a flat 512-byte x86 real-mode boot sector
+- **Five target configurations** — x86_64 and x86_32 Linux executables, a flat 512-byte x86 real-mode boot sector, plus raw flat-binary kernels for x86_32 and x86_64 (boot-to-32-bit and boot-to-64-bit chains)
 - **Python-like syntax** — indentation-based: `def`, `let`/`var`, `if`/`elif`/`else`, `for`/`while`/`loop`, `match`/`case`, `struct`, `as` casts
+- **Generics & tuples** — generic functions and structs monomorphized per instantiation, tuple literals/types/destructuring, and block expressions end-to-end
 - **Low-level control** — raw pointers, `unsafe` blocks, `extern` declarations, width-correct volatile access
 - **Module system** — `std.*` imports resolve to `core/<name>.dev` (or the stdlib embedded in the binary when no `core/` is present); user modules resolve to local `.dev` files
 - **Memory management** — first-fit heap allocator with optional conservative mark-and-sweep GC (x86_64)
@@ -84,6 +85,7 @@ GitHub Pages:
 | `std.math` | `abs_i32`, `min_i32`, `max_i32`, `clamp_i32` |
 | `std.fmt` | `format_i32`, `format_f64` |
 | `std.volatile` | width-correct loads/stores and memory barriers |
+| `std.hal` | freestanding hardware primitives: port I/O (`outb`/`inb`/`outw`/`inw`), inline `INT nn`, `sti`/`cli`/`iret`/`halt`, PIC 8259A init + EOI |
 | `std.alloc` | `alloc`/`free` over a first-fit heap; auto-GC on exhaustion (x86_64) |
 | `std.gc` | `collect`, `leak_check`, heap stats (x86_64 only) |
 
@@ -94,6 +96,8 @@ GitHub Pages:
 | `x86_64-unknown-linux-gnu` | 64-bit Linux (ELF64)              | Supported |
 | `x86_32-unknown-linux-gnu` | 32-bit Linux (ELF32, i686)        | Supported |
 | `x86_16-boot`              | 16-bit x86 real-mode boot sector  | Supported |
+| `x86_32` raw (`.fld`)      | Freestanding flat kernel, boot-to-32-bit chain (`examples/os32`) | Supported |
+| `x86_64` raw (`.fld`)      | Freestanding flat kernel, boot-to-64-bit chain (`examples/os64`) | Supported |
 | `x86_64-apple-darwin`      | 64-bit macOS (Mach-O)             | Planned   |
 | `x86_64-pc-windows-gnu`    | 64-bit Windows (COFF)             | Planned   |
 | `riscv64-unknown-elf`      | 64-bit RISC-V bare metal (ELF)    | Planned   |
