@@ -5,8 +5,11 @@
 //!   - **Standard library modules**: `import std.io` or `from std.io import puts, putchar`.
 //!     These resolve to `core/<name>.dev` by walking up from the entry source
 //!     directory looking for a `core/` directory containing `<name>.dev`.
-//!     Both `pub` and private items are merged so that wrapper functions in
-//!     stdlib modules can call internal helpers (e.g. `puts` calls `_dev_puts`).
+//!     When no on-disk `core/` is found, the stdlib embedded in the compiler
+//!     binary is used instead (see `src/embed.rs`) — `forgec` works with no
+//!     data files at all.  Both `pub` and private items are merged so that
+//!     wrapper functions in stdlib modules can call internal helpers
+//!     (e.g. `puts` calls `_dev_puts`).
 //!
 //!   - **User-defined modules**: `import mymod` or `from mymod import helper`.
 //!     These resolve to `<name>.dev` (or `<name>/<sub>.dev` for dotted paths)
@@ -30,6 +33,14 @@ use crate::parser::parse_module_in_dir;
 pub struct ModuleGraph {
     pub entry: Module,
     pub modules: HashMap<Vec<String>, Module>,
+}
+
+/// A resolved module source: a file on disk or the embedded stdlib.
+enum ResolvedSource {
+    /// A file on disk (`core/<name>.dev` or a user module).
+    File(PathBuf),
+    /// The stdlib source compiled into the binary.
+    Embedded(&'static str),
 }
 
 /// Parse `entry_source` (located at `entry_path`), then recursively load every
@@ -58,15 +69,25 @@ pub fn load_modules(entry_source: &str, entry_path: &Path) -> Result<ModuleGraph
     }
 
     while let Some(path) = pending.pop() {
-        let file = resolve_module_path(&path, entry_path)?;
-        let src = std::fs::read_to_string(&file)
-            .with_context(|| format!("reading module {} at {}", path.join("."), file.display()))?;
-        let dir = file
+        let resolved = resolve_module_path(&path, entry_path)?;
+        let (src, display) = match resolved {
+            ResolvedSource::File(file) => {
+                let src = std::fs::read_to_string(&file).with_context(|| {
+                    format!("reading module {} at {}", path.join("."), file.display())
+                })?;
+                (src, file)
+            }
+            ResolvedSource::Embedded(embedded) => (
+                embedded.to_string(),
+                PathBuf::from(format!("{} (embedded)", path.join("."))),
+            ),
+        };
+        let dir = display
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."));
         let module = parse_module_in_dir(&src, &dir)
-            .map_err(|e| anyhow::anyhow!("parse error in {}: {}", file.display(), e))?;
+            .map_err(|e| anyhow::anyhow!("parse error in {}: {}", display.display(), e))?;
 
         for imp in &module.imports {
             let dep_path = import_path(imp);
@@ -132,7 +153,7 @@ fn import_path(imp: &Import) -> Vec<String> {
     }
 }
 
-fn resolve_module_path(path: &[String], entry_path: &Path) -> Result<PathBuf> {
+fn resolve_module_path(path: &[String], entry_path: &Path) -> Result<ResolvedSource> {
     if path.is_empty() {
         bail!("empty import path");
     }
@@ -146,21 +167,24 @@ fn resolve_module_path(path: &[String], entry_path: &Path) -> Result<PathBuf> {
         loop {
             let candidate = dir.join("core").join(&name).with_extension("dev");
             if candidate.is_file() {
-                return Ok(candidate);
+                return Ok(ResolvedSource::File(candidate));
             }
             if !dir.pop() {
                 break;
             }
         }
+        if let Some(src) = crate::embed::stdlib_source(&name) {
+            return Ok(ResolvedSource::Embedded(src));
+        }
         bail!(
-            "cannot resolve std module `{}`: core/{}.dev not found near {}",
+            "cannot resolve std module `{}`: core/{}.dev not found near {} and no embedded copy is available",
             path.join("."),
             name,
             entry_path.display()
         );
     }
 
-    resolve_local_module(path, entry_path)
+    resolve_local_module(path, entry_path).map(ResolvedSource::File)
 }
 
 /// Resolve a user-defined (non-`std`) module path to a `.dev` file by walking

@@ -32,7 +32,7 @@ external toolchain. One binary, straight to machine code.
 - **Three targets** — x86_64 and x86_32 Linux executables, plus a flat 512-byte x86 real-mode boot sector
 - **Python-like syntax** — indentation-based: `def`, `let`/`var`, `if`/`elif`/`else`, `for`/`while`/`loop`, `match`/`case`, `struct`, `as` casts
 - **Low-level control** — raw pointers, `unsafe` blocks, `extern` declarations, width-correct volatile access
-- **Module system** — `std.*` imports resolve to `core/<name>.dev`; user modules resolve to local `.dev` files
+- **Module system** — `std.*` imports resolve to `core/<name>.dev` (or the stdlib embedded in the binary when no `core/` is present); user modules resolve to local `.dev` files
 - **Memory management** — first-fit heap allocator with optional conservative mark-and-sweep GC (x86_64)
 - **Bare metal** — the bootloader example is written entirely in Forge, no inline assembly required
 
@@ -46,6 +46,11 @@ cargo build --release
 ```
 
 Prebuilt binaries are published as [nightly releases](https://github.com/celestiamia/Forge/releases?q=nightly&expanded=true).
+
+The compiled `forgec` binary is fully self-contained — the standard library is
+embedded, so no `core/` checkout is needed. Arch Linux users can install it
+from the AUR as [`forgec-git`](https://aur.archlinux.org/packages/forgec-git)
+(`paru -S forgec-git`).
 
 ## Documentation
 

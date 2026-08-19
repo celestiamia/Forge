@@ -5,6 +5,7 @@ use std::path::PathBuf;
 mod ast;
 mod backend;
 mod driver;
+mod embed;
 mod lexer;
 mod linker;
 mod lower;

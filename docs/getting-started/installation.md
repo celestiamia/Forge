@@ -2,6 +2,22 @@
 
 There are several ways to install `forgec`:
 
+## From the AUR (Arch Linux)
+
+`forgec` is available on the Arch User Repository as
+[`forgec-git`](https://aur.archlinux.org/packages/forgec-git), which tracks the
+latest commit on `main`. Install it with your favorite AUR helper:
+
+```bash
+paru -S forgec-git
+# or
+yay -S forgec-git
+```
+
+The AUR package builds `forgec` from source, and the installed binary is fully
+self-contained — the standard library is embedded, so no `core/` directory or
+other data files are needed.
+
 ## From GitHub Releases
 
 `forgec` is distributed as **nightly prereleases** — one per day, tagged
@@ -62,6 +78,9 @@ cargo build --release
 # Optional: install system-wide
 sudo cp target/release/forgec /usr/local/bin/forgec
 ```
+
+The compiled binary is self-contained: the `std.*` modules are embedded, so it
+works from any directory — no `core/` stdlib checkout is required.
 
 ## Cross-Compilation Targets
 

@@ -78,7 +78,7 @@ Single Rust crate (`forgec`), edition 2024, source in `src/`.
 
 ## Module system
 
-`from std.<name> import ...` resolves to `core/<name>.dev` by walking up from source directory. Only `std.*` modules are supported. See `src/driver/loader.rs`.
+`from std.<name> import ...` resolves to `core/<name>.dev` by walking up from source directory, falling back to the stdlib embedded in the binary (`src/embed.rs`, `include_str!` per module) when no on-disk `core/` exists — the packaged `forgec` binary is self-contained. Only `std.*` modules are supported. See `src/driver/loader.rs`.
 
 Stdlib modules: `io`, `runtime`, `volatile`, `mem`, `string`, `math`, `alloc`, `gc`, `fmt`. (All except `gc` are cross-target; `gc` is x86_64-only and rejected on x86_32 at codegen.)
 

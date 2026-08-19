@@ -64,6 +64,47 @@ fn hello_dev_compiles_and_runs() {
 }
 
 #[test]
+fn embedded_stdlib_compiles_without_core_directory() {
+    // Compile a program that imports std.io from a directory with no `core/`
+    // ancestor, so the loader must fall back to the stdlib embedded in the
+    // forgec binary.  std::env::temp_dir() is never under the repo root.
+    let out_dir =
+        std::env::temp_dir().join(format!("forge_embedded_stdlib_{}_test", std::process::id()));
+    let _ = fs::create_dir_all(&out_dir);
+    let src = out_dir.join("embedded_hello.dev");
+    fs::write(
+        &src,
+        "package embedded_hello\n\
+         \n\
+         from std.io import puts\n\
+         \n\
+         pub def main() -> int32:\n\
+         \x20\x20\x20\x20puts(\"Hello from embedded stdlib!\\n\")\n\
+         \x20\x20\x20\x20return 0\n",
+    )
+    .expect("failed to write embedded_hello.dev");
+
+    let bin = out_dir.join("embedded_hello");
+    let mut cmd = Command::cargo_bin("forgec").unwrap();
+    cmd.arg(&src)
+        .arg("-o")
+        .arg(&bin)
+        .arg("--target")
+        .arg("x86_64-unknown-linux-gnu");
+    cmd.assert().success();
+
+    let output = Command::new(&bin)
+        .output()
+        .expect("failed to run embedded_hello binary");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, "Hello from embedded stdlib!\n");
+    assert!(
+        output.status.success(),
+        "embedded_hello binary exited with non-zero status"
+    );
+}
+
+#[test]
 fn hello_dev_compiles_and_runs_x86_32() {
     let bin = compile_example_with_target("hello", "x86_32-unknown-linux-gnu");
     let output = Command::new(&bin)
