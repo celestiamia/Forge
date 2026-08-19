@@ -758,8 +758,7 @@ fn os64_boot_chain_enters_long_mode() {
         return;
     }
 
-    let out_dir = std::env::temp_dir()
-        .join(format!("forge_os64_test_{}", std::process::id()));
+    let out_dir = std::env::temp_dir().join(format!("forge_os64_test_{}", std::process::id()));
     let _ = fs::create_dir_all(&out_dir);
     let img = out_dir.join("os64.img");
 
@@ -796,8 +795,7 @@ fn os64_32bit_cpu_guard_halts() {
         return;
     }
 
-    let out_dir = std::env::temp_dir()
-        .join(format!("forge_os64_32bit_{}", std::process::id()));
+    let out_dir = std::env::temp_dir().join(format!("forge_os64_32bit_{}", std::process::id()));
     let _ = fs::create_dir_all(&out_dir);
     let img = out_dir.join("os64.img");
 

@@ -285,8 +285,7 @@ pub(super) fn compile_elf_program(prog: &Program) -> Result<Box<dyn ObjectWriter
         // (see `emit_freestanding_runtime`).
         for name in FREESTANDING_FUNCS {
             if prog.externs.iter().any(|e| e.name == name) {
-                cg.func_labels
-                    .insert(name.to_string(), cg.asm.new_label());
+                cg.func_labels.insert(name.to_string(), cg.asm.new_label());
             }
         }
         entry

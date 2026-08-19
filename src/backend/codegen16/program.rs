@@ -436,8 +436,7 @@ impl<'p> CodeGen16<'p> {
                     // implements long mode.  On a 32-bit-only CPU the switch
                     // below would #GP and triple-fault with no diagnostics, so
                     // print "No 64-bit CPU" via the BIOS teletype and halt.
-                    let no_lm_msg =
-                        self.string_label("No 64-bit CPU\r\n\0");
+                    let no_lm_msg = self.string_label("No 64-bit CPU\r\n\0");
                     let err = self.asm.new_label();
                     // Robust long-mode detection: first read the max extended CPUID
                     // leaf (0x80000000) and only test the LM bit when leaf
@@ -592,7 +591,8 @@ impl<'p> CodeGen16<'p> {
                     self.asm.emit_slice(&[0x48, 0xBC]); // mov rax, 0x90000
                     self.asm.emit_imm32(0x00090000);
                     self.asm.emit_imm32(0);
-                    self.asm.emit_slice(&[0x48, 0x8B, 0x04, 0x25, 0xF8, 0x8F, 0x00, 0x00]); // mov rax,[0x8FF8]
+                    self.asm
+                        .emit_slice(&[0x48, 0x8B, 0x04, 0x25, 0xF8, 0x8F, 0x00, 0x00]); // mov rax,[0x8FF8]
                     self.asm.emit_slice(&[0xFF, 0xE0]); // jmp rax
                     // --- 16->32 GDT (inline) + GDTR32, read by the lgdt above ---
                     self.asm.bind(gdtr32);
@@ -601,15 +601,17 @@ impl<'p> CodeGen16<'p> {
                     self.asm.imm32_label(gdt32); // base = gdt32 (load_base + off)
                     self.asm.bind(gdt32);
                     self.asm.emit_slice(&[0x00; 8]); // null
-                    self.asm.emit_slice(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x9A, 0xCF, 0x00]); // code32
-                    self.asm.emit_slice(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x92, 0xCF, 0x00]); // data32
+                    self.asm
+                        .emit_slice(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x9A, 0xCF, 0x00]); // code32
+                    self.asm
+                        .emit_slice(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x92, 0xCF, 0x00]); // data32
                 }
                 "_dev_outw" => {
                     // push bp; mov bp,sp; mov dx,[bp+6]; mov ax,[bp+4]; out dx,ax; ret
                     self.asm.push(Reg16::Bp);
                     self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
-                    self.asm.load16_bp(Reg16::Dx, 6);  // port
-                    self.asm.load16_bp(Reg16::Ax, 4);  // value
+                    self.asm.load16_bp(Reg16::Dx, 6); // port
+                    self.asm.load16_bp(Reg16::Ax, 4); // value
                     self.asm.out_dx_ax();
                     self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
                     self.asm.pop(Reg16::Bp);
@@ -619,7 +621,7 @@ impl<'p> CodeGen16<'p> {
                     // push bp; mov bp,sp; mov dx,[bp+4]; in ax,dx; ret
                     self.asm.push(Reg16::Bp);
                     self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
-                    self.asm.load16_bp(Reg16::Dx, 4);  // port
+                    self.asm.load16_bp(Reg16::Dx, 4); // port
                     self.asm.in_ax_dx();
                     self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
                     self.asm.pop(Reg16::Bp);
@@ -638,8 +640,8 @@ impl<'p> CodeGen16<'p> {
                     // push bp; mov bp,sp; mov dx,[bp+6]; mov al,[bp+4]; out dx,al; ret
                     self.asm.push(Reg16::Bp);
                     self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
-                    self.asm.load16_bp(Reg16::Dx, 6);  // port
-                    self.asm.load8_bp(Reg8::Al, 4);    // value
+                    self.asm.load16_bp(Reg16::Dx, 6); // port
+                    self.asm.load8_bp(Reg8::Al, 4); // value
                     self.asm.out_dx_al();
                     self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
                     self.asm.pop(Reg16::Bp);
@@ -649,7 +651,7 @@ impl<'p> CodeGen16<'p> {
                     // push bp; mov bp,sp; mov dx,[bp+4]; in al,dx; xor ah,ah; ret
                     self.asm.push(Reg16::Bp);
                     self.asm.mov16_rr(Reg16::Bp, Reg16::Sp);
-                    self.asm.load16_bp(Reg16::Dx, 4);  // port
+                    self.asm.load16_bp(Reg16::Dx, 4); // port
                     self.asm.in_al_dx();
                     self.asm.xor_ah_ah();
                     self.asm.mov16_rm(Reg16::Sp, Reg16::Bp);
@@ -781,24 +783,30 @@ mod tests {
             find(&[0x66, 0xF7, 0xC2, 0x00, 0x00, 0x00, 0x20]).is_some(),
             "missing: test edx, (1<<29) (LM bit) -- 0x66 0xF7 0xC2 (test r32,imm32), not 0x81 (xor)"
         );
-        assert!(find("No 64-bit CPU\r\n\0".as_bytes()).is_some(), "missing 32-bit CPU guard message");
+        assert!(
+            find("No 64-bit CPU\r\n\0".as_bytes()).is_some(),
+            "missing 32-bit CPU guard message"
+        );
         // The error block prints the message via BIOS teletopy (int 0x10, VGA),
         // matching the stage-2 loader's `_dev_bios_teletopy` channel: lodsb; cmp
         // al,0; je halt; mov ah,0x0E; mov bl,0x07; mov bh,0; int 0x10; jmp loop;
         // then cli; hlt; spin.  Single-VGA-channel keeps the output un-doubled
         // under `-nographic` (which mirrors both VGA and COM1 to stdio).
-        assert!(find(&[0xAC, 0x3C, 0x00]).is_some(), "missing lodsb + cmp al,0 message loop");
+        assert!(
+            find(&[0xAC, 0x3C, 0x00]).is_some(),
+            "missing lodsb + cmp al,0 message loop"
+        );
         assert!(
             find(&[0xB4, 0x0E, 0xB3, 0x07, 0xB7, 0x00, 0xCD, 0x10]).is_some(),
             "missing BIOS teletopy int 0x10 in the guard error block"
         );
 
         // 16-bit prologue (success path): lgdt [abs16]; CR0.PE; 32-bit far jmp.
+        assert!(find(&[0x0F, 0x01, 0x16]).is_some(), "missing 16->32 lgdt");
         assert!(
-            find(&[0x0F, 0x01, 0x16]).is_some(),
-            "missing 16->32 lgdt"
+            find(&[0x66, 0xEA]).is_some(),
+            "missing far jmp 66 EA to 32-bit trampoline"
         );
-        assert!(find(&[0x66, 0xEA]).is_some(), "missing far jmp 66 EA to 32-bit trampoline");
         assert!(
             find(&[0x66, 0x0F, 0x22, 0xC0]).is_some(),
             "missing 16-bit-prologue CR0.PE (mov cr0,eax)"
@@ -832,7 +840,10 @@ mod tests {
         );
         // lgdt [moffs32] (loads the 64-bit GDT) + CR0 |= PG + far jmp to 64-bit CS.
         assert!(
-            find(&[0x0F, 0x20, 0xC0, 0x0D, 0x00, 0x00, 0x00, 0x80, 0x0F, 0x22, 0xC0, 0xEA]).is_some(),
+            find(&[
+                0x0F, 0x20, 0xC0, 0x0D, 0x00, 0x00, 0x00, 0x80, 0x0F, 0x22, 0xC0, 0xEA
+            ])
+            .is_some(),
             "missing CR0.PG + far jmp to 64-bit code"
         );
         // Validated 64-bit trampoline: mov rax,0x90000; mov rax,[0x8FF8]; jmp rax.

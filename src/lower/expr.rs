@@ -536,10 +536,7 @@ impl LowerCtx<'_> {
             }
             if let ast::Expr::Literal(ast::Literal::Int(n)) = c.args[0] {
                 if (0..=255).contains(&n) {
-                    return Ok(ir::Expr::new(
-                        ir::ExprKind::IntImm(n as u8),
-                        ir::Type::Void,
-                    ));
+                    return Ok(ir::Expr::new(ir::ExprKind::IntImm(n as u8), ir::Type::Void));
                 }
                 bail!(
                     "`int()` vector {} is out of range (0-255); \
