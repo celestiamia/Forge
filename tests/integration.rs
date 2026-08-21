@@ -1,5 +1,11 @@
 use assert_cmd::Command;
 use std::fs;
+use std::sync::{Mutex, OnceLock};
+
+fn fileio_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 fn compile_example(name: &str) -> std::path::PathBuf {
     compile_example_with_target(name, "x86_64-unknown-linux-gnu")
@@ -994,6 +1000,7 @@ fn os_dev_boots_shell_and_calc() {
 
 #[test]
 fn fileio_dev_compiles_and_runs() {
+    let _guard = fileio_lock().lock().unwrap();
     let bin = compile_example("fileio");
     let output = Command::new(&bin)
         .output()
@@ -1011,6 +1018,7 @@ fn fileio_dev_compiles_and_runs() {
 
 #[test]
 fn fileio_dev_compiles_and_runs_x86_32() {
+    let _guard = fileio_lock().lock().unwrap();
     let bin = compile_example_with_target("fileio", "x86_32-unknown-linux-gnu");
     let output = Command::new(&bin)
         .output()
