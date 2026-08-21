@@ -18,20 +18,50 @@ jobs:
         with:
           fetch-depth: 0  # Need full history for version
 
+      - name: Check if commit already has a nightly release
+        id: check
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          FULL_SHA=$(git rev-parse HEAD)
+          echo "Current commit: $FULL_SHA ($SHORT_SHA)"
+          TAGS=$(git tag --points-at HEAD | grep "^nightly-" || true)
+          if [ -n "$TAGS" ]; then
+            echo "Found existing nightly tag(s) for this commit:"
+            echo "$TAGS"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping nightly release — this commit already has a release."
+            exit 0
+          fi
+          # Fallback: check GitHub releases API for any release whose tag contains this SHA
+          if gh release list --limit 100 2>/dev/null | grep -q "$SHORT_SHA"; then
+            echo "Found existing GitHub release containing $SHORT_SHA"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping nightly release — this commit already has a release."
+            exit 0
+          fi
+          echo "No existing nightly release for commit $SHORT_SHA, proceeding."
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install Rust toolchain
+        if: steps.check.outputs.skip == 'false'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install 32-bit libraries (for x86_32)
+        if: steps.check.outputs.skip == 'false'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-multilib g++-multilib libc6-dev-i386
 
       - name: Install QEMU
+        if: steps.check.outputs.skip == 'false'
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-system-x86
 
       - name: Cache Cargo artifacts
+        if: steps.check.outputs.skip == 'false'
         uses: actions/cache@v5
         with:
           path: |
@@ -45,19 +75,23 @@ jobs:
             ${{ runner.os }}-cargo-nightly-
 
       - name: Build release compiler (x86_64)
+        if: steps.check.outputs.skip == 'false'
         run: cargo build --release
 
       - name: Build x86_32 target
+        if: steps.check.outputs.skip == 'false'
         run: |
           rustup target add i686-unknown-linux-gnu
           cargo build --release --target i686-unknown-linux-gnu
 
       - name: Build bootloader (x86_16)
+        if: steps.check.outputs.skip == 'false'
         run: |
           # Build bootloader using the x86_64 forgec compiler
           ./target/release/forgec examples/bootloader.dev -o target/forgec-x86_16-boot.bin --target x86_16-boot
 
       - name: Get version from Cargo.toml
+        if: steps.check.outputs.skip == 'false'
         id: version
         run: |
           VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
@@ -66,6 +100,7 @@ jobs:
           echo "version=${VERSION}-nightly-${DATE}-${SHORT_SHA}" >> $GITHUB_OUTPUT
 
       - name: Package artifacts
+        if: steps.check.outputs.skip == 'false'
         run: |
           mkdir -p dist
           # x86_64
@@ -78,12 +113,14 @@ jobs:
           cd dist && sha256sum * > SHA256SUMS
 
       - name: Delete existing nightly release (if any)
+        if: steps.check.outputs.skip == 'false'
         run: |
           gh release delete nightly-${{ steps.version.outputs.version }} --yes --cleanup-tag || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Nightly Release
+        if: steps.check.outputs.skip == 'false'
         id: release
         uses: softprops/action-gh-release@v2
         with:
@@ -115,6 +152,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish Nightly Release
+        if: steps.check.outputs.skip == 'false'
         run: gh release edit nightly-${{ steps.version.outputs.version }} --draft=false
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
